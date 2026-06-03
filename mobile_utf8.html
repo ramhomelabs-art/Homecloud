@@ -1,0 +1,1037 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>NexaDisk Mobile</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="/mobile/libs/react.js?v=13"></script>
+    <script src="/mobile/libs/react-dom.js?v=13"></script>
+    <script src="/mobile/libs/lucide.js?v=13"></script>
+    <script src="/mobile/libs/axios.js?v=13"></script>
+    <script src="/mobile/libs/babel.js?v=13"></script>
+    <style>
+        :root {
+            --bg-page: #010409;
+            --bg-card: #161b22;
+            --bg-nav: rgba(1, 4, 9, 0.85);
+            --text-primary: #f0f6fc;
+            --text-secondary: #8b949e;
+            --accent: #ffcc33;
+            --accent-soft: rgba(255, 204, 51, 0.1);
+            --border: rgba(48, 54, 61, 0.7);
+            --error: #f85149;
+            --success: #3fff64;
+            --safe-top: env(safe-area-inset-top, 0px);
+            --safe-bottom: env(safe-area-inset-bottom, 0px);
+            --nav-height: 65px;
+            --header-height: 60px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        html,
+        body {
+            height: 100dvh;
+            width: 100vw;
+            overflow: hidden;
+            background: var(--bg-page);
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            color: var(--text-primary);
+            -webkit-user-select: none;
+        }
+
+        #splash {
+            position: fixed;
+            inset: 0;
+            background: #000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            transition: opacity 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .fade-out {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .app-shell {
+            display: flex;
+            flex-direction: column;
+            height: 100dvh;
+            width: 100vw;
+            padding-top: var(--safe-top);
+            background: radial-gradient(circle at top right, #1a1a2e, #010409);
+        }
+
+        .app-header {
+            height: var(--header-height);
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            background: var(--bg-nav);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border);
+            z-index: 100;
+        }
+
+        .search-bar {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 10px 16px;
+            border-radius: 14px;
+            border: 1px solid var(--border);
+            transition: all 0.2s;
+        }
+
+        .search-bar:focus-within {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px var(--accent-soft);
+        }
+
+        .search-bar input {
+            background: transparent;
+            border: none;
+            color: #fff;
+            outline: none;
+            width: 100%;
+            font-size: 15px;
+            font-weight: 500;
+        }
+
+        .scroll-container {
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+            -webkit-overflow-scrolling: touch;
+            padding: 20px 20px 120px;
+        }
+
+        .app-nav {
+            height: calc(var(--nav-height) + var(--safe-bottom));
+            flex-shrink: 0;
+            display: flex;
+            background: var(--bg-nav);
+            backdrop-filter: blur(16px);
+            border-top: 1px solid var(--border);
+            padding-bottom: var(--safe-bottom);
+            position: fixed;
+            bottom: 0;
+            width: 100%;
+            z-index: 100;
+        }
+
+        .nav-btn {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-secondary);
+            gap: 5px;
+            transition: all 0.3s;
+        }
+
+        .nav-btn.active {
+            color: var(--accent);
+        }
+
+        .nav-btn span {
+            font-size: 10px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+        }
+
+        .section-title {
+            font-size: 11px;
+            font-weight: 900;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            margin: 24px 0 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .section-title::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: var(--border);
+        }
+
+        .storage-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+
+        .storage-card {
+            background: linear-gradient(135deg, #1c2128, #161b22);
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            padding: 16px;
+            position: relative;
+            overflow: hidden;
+            transition: all 0.2s;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        .storage-card:active {
+            transform: scale(0.96);
+            filter: brightness(1.2);
+        }
+
+        .storage-card .info {
+            margin-top: 12px;
+        }
+
+        .storage-card .name {
+            font-weight: 800;
+            font-size: 14px;
+            margin-bottom: 2px;
+        }
+
+        .storage-card .label {
+            font-size: 10px;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+        }
+
+        .progress-container {
+            background: rgba(255, 255, 255, 0.05);
+            height: 5px;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-bottom: 8px;
+        }
+
+        .progress-bar {
+            background: var(--accent);
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.5s ease;
+        }
+
+        .storage-card .status {
+            font-size: 9px;
+            font-weight: 900;
+            color: var(--text-secondary);
+        }
+
+        .file-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .file-item {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            transition: all 0.2s;
+        }
+
+        .file-item:active {
+            background: var(--border);
+            transform: translateX(4px);
+        }
+
+        .file-icon {
+            width: 44px;
+            height: 44px;
+            background: rgba(255, 204, 51, 0.05);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .file-info {
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .file-name {
+            font-weight: 700;
+            font-size: 14px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .file-meta {
+            font-size: 10px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            font-weight: 600;
+            margin-top: 2px;
+        }
+
+        .fab {
+            position: fixed;
+            bottom: calc(var(--nav-height) + var(--safe-bottom) + 20px);
+            right: 20px;
+            width: 60px;
+            height: 60px;
+            background: var(--accent);
+            border-radius: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 10px 30px rgba(255, 204, 51, 0.3);
+            z-index: 1000;
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        .fab:active {
+            transform: scale(0.9) rotate(15deg);
+        }
+
+        .sheet-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(8px);
+            z-index: 2000;
+            display: flex;
+            align-items: flex-end;
+            animation: fadeIn 0.2s ease;
+        }
+
+        .sheet {
+            background: #0d1117;
+            width: 100%;
+            border-radius: 30px 30px 0 0;
+            padding: 32px 24px calc(32px + var(--safe-bottom));
+            border-top: 1px solid var(--border);
+            box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.5);
+            animation: slideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+
+            to {
+                opacity: 1;
+            }
+        }
+
+        @keyframes slideUp {
+            from {
+                transform: translateY(100%);
+            }
+
+            to {
+                transform: translateY(0);
+            }
+        }
+
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(10px);
+            z-index: 3000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .modal {
+            background: #161b22;
+            width: 100%;
+            max-width: 320px;
+            border-radius: 20px;
+            border: 1px solid var(--border);
+            padding: 24px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            animation: zoomIn 0.2s ease;
+        }
+
+        @keyframes zoomIn {
+            from {
+                transform: scale(0.9);
+                opacity: 0;
+            }
+
+            to {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+
+        .modal-title {
+            font-size: 18px;
+            font-weight: 800;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .modal-input {
+            width: 100%;
+            padding: 14px;
+            background: #0d1117;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            color: #fff;
+            margin-bottom: 20px;
+            outline: none;
+            font-size: 16px;
+        }
+
+        .modal-input:focus {
+            border-color: var(--accent);
+        }
+
+        .modal-btns {
+            display: flex;
+            gap: 12px;
+        }
+
+        .modal-btn {
+            flex: 1;
+            padding: 14px;
+            border-radius: 12px;
+            font-weight: 800;
+            font-size: 13px;
+            text-transform: uppercase;
+            border: none;
+            cursor: pointer;
+        }
+
+        .modal-btn.primary {
+            background: var(--accent);
+            color: #000;
+        }
+
+        .modal-btn.secondary {
+            background: rgba(255, 255, 255, 0.05);
+            color: #fff;
+        }
+
+        .action-row {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 14px 18px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 16px;
+            margin-bottom: 10px;
+            border: 1px solid transparent;
+        }
+
+        .action-row:active {
+            border-color: var(--accent);
+            background: var(--accent-soft);
+        }
+
+        .action-label {
+            font-weight: 700;
+            font-size: 15px;
+        }
+
+        .back-nav {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 14px 18px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            margin-bottom: 20px;
+            font-weight: 800;
+            color: var(--accent);
+        }
+
+        .toast {
+            position: fixed;
+            bottom: calc(var(--nav-height) + var(--safe-bottom) + 32px);
+            left: 50%;
+            transform: translateX(-50%);
+            background: #1f2328;
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 14px 28px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            z-index: 10000;
+            opacity: 0;
+            pointer-events: none;
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translate(-50%, -10px);
+        }
+
+        .toast.error {
+            border-color: var(--error);
+            color: var(--error);
+        }
+
+        .toast.success {
+            border-color: var(--success);
+            color: var(--success);
+        }
+    </style>
+</head>
+
+<body>
+    <div id="splash">
+        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2.5"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+        </svg>
+        <p style="margin-top: 24px; color: var(--accent); font-weight: 900; letter-spacing: 2px; font-size: 12px;">
+            NEXADISK PROFESSIONAL</p>
+    </div>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        (function () {
+            try {
+                const { useState, useEffect, useRef } = React;
+
+                const ICONS = {
+                    Dashboard: '<path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z"/>',
+                    Fleet: '<rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6" y2="6"/><line x1="6" y1="18" x2="6" y2="18"/>',
+                    Files: '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',
+                    Shares: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>',
+                    Settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+                    Search: '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
+                    Monitor: '<rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>',
+                    FileText: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>',
+                    ArrowLeft: '<line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>',
+                    Plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+                    More: '<circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/>',
+                    Trash: '<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>',
+                    Globe: '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>',
+                    HardDrive: '<line x1="22" y1="12" x2="2" y2="12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" y1="16" x2="6.01" y2="16"/><line x1="10" y1="16" x2="10.01" y2="16"/>',
+                    ChevronRight: '<polyline points="9 18 15 12 9 6"/>',
+                    Clipboard: '<path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>',
+                    Copy: '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+                    Link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>'
+                };
+
+                const Icon = ({ name, size = 20, color = 'currentColor', ...props }) => {
+                    const mapped = {
+                        'Layout': 'Dashboard', 'Server': 'Fleet', 'Folder': 'Files', 'Share2': 'Shares', 'Settings': 'Settings', 'Monitor': 'Monitor', 'FileText': 'FileText', 'Cpu': 'Dashboard', 'Activity': 'Dashboard',
+                        'ArrowLeft': 'ArrowLeft', 'Plus': 'Plus', 'MoreVertical': 'More', 'Trash2': 'Trash', 'Globe': 'Globe', 'HardDrive': 'HardDrive', 'ChevronRight': 'ChevronRight', 'Search': 'Search',
+                        'ClipboardCopy': 'Clipboard', 'Copy': 'Copy', 'Link': 'Link'
+                    };
+                    const path = ICONS[mapped[name] || name] || ICONS['Files'];
+                    return (
+                        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+                            <g dangerouslySetInnerHTML={{ __html: path }} />
+                        </svg>
+                    );
+                };
+
+                const useLongPress = (callback, ms = 450) => {
+                    const timer = useRef();
+                    const moved = useRef(false);
+                    const start = () => { moved.current = false; timer.current = setTimeout(() => { if (!moved.current) callback(); }, ms); };
+                    const stop = () => clearTimeout(timer.current);
+                    const handleMove = () => { moved.current = true; stop(); };
+                    return { onMouseDown: start, onMouseUp: stop, onMouseLeave: stop, onTouchStart: start, onTouchEnd: stop, onTouchMove: handleMove };
+                };
+
+                const FileRow = ({ file, onClick, onMore }) => {
+                    const lp = useLongPress(() => onMore(file));
+                    return (
+                        <div className="row" onClick={() => onClick(file)} {...lp}>
+                            <div className="icon-box"><Icon name={file.isDirectory ? "Folder" : "FileText"} color={file.isDirectory ? "var(--accent)" : "var(--text-secondary)"} /></div>
+                            <div style={{ flex: 1, overflow: 'hidden' }}>
+                                <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{file.name}</div>
+                                <div style={{ fontSize: 10, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.4px' }}>{file.isDirectory ? 'System Directory' : `${(file.size / 1024 / 1024).toFixed(1)} MB`}</div>
+                            </div>
+                            <div onClick={e => { e.stopPropagation(); onMore(file); }} style={{ padding: 8 }}><Icon name="MoreVertical" size={16} color="var(--text-secondary)" /></div>
+                        </div>
+                    );
+                };
+
+                const Toast = ({ message, type, show }) => (
+                    <div className={`toast ${type} ${show ? 'show' : ''}`}>
+                        <Icon name={type === 'success' ? 'Plus' : 'Trash'} size={18} />
+                        <span style={{ fontWeight: 700, fontSize: 13 }}>{message}</span>
+                    </div>
+                );
+
+                const App = () => {
+                    const [token, setToken] = useState(localStorage.getItem('mobile_token'));
+                    const [view, setView] = useState(token ? 'dashboard' : 'login');
+                    const [path, setPath] = useState('/');
+                    const [files, setFiles] = useState([]);
+                    const [devices, setDevices] = useState([]);
+                    const [activities, setActivities] = useState([]);
+                    const [shares, setShares] = useState([]);
+                    const [networkDrives, setNetworkDrives] = useState([]);
+                    const [stats, setStats] = useState({ total: 1, used: 0 });
+                    const [selectedDevice, setSelectedDevice] = useState(null);
+                    const [contextFile, setContextFile] = useState(null);
+                    const [clipboard, setClipboard] = useState(null);
+                    const [loading, setLoading] = useState(false);
+                    const [toast, setToast] = useState({ message: '', type: 'success', show: false });
+                    const [showPlusMenu, setShowPlusMenu] = useState(false);
+                    const [mkdirModal, setMkdirModal] = useState(false);
+                    const fileInputRef = useRef();
+
+                    const showToast = (message, type = 'success') => {
+                        setToast({ message, type, show: true });
+                        setTimeout(() => setToast(prev => ({ ...prev, show: false })), 2500);
+                    };
+
+                    useEffect(() => {
+                        // Theme removed as per user request
+                        document.body.setAttribute('data-theme', 'dark');
+                    }, []);
+
+                    const fetchData = async (currPath = path, device = selectedDevice) => {
+                        if (!token) return;
+                        setLoading(true);
+                        try {
+                            const headers = { Authorization: `Bearer ${token}` };
+                            const [fRes, dRes, aRes, sRes, nRes] = await Promise.all([
+                                axios.get(`/api/files/list?path=${encodeURIComponent(currPath)}${device?.type === 'Agent' ? `&agentId=${device.id}` : ''}`, { headers }),
+                                axios.get('/api/storage/devices', { headers }),
+                                axios.get('/api/activities', { headers }),
+                                axios.get('/api/share/list', { headers }),
+                                axios.get('/api/network/list', { headers })
+                            ]);
+                            setFiles(fRes.data || []);
+                            setDevices(dRes.data || []);
+                            setActivities(aRes.data || []);
+                            setShares(sRes.data || []);
+                            setNetworkDrives(nRes.data || []);
+
+                            let total = 0, used = 0;
+                            (dRes.data || []).forEach(d => {
+                                if (d.size) total += d.size;
+                                if (d.used) used += d.used;
+                                (d.children || []).forEach(c => { if (c.size) total += c.size; if (c.used) used += c.used; });
+                                (d.disks || []).forEach(disk => { total += (disk.size || 0); used += (disk.used || 0); });
+                            });
+                            setStats({ total: total || 1, used });
+                        } catch (e) { if (e.response?.status === 401) { setToken(null); setView('login'); } } finally { setLoading(false); }
+                    };
+
+                    useEffect(() => { if (token) fetchData(); }, [token]);
+
+                    const handleLogin = async (e) => {
+                        e.preventDefault();
+                        try {
+                            const res = await axios.post('/api/login', { username: e.target.u.value, password: e.target.p.value });
+                            localStorage.setItem('mobile_token', res.data.token);
+                            setToken(res.data.token);
+                            setView('dashboard');
+                            showToast('Welcome, Access Granted');
+                        } catch (e) { showToast('Authentication Failure', 'error'); }
+                    };
+
+                    const handleAction = async (action, file) => {
+                        const headers = { Authorization: `Bearer ${token}` };
+                        try {
+                            if (action === 'copy' || action === 'move') {
+                                setClipboard({ path: file.path, agentId: selectedDevice?.id, isMove: action === 'move', name: file.name });
+                                setContextFile(null);
+                                showToast(`${action === 'copy' ? 'Copied' : 'Moved'} to Clipboard`);
+                            } else if (action === 'paste') {
+                                if (!clipboard) return;
+                                const endpoint = clipboard.isMove ? '/api/files/move' : '/api/files/copy';
+                                await axios.post(endpoint, { source: clipboard.path, destination: path, agentId: selectedDevice?.id, overwrite: true }, { headers });
+                                showToast(`${clipboard.isMove ? 'Moved' : 'Copied'} Successfully`);
+                                setClipboard(null);
+                                fetchData();
+                            } else if (action === 'delete') {
+                                if (confirm(`Permanently delete "${file.name}"?`)) {
+                                    await axios.post('/api/files/delete', { path: file.path, agentId: selectedDevice?.id }, { headers });
+                                    showToast('Record Deleted', 'error');
+                                    setContextFile(null);
+                                    fetchData();
+                                }
+                            } else if (action === 'share') {
+                                await axios.post('/api/share/create', { path: file.path }, { headers });
+                                showToast('Public Link Generated');
+                                setContextFile(null);
+                                fetchData();
+                            } else if (action === 'revoke') {
+                                if (confirm('Revoke access to this share?')) {
+                                    await axios.delete(`/api/share/${file.id}`, { headers });
+                                    showToast('Access Revoked', 'error');
+                                    fetchData();
+                                }
+                            } else if (action === 'copy_url') {
+                                try {
+                                    const url = `${window.location.origin}/share/${file.id}`;
+                                    // Robust clipboard copy with fallback
+                                    if (navigator.clipboard && window.isSecureContext) {
+                                        await navigator.clipboard.writeText(url);
+                                    } else {
+                                        const el = document.createElement('textarea');
+                                        el.value = url;
+                                        document.body.appendChild(el);
+                                        el.select();
+                                        document.execCommand('copy');
+                                        document.body.removeChild(el);
+                                    }
+                                    showToast('Public Link Copied');
+                                } catch (err) {
+                                    showToast('Copy Failed', 'error');
+                                }
+                            } else if (action === 'mkdir') {
+                                setMkdirModal(true);
+                            } else if (action === 'do_mkdir') {
+                                try {
+                                    await axios.post('/api/files/mkdir', { path, name: file, agentId: selectedDevice?.id }, { headers });
+                                    showToast('Folder Created');
+                                    setMkdirModal(false);
+                                    fetchData();
+                                } catch (e) { showToast(e.response?.data?.error || 'Create Failed', 'error'); }
+                            }
+                        } catch (e) { showToast(e.response?.data?.error || 'Action Denied', 'error'); }
+                    };
+
+                    const localHost = devices.find(d => d.type === 'host') || {};
+                    const allDrives = localHost.children || [];
+                    const localDrives = allDrives.filter(d => d.drivetype !== 4);
+                    const remoteDrives = allDrives.filter(d => d.drivetype === 4);
+
+                    // Consolidate all storage for the explorer view
+                    const explorerDrives = [...allDrives];
+                    networkDrives.forEach(nd => {
+                        const mPoint = nd.path || nd.mountpoint;
+                        if (!explorerDrives.some(ed => (ed.mountpoint || ed.path) === mPoint)) {
+                            explorerDrives.push({
+                                ...nd,
+                                mountpoint: mPoint,
+                                type: 'network'
+                            });
+                        }
+                    });
+
+                    if (view === 'login') return (
+                        <div style={{ padding: 40, height: '100dvh', display: 'flex', flexDirection: 'column', justifyContent: 'center', background: 'var(--bg-nav)' }}>
+                            <div style={{ textAlign: 'center', marginBottom: 48 }}>
+                                <Icon name="Settings" size={64} color="var(--accent)" />
+                                <h1 style={{ marginTop: 24, fontSize: 32, fontWeight: 900, color: '#fff' }}>NexaDisk</h1>
+                                <p style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 800, marginTop: 12, letterSpacing: '1px' }}>ENTERPRISE SECURE GATE</p>
+                            </div>
+                            <form onSubmit={handleLogin}>
+                                <input name="u" style={{ width: '100%', padding: 18, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, color: '#fff', marginBottom: 12 }} placeholder="Username" required />
+                                <input name="p" type="password" style={{ width: '100%', padding: 18, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, color: '#fff', marginBottom: 24 }} placeholder="Password" required />
+                                <button style={{ width: '100%', padding: 18, background: 'var(--accent)', color: '#000', borderRadius: 100, fontWeight: 900, border: 'none', fontSize: 16 }}>AUTHENTICATE</button>
+                                <div style={{ marginTop: '32px', textAlign: 'center' }}>
+                                    <a href="/?ui=desktop" style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: '8px',
+                                        color: 'rgba(255,255,255,0.6)',
+                                        fontSize: '13px',
+                                        textDecoration: 'none',
+                                        padding: '12px',
+                                        borderRadius: '12px',
+                                        background: 'rgba(255,255,255,0.03)',
+                                        border: '1px solid rgba(255,255,255,0.05)'
+                                    }}>
+                                        <Icon name="Monitor" size={16} />
+                                        Switch to Desktop Version
+                                    </a>
+                                </div>
+                            </form>
+                            <Toast {...toast} />
+                        </div>
+                    );
+
+                    return (
+                        <div className="app-shell">
+                            <header className="app-header">
+                                <div className="search-bar">
+                                    <Icon name="Search" size={18} color="var(--text-secondary)" />
+                                    <input placeholder="Search your digital vault..." />
+                                </div>
+                                {clipboard && view === 'explorer' && (
+                                    <div className="paste-btn" onClick={() => handleAction('paste')} style={{ marginLeft: 12 }}>
+                                        <Icon name="ClipboardCopy" size={16} color="#000" />
+                                    </div>
+                                )}
+                            </header>
+
+                            <main className="scroll-container">
+                                {view === 'dashboard' && (
+                                    <>
+                                        <h2 style={{ fontSize: 28, fontWeight: 900, marginBottom: 4, letterSpacing: '-0.5px' }}>Vault Overview</h2>
+                                        <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 24, fontWeight: 500 }}>Real-time cluster health and metrics</p>
+
+                                        <div className="storage-card" style={{ marginBottom: 24, padding: 24 }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 16 }}>
+                                                <div>
+                                                    <div className="section-title" style={{ margin: 0, border: 'none' }}>Total Fleet Capacity</div>
+                                                    <div style={{ fontSize: 24, fontWeight: 900, marginTop: 4 }}>
+                                                        {(stats.used / 1024 / 1024 / 1024).toFixed(1)} <span style={{ color: 'var(--text-secondary)', fontSize: 14 }}>/ {(stats.total / 1024 / 1024 / 1024).toFixed(1)} GB</span>
+                                                    </div>
+                                                </div>
+                                                <div style={{ color: 'var(--accent)', fontWeight: 900, fontSize: 14 }}>{Math.round((stats.used / stats.total) * 100)}%</div>
+                                            </div>
+                                            <div className="progress-container" style={{ height: 8 }}>
+                                                <div className="progress-bar" style={{ width: `${(stats.used / stats.total) * 100}%` }} />
+                                            </div>
+                                            <div style={{ display: 'flex', gap: 20, marginTop: 24 }}>
+                                                <div style={{ flex: 1 }}><div className="section-title" style={{ margin: '0 0 4px' }}>Nodes</div><div style={{ fontSize: 18, fontWeight: 900 }}>{devices.length}</div></div>
+                                                <div style={{ flex: 1 }}><div className="section-title" style={{ margin: '0 0 4px' }}>Shares</div><div style={{ fontSize: 18, fontWeight: 900 }}>{shares.length}</div></div>
+                                                <div style={{ flex: 1 }}><div className="section-title" style={{ margin: '0 0 4px' }}>Drives</div><div style={{ fontSize: 18, fontWeight: 900 }}>{explorerDrives.length}</div></div>
+                                            </div>
+                                        </div>
+
+                                        <div className="section-title">Cluster Activity</div>
+                                        <div className="file-list">
+                                            {activities.slice(0, 6).map(a => (
+                                                <div key={a.id} className="file-item" style={{ padding: '10px 14px' }}>
+                                                    <Icon name="Activity" size={16} color="var(--accent)" />
+                                                    <div style={{ flex: 1, fontSize: 12, fontWeight: 600 }}>{a.name}</div>
+                                                    <div style={{ fontSize: 10, color: 'var(--text-secondary)', fontWeight: 700 }}>{new Date(a.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </>
+                                )}
+
+                                {view === 'explorer' && (
+                                    <>
+                                        {selectedDevice && path === '/' && (
+                                            <div className="back-nav" onClick={() => { setSelectedDevice(null); setView('machines'); }}>
+                                                <Icon name="ArrowLeft" size={20} />
+                                                <span>Return to Node Cluster</span>
+                                            </div>
+                                        )}
+                                        {path !== '/' && (
+                                            <div className="back-nav" style={{ color: 'var(--text-primary)' }} onClick={() => { const p = path.split(/[\/\\]/).slice(0, -1).join('\\') || '/'; setPath(p); fetchData(p); }}>
+                                                <Icon name="ArrowLeft" size={20} />
+                                                <span>Parent Directory</span>
+                                            </div>
+                                        )}
+
+                                        <div style={{ marginBottom: 24 }}>
+                                            <h2 style={{ fontSize: 24, fontWeight: 900 }}>{path === '/' ? (selectedDevice ? selectedDevice.name : 'Storage Explorer') : path.split(/[\/\\]/).filter(Boolean).pop()}</h2>
+                                            <div style={{ fontSize: 11, color: 'var(--text-secondary)', fontWeight: 700, marginTop: 4 }}>{path === '/' ? 'LOCAL & REMOTE VOLUMES' : path}</div>
+                                        </div>
+
+                                        {path === '/' && !selectedDevice ? (
+                                            <div className="storage-grid">
+                                                {explorerDrives.map(d => (
+                                                    <div key={d.name || d.label} className="storage-card" onClick={() => { setPath(d.mountpoint); fetchData(d.mountpoint); }}>
+                                                        <Icon name={d.type === 'network' ? "Globe" : "HardDrive"} size={28} color="var(--accent)" />
+                                                        <div className="info">
+                                                            <div className="name">{d.name}</div>
+                                                            <div className="label">{d.label}</div>
+                                                            <div className="progress-container">
+                                                                <div className="progress-bar" style={{ width: d.size ? `${(d.used / d.size) * 100}%` : '0%' }} />
+                                                            </div>
+                                                            <div className="status">
+                                                                {d.size ? `${(d.free / 1024 / 1024 / 1024).toFixed(1)} GB Available` : 'Syncing Size...'}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <div className="file-list">
+                                                {files.length === 0 ? (
+                                                    <div style={{ textAlign: 'center', padding: '60px 20px', background: 'rgba(255,255,255,0.02)', borderRadius: 20, border: '1px dashed var(--border)' }}>
+                                                        <Icon name="Folder" size={48} color="var(--border)" />
+                                                        <p style={{ marginTop: 16, color: 'var(--text-secondary)', fontWeight: 600 }}>Empty Directory</p>
+                                                    </div>
+                                                ) : files.map(f => (
+                                                    <div key={f.path} className="file-item" onClick={() => { if (f.isDirectory) { setPath(f.path); fetchData(f.path); } }} onContextMenu={e => { e.preventDefault(); setContextFile(f); }}>
+                                                        <div className="file-icon">
+                                                            <Icon name={f.isDirectory ? "Folder" : "FileText"} color={f.isDirectory ? "var(--accent)" : "var(--text-secondary)"} />
+                                                        </div>
+                                                        <div className="file-info">
+                                                            <div className="file-name">{f.name}</div>
+                                                            <div className="file-meta">{f.isDirectory ? 'Directory' : `${(f.size / 1024 / 1024).toFixed(1)} MB`} • {new Date(f.mtime || Date.now()).toLocaleDateString()}</div>
+                                                        </div>
+                                                        <div onClick={e => { e.stopPropagation(); setContextFile(f); }} style={{ padding: 10 }}>
+                                                            <Icon name="MoreVertical" size={18} color="var(--text-secondary)" />
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+
+                                        <div className="fab" onClick={() => setShowPlusMenu(true)}><Icon name="Plus" size={28} color="#000" /></div>
+                                        <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={async (e) => {
+                                            if (e.target.files.length > 0) {
+                                                const formData = new FormData();
+                                                for (let i = 0; i < e.target.files.length; i++) {
+                                                    formData.append('files', e.target.files[i]);
+                                                }
+                                                const headers = { Authorization: `Bearer ${token}` };
+                                                try {
+                                                    showToast('Uploading file...');
+                                                    await axios.post(`/api/files/upload?path=${encodeURIComponent(path)}${selectedDevice?.id ? `&agentId=${selectedDevice.id}` : ''}`, formData, { headers });
+                                                    showToast('Upload Successful');
+                                                    fetchData();
+                                                } catch (err) {
+                                                    showToast('Upload Failed', 'error');
+                                                }
+                                            }
+                                        }} />
+
+                                        {showPlusMenu && (
+                                            <div className="sheet-overlay" onClick={() => setShowPlusMenu(false)}>
+                                                <div className="sheet" onClick={e => e.stopPropagation()}>
+                                                    <div className="section-title" style={{ margin: '0 0 24px' }}>Create or Upload</div>
+                                                    <div className="action-row" onClick={() => { setShowPlusMenu(false); fileInputRef.current?.click(); }}>
+                                                        <Icon name="Plus" size={20} color="var(--accent)" />
+                                                        <span className="action-label">Upload New File</span>
+                                                    </div>
+                                                    <div className="action-row" onClick={() => { setShowPlusMenu(false); handleAction('mkdir'); }}>
+                                                        <Icon name="Folder" size={20} color="var(--accent)" />
+                                                        <span className="action-label">Create Collection</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </>
+                                )}
+
+                                {view === 'machines' && (
+                                    <>
+                                        <h2 className="h-tag">FLEET MACHINE NODES</h2>
+                                        {devices.map(d => (
+                                            <div key={d.id} className="row" onClick={() => { setSelectedDevice(d); setPath('/'); setView('explorer'); fetchData('/', d); }}>
+                                                <div className="icon-box"><Icon name="Monitor" color={d.status === 'online' ? 'var(--success)' : 'var(--text-secondary)'} /></div>
+                                                <div style={{ flex: 1 }}><div style={{ fontWeight: 700, fontSize: 14 }}>{d.hostname || d.name}</div><div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{d.type || 'Storage Node'} • {d.status.toUpperCase()}</div></div>
+                                                <Icon name="ChevronRight" size={16} color="var(--border)" />
+                                            </div>
+                                        ))}
+                                    </>
+                                )}
+
+                                {view === 'shares' && (
+                                    <>
+                                        <h2 className="h-tag">ACTIVE SHARES</h2>
+                                        {shares.length === 0 ? <p style={{ padding: 12, color: 'var(--text-secondary)' }}>No active sharing links found.</p> : shares.map(s => (
+                                            <div key={s.id} className="card" style={{ padding: 12, marginBottom: 12 }}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                                                    <div className="icon-box"><Icon name="Globe" color="var(--accent)" /></div>
+                                                    <div style={{ flex: 1 }}><div style={{ fontWeight: 700, fontSize: 14 }}>{s.path.split(/[\/\\]/).pop()}</div><div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>Public Secure Link</div></div>
+                                                </div>
+                                                <div style={{ display: 'flex', gap: 8 }}>
+                                                    <div className="action-link" onClick={() => handleAction('copy_url', s)}><Icon name="Copy" size={12} /> Copy Link</div>
+                                                    <div className="action-link" style={{ color: 'var(--error)', background: 'rgba(248,81,73,0.1)' }} onClick={() => handleAction('revoke', s)}><Icon name="Trash" size={12} color="var(--error)" /> Revoke</div>
+                                                </div>
+                                            </div>
+                                        ))}
+
+                                        <h2 className="h-tag" style={{ marginTop: 32 }}>NETWORK MAPPED DRIVES</h2>
+                                        {[...networkDrives, ...remoteDrives].length === 0 ? <p style={{ padding: 12, color: 'var(--text-secondary)' }}>No remote storage mapped.</p> : [...networkDrives, ...remoteDrives].map((n, i) => (
+                                            <div key={n.id || i} className="row" onClick={() => { if (n.mountpoint) { setView('explorer'); setPath(n.mountpoint); fetchData(n.mountpoint); } }}>
+                                                <div className="icon-box"><Icon name="Link" color="var(--accent)" /></div>
+                                                <div style={{ flex: 1 }}><div style={{ fontWeight: 700, fontSize: 14 }}>{n.label || n.name}</div><div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{n.username || 'Remote Connection'} • Mounted</div></div>
+                                            </div>
+                                        ))}
+                                    </>
+                                )}
+
+                                {view === 'settings' && (
+                                    <>
+                                        <h2 className="h-tag">ACCOUNT SETTINGS</h2>
+                                        <div className="row" style={{ border: '2px solid var(--error)', marginTop: 24, background: 'rgba(248,81,73,0.05)' }} onClick={() => { localStorage.removeItem('mobile_token'); window.location.reload(); }}><div className="icon-box"><Icon name="Settings" color="var(--error)" /></div><div style={{ flex: 1 }}><div style={{ fontWeight: 800, color: 'var(--error)' }}>TERMINATE SESSION</div><div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>Secure disconnect</div></div></div>
+                                    </>
+                                )}
+                            </main>
+
+                            <nav className="app-nav">
+                                <div className={`nav-btn ${view === 'dashboard' ? 'active' : ''}`} onClick={() => setView('dashboard')}><Icon name="Layout" /><span style={{ opacity: view === 'dashboard' ? 1 : 0.6 }}>Dash</span></div>
+                                <div className={`nav-btn ${view === 'machines' ? 'active' : ''}`} onClick={() => setView('machines')}><Icon name="Server" /><span style={{ opacity: view === 'machines' ? 1 : 0.6 }}>Fleet</span></div>
+                                <div className={`nav-btn ${view === 'explorer' ? 'active' : ''}`} onClick={() => setView('explorer')}><Icon name="Folder" /><span style={{ opacity: view === 'explorer' ? 1 : 0.6 }}>Files</span></div>
+                                <div className={`nav-btn ${view === 'shares' ? 'active' : ''}`} onClick={() => setView('shares')}><Icon name="Share2" /><span style={{ opacity: view === 'shares' ? 1 : 0.6 }}>Shares</span></div>
+                                <div className={`nav-btn ${view === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')}><Icon name="Settings" /><span style={{ opacity: view === 'settings' ? 1 : 0.6 }}>Settings</span></div>
+                            </nav>
+
+                            <Toast {...toast} />
+
+                            {
+                                contextFile && (
+                                    <div className="sheet-overlay" onClick={() => setContextFile(null)}>
+                                        <div className="sheet" onClick={e => e.stopPropagation()}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 28 }}>
+                                                <div className="file-icon" style={{ width: 56, height: 56, background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+                                                    <Icon name={contextFile.isDirectory ? "Folder" : "FileText"} size={32} color="var(--accent)" />
+                                                </div>
+                                                <div style={{ flex: 1, overflow: 'hidden' }}>
+                                                    <div style={{ fontWeight: 900, fontSize: 18, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{contextFile.name}</div>
+                                                    <div style={{ fontSize: 12, color: 'var(--text-secondary)', fontWeight: 700 }}>{contextFile.isDirectory ? 'Collection' : 'Digital Asset'}</div>
+                                                </div>
+                                            </div>
+                                            <div className="action-row" onClick={() => handleAction('copy', contextFile)}><Icon name="Copy" size={20} color="var(--accent)" /><span className="action-label">Duplicate Item</span></div>
+                                            <div className="action-row" onClick={() => handleAction('move', contextFile)}><Icon name="ClipboardCopy" size={20} color="var(--accent)" /><span className="action-label">Cut & Relocate</span></div>
+                                            <div className="action-row" onClick={() => handleAction('share', contextFile)}><Icon name="Globe" size={20} color="var(--accent)" /><span className="action-label">Generate Share Link</span></div>
+                                            <div className="action-row" style={{ border: '1px solid var(--error)', background: 'rgba(248,81,73,0.05)', marginTop: 12 }} onClick={() => handleAction('delete', contextFile)}><Icon name="Trash" size={20} color="var(--error)" /><span className="action-label" style={{ color: 'var(--error)' }}>Destroy Permanently</span></div>
+                                        </div>
+                                    </div>
+                                )
+                            }
+
+                            {
+                                mkdirModal && (
+                                    <div className="modal-overlay">
+                                        <div className="modal">
+                                            <div className="modal-title">NEW COLLECTION</div>
+                                            <input className="modal-input" id="mkdir_name" placeholder="Enter folder name..." autoFocus />
+                                            <div className="modal-btns">
+                                                <button className="modal-btn secondary" onClick={() => setMkdirModal(false)}>Cancel</button>
+                                                <button className="modal-btn primary" onClick={() => {
+                                                    const name = document.getElementById('mkdir_name').value;
+                                                    if (name) handleAction('do_mkdir', name);
+                                                }}>Create</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )
+                            }
+                        </div >
+                    );
+                };
+
+                ReactDOM.render(<App />, document.getElementById('root'));
+                setTimeout(() => { const s = document.getElementById('splash'); if (s) s.classList.add('fade-out'); }, 1000);
+            } catch (err) { alert('Runtime Error: ' + err.message); }
+        })();
+    </script>
+</body>
+
+</html>
