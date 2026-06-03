@@ -14,7 +14,7 @@ router.get('/tasks', authenticateToken, (req, res) => {
 
 // POST create task
 router.post('/tasks', authenticateToken, (req, res) => {
-    const { name, sourceNode, sourcePath, destNode, destPath, syncMode, scheduleInterval } = req.body;
+    const { name, sourceNode, sourcePath, destNode, destPath, syncMode, scheduleInterval, sanitizeMedia } = req.body;
     if (!name || !sourcePath || !destPath) {
         return res.status(400).json({ error: 'Name, source path, and destination path are required' });
     }
@@ -23,9 +23,9 @@ router.post('/tasks', authenticateToken, (req, res) => {
 
     db.run(
         `INSERT INTO sync_tasks 
-        (name, sourceNode, sourcePath, destNode, destPath, syncMode, scheduleInterval, nextRun, lastStatus) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Idle')`,
-        [name, sourceNode || 'local', sourcePath, destNode || 'local', destPath, syncMode || 'backup', scheduleInterval || 'manual', nextRun],
+        (name, sourceNode, sourcePath, destNode, destPath, syncMode, scheduleInterval, nextRun, lastStatus, sanitizeMedia) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Idle', ?)`,
+        [name, sourceNode || 'local', sourcePath, destNode || 'local', destPath, syncMode || 'backup', scheduleInterval || 'manual', nextRun, sanitizeMedia ? 1 : 0],
         function (err) {
             if (err) return res.status(500).json({ error: err.message });
             res.json({ id: this.lastID, message: 'Sync task created successfully' });

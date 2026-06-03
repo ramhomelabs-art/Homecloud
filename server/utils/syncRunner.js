@@ -4,6 +4,16 @@ const axios = require('axios');
 const FormData = require('form-data');
 const db = require('../config/database');
 const { agents } = require('../config/sharedState');
+const { sanitizeMediaName } = require('./nameSanitizer');
+const { sendSyncAlert } = require('./notifier');
+
+const sanitizeRelPath = (relPath) => {
+    const parts = relPath.replace(/\\/g, '/').split('/');
+    const filename = parts.pop();
+    const sanitizedFilename = sanitizeMediaName(filename);
+    parts.push(sanitizedFilename);
+    return parts.join('/');
+};
 
 const activeSyncs = new Set();
 
@@ -151,7 +161,7 @@ const copyFileBetweenNodes = async (srcNode, srcPath, destNode, destPath) => {
         if (!targetAgent) throw new Error(`Destination Agent ${destNode} not found or offline`);
 
         const form = new FormData();
-        form.append('files', fs.createReadStream(srcPath), path.basename(srcPath));
+        form.append('files', fs.createReadStream(srcPath), path.basename(destPath));
 
         const targetDir = getParentDirForNode(destNode, destPath);
         const uploadUrl = `${targetAgent.url}/files/upload?path=${encodeURIComponent(targetDir)}`;
@@ -199,7 +209,7 @@ const copyFileBetweenNodes = async (srcNode, srcPath, destNode, destPath) => {
         });
 
         const form = new FormData();
-        form.append('files', downloadResponse.data, path.basename(srcPath));
+        form.append('files', downloadResponse.data, path.basename(destPath));
 
         const targetDir = getParentDirForNode(destNode, destPath);
         const uploadUrl = `${targetAgent.url}/files/upload?path=${encodeURIComponent(targetDir)}`;
@@ -260,7 +270,8 @@ const runSyncTask = async (taskId) => {
 
                 const filesToCopy = [];
                 for (const srcFile of sourceFiles) {
-                    const destFile = destFilesMap.get(srcFile.relPath);
+                    const targetRelPath = task.sanitizeMedia ? sanitizeRelPath(srcFile.relPath) : srcFile.relPath;
+                    const destFile = destFilesMap.get(targetRelPath);
                     if (!destFile || srcFile.size !== destFile.size || srcFile.modified > destFile.modified) {
                         filesToCopy.push(srcFile);
                     }
@@ -268,7 +279,11 @@ const runSyncTask = async (taskId) => {
 
                 const filesToDelete = [];
                 if (task.syncMode === 'mirror') {
-                    const sourceFilesSet = new Set(sourceFiles.map(f => f.relPath));
+                    const sourceFilesSet = new Set(
+                        task.sanitizeMedia 
+                            ? sourceFiles.map(f => sanitizeRelPath(f.relPath)) 
+                            : sourceFiles.map(f => f.relPath)
+                    );
                     for (const destFile of destFiles) {
                         if (!sourceFilesSet.has(destFile.relPath)) {
                             filesToDelete.push(destFile);
@@ -286,7 +301,8 @@ const runSyncTask = async (taskId) => {
 
                 for (const copyFile of filesToCopy) {
                     try {
-                        const targetPath = joinPathsForNode(task.destNode, task.destPath, copyFile.relPath);
+                        const targetRelPath = task.sanitizeMedia ? sanitizeRelPath(copyFile.relPath) : copyFile.relPath;
+                        const targetPath = joinPathsForNode(task.destNode, task.destPath, targetRelPath);
                         await ensureDirExistsOnNode(task.destNode, getParentDirForNode(task.destNode, targetPath));
                         
                         const bytes = await copyFileBetweenNodes(task.sourceNode, copyFile.absPath, task.destNode, targetPath);
@@ -311,7 +327,12 @@ const runSyncTask = async (taskId) => {
                     [taskId, status, filesCopied, bytesTransferred, errorStr]
                 );
 
-                resolve({ status, filesCopied, bytesTransferred, errors });
+                const result = { status, filesCopied, bytesTransferred, errors: errorStr };
+                sendSyncAlert(task, result).catch(alertErr => {
+                    console.error('[Sync Notifier Trigger Error]:', alertErr.message);
+                });
+
+                resolve(result);
             } catch (runErr) {
                 console.error(`[Sync Task ${taskId} Run Error]:`, runErr.message);
                 const nextRun = computeNextRun(task.scheduleInterval);
@@ -323,6 +344,11 @@ const runSyncTask = async (taskId) => {
                     "INSERT INTO sync_history (taskId, status, errors) VALUES (?, 'Failed', ?)",
                     [taskId, runErr.message]
                 );
+
+                sendSyncAlert(task, { status: 'Failed', errors: runErr.message }).catch(alertErr => {
+                    console.error('[Sync Notifier Trigger Error]:', alertErr.message);
+                });
+
                 reject(runErr);
             } finally {
                 activeSyncs.delete(taskId);

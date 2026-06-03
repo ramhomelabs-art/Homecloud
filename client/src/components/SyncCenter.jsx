@@ -44,6 +44,7 @@ const SyncCenter = ({ agents, showToast }) => {
     const [syncMode, setSyncMode] = useState('backup');
     const [scheduleInterval, setScheduleInterval] = useState('manual');
     const [customMinutes, setCustomMinutes] = useState('30');
+    const [sanitizeMedia, setSanitizeMedia] = useState(false);
     const [submitting, setSubmitting] = useState(false);
 
     const fetchTasks = async (silent = false) => {
@@ -88,7 +89,8 @@ const SyncCenter = ({ agents, showToast }) => {
                 destNode,
                 destPath,
                 syncMode,
-                scheduleInterval: intervalVal
+                scheduleInterval: intervalVal,
+                sanitizeMedia
             }, { headers });
 
             showToast('Sync task created successfully', 'success');
@@ -101,6 +103,7 @@ const SyncCenter = ({ agents, showToast }) => {
             setDestNode('local');
             setSyncMode('backup');
             setScheduleInterval('manual');
+            setSanitizeMedia(false);
             
             fetchTasks();
         } catch (err) {
@@ -306,6 +309,22 @@ const SyncCenter = ({ agents, showToast }) => {
                                                         <span style={{ fontSize: '11px', color: '#8b949e' }}>To:</span>
                                                         <span style={{ fontWeight: '500' }}>{getNodeLabel(task.destNode)}</span>
                                                     </div>
+                                                    {task.sanitizeMedia === 1 && (
+                                                        <span style={{ 
+                                                            padding: '2px 6px', 
+                                                            borderRadius: '4px', 
+                                                            fontSize: '9px', 
+                                                            fontWeight: '800',
+                                                            textTransform: 'uppercase',
+                                                            backgroundColor: 'rgba(242, 201, 76, 0.1)',
+                                                            color: 'var(--accent-gold)',
+                                                            border: '1px solid rgba(242, 201, 76, 0.2)',
+                                                            marginTop: '4px',
+                                                            alignSelf: 'flex-start'
+                                                        }}>
+                                                            Sanitized
+                                                        </span>
+                                                    )}
                                                     <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.3)', fontFamily: 'monospace', wordBreak: 'break-all' }}>
                                                         {task.sourcePath} $\rightarrow$ {task.destPath}
                                                     </span>
@@ -524,6 +543,20 @@ const SyncCenter = ({ agents, showToast }) => {
                                     />
                                 </div>
                             )}
+
+                            {/* Sanitize Media Names toggle */}
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(0,0,0,0.2)', padding: '12px 16px', borderRadius: '10px', marginTop: '8px' }}>
+                                <div>
+                                    <div style={{ fontSize: '13px', fontWeight: 'bold' }}>Sanitize Media Names</div>
+                                    <div style={{ fontSize: '11px', color: '#8b949e' }}>Convert torrent titles to "Title (Year)"</div>
+                                </div>
+                                <div
+                                    onClick={() => setSanitizeMedia(!sanitizeMedia)}
+                                    style={{ width: '40px', height: '20px', background: sanitizeMedia ? 'var(--accent-gold)' : '#333', borderRadius: '20px', position: 'relative', cursor: 'pointer', transition: '0.3s' }}
+                                >
+                                    <div style={{ width: '16px', height: '16px', background: '#fff', borderRadius: '50%', position: 'absolute', top: '2px', left: sanitizeMedia ? '22px' : '2px', transition: '0.3s' }} />
+                                </div>
+                            </div>
 
                             {/* Submit */}
                             <div style={{ display: 'flex', gap: '12px', marginTop: '16px' }}>

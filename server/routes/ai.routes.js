@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../config/database');
 const { executeAICommand } = require('../utils/aiAutomator');
 const { authenticateToken } = require('../middleware/auth');
+const { sendAiAlert } = require('../utils/notifier');
 
 // GET all rules
 router.get('/rules', authenticateToken, (req, res) => {
@@ -72,6 +73,11 @@ router.post('/copilot', authenticateToken, async (req, res) => {
             }
         );
 
+        // Send Telegram alert asynchronously
+        sendAiAlert(command, result).catch(alertErr => {
+            console.error('[AI Alert Notification Error]:', alertErr.message);
+        });
+
         res.json(result);
     } catch (err) {
         // Log the failure to the database as well
@@ -82,6 +88,11 @@ router.post('/copilot', authenticateToken, async (req, res) => {
                 if (dbErr) console.error('[AI Automator API] Failed to write failure logs to DB:', dbErr.message);
             }
         );
+
+        // Send Telegram failure alert asynchronously
+        sendAiAlert(command, { status: 'Failed', logs: err.message, filesAffected: [] }).catch(alertErr => {
+            console.error('[AI Alert Notification Error]:', alertErr.message);
+        });
 
         res.status(500).json({ error: err.message });
     }

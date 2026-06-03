@@ -8,7 +8,7 @@ import {
     ArrowLeft, ArrowRight, ChevronUp, ChevronDown, ListIcon, LayoutGrid, LayoutList,
     Square, CheckSquare, MoreVertical, Database as DriveIcon, Key, Monitor, Smartphone,
     ChevronRight, ChevronLeft, CreditCard, Box, Grid, List, Search, Bell, HelpCircle, Settings, LogOut,
-    HardDrive, FolderOpen, Eye, Save
+    HardDrive, FolderOpen, Eye, Save, Send
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ConfirmationModal from './components/modals/ConfirmationModal';
@@ -1551,6 +1551,71 @@ function App() {
 
                                     {userRole === 'Administrator' && (
                                         <>
+                                            <div style={{ background: 'rgba(255,255,255,0.03)', padding: '24px', borderRadius: '16px', border: '1px solid var(--border-dim)', marginBottom: '24px' }}>
+                                                <h3 style={{ marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '10px' }}><Send size={20} color="var(--accent-gold)" /> Telegram Alerts</h3>
+                                                <p style={{ fontSize: '12px', color: '#8b949e', marginBottom: '20px' }}>Configure a Telegram bot to send real-time system alerts when Sync tasks finish or folder operations are performed by the AI Automator.</p>
+                                                
+                                                <div style={{ marginBottom: '16px' }}>
+                                                    <label style={{ display: 'block', fontSize: '11px', color: '#8b949e', marginBottom: '8px', fontWeight: '800' }}>TELEGRAM BOT TOKEN</label>
+                                                    <input 
+                                                        type="password" 
+                                                        placeholder="Enter Bot Token (e.g. 123456789:ABCdef...)"
+                                                        value={settings.telegramBotToken || ''} 
+                                                        onChange={(e) => setSettings({ ...settings, telegramBotToken: e.target.value })}
+                                                        onBlur={(e) => updateSetting('telegramBotToken', e.target.value)}
+                                                        style={{ width: '100%', padding: '10px', background: '#000', border: '1px solid var(--border-dim)', borderRadius: '8px', color: '#fff', outline: 'none' }} 
+                                                    />
+                                                </div>
+                                                
+                                                <div style={{ marginBottom: '20px' }}>
+                                                    <label style={{ display: 'block', fontSize: '11px', color: '#8b949e', marginBottom: '8px', fontWeight: '800' }}>TELEGRAM CHAT ID / CHANNEL NAME</label>
+                                                    <input 
+                                                        type="text" 
+                                                        placeholder="Enter Chat ID (e.g. -10012345678) or Channel Username"
+                                                        value={settings.telegramChatId || ''} 
+                                                        onChange={(e) => setSettings({ ...settings, telegramChatId: e.target.value })}
+                                                        onBlur={(e) => updateSetting('telegramChatId', e.target.value)}
+                                                        style={{ width: '100%', padding: '10px', background: '#000', border: '1px solid var(--border-dim)', borderRadius: '8px', color: '#fff', outline: 'none' }} 
+                                                    />
+                                                </div>
+
+                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(0,0,0,0.2)', padding: '12px 16px', borderRadius: '10px' }}>
+                                                        <div>
+                                                            <div style={{ fontSize: '13px', fontWeight: 'bold' }}>Notify Sync Tasks</div>
+                                                            <div style={{ fontSize: '11px', color: '#8b949e' }}>Alerts on Sync Job results</div>
+                                                        </div>
+                                                        <div
+                                                            onClick={() => {
+                                                                const nextVal = settings.telegramNotifySync === '1' ? '0' : '1';
+                                                                setSettings({ ...settings, telegramNotifySync: nextVal });
+                                                                updateSetting('telegramNotifySync', nextVal);
+                                                            }}
+                                                            style={{ width: '40px', height: '20px', background: settings.telegramNotifySync === '1' ? 'var(--accent-gold)' : '#333', borderRadius: '20px', position: 'relative', cursor: 'pointer', transition: '0.3s' }}
+                                                        >
+                                                            <div style={{ width: '16px', height: '16px', background: '#fff', borderRadius: '50%', position: 'absolute', top: '2px', left: settings.telegramNotifySync === '1' ? '22px' : '2px', transition: '0.3s' }} />
+                                                        </div>
+                                                    </div>
+
+                                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(0,0,0,0.2)', padding: '12px 16px', borderRadius: '10px' }}>
+                                                        <div>
+                                                            <div style={{ fontSize: '13px', fontWeight: 'bold' }}>Notify AI Automator</div>
+                                                            <div style={{ fontSize: '11px', color: '#8b949e' }}>Alerts on AI clean/organize</div>
+                                                        </div>
+                                                        <div
+                                                            onClick={() => {
+                                                                const nextVal = settings.telegramNotifyAi === '1' ? '0' : '1';
+                                                                setSettings({ ...settings, telegramNotifyAi: nextVal });
+                                                                updateSetting('telegramNotifyAi', nextVal);
+                                                            }}
+                                                            style={{ width: '40px', height: '20px', background: settings.telegramNotifyAi === '1' ? 'var(--accent-gold)' : '#333', borderRadius: '20px', position: 'relative', cursor: 'pointer', transition: '0.3s' }}
+                                                        >
+                                                            <div style={{ width: '16px', height: '16px', background: '#fff', borderRadius: '50%', position: 'absolute', top: '2px', left: settings.telegramNotifyAi === '1' ? '22px' : '2px', transition: '0.3s' }} />
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
                                             <div style={{ background: 'rgba(255,255,255,0.03)', padding: '24px', borderRadius: '16px', border: '1px solid var(--border-dim)', marginBottom: '24px' }}>
                                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                                                     <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}><Cpu size={20} color="var(--accent-cyan)" /> System Version & Updates</h3>

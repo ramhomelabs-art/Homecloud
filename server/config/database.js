@@ -85,8 +85,11 @@ new MigrationManager(DB_PATH).migrate()
                 lastError TEXT,
                 nextRun DATETIME,
                 active INTEGER DEFAULT 1,
+                sanitizeMedia INTEGER DEFAULT 0,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )`);
+
+            db.run("ALTER TABLE sync_tasks ADD COLUMN sanitizeMedia INTEGER DEFAULT 0", (err) => { });
 
             db.run(`CREATE TABLE IF NOT EXISTS sync_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
