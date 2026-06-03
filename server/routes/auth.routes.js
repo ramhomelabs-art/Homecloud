@@ -6,6 +6,7 @@ const os = require('os');
 const rateLimit = require('express-rate-limit');
 const db = require('../config/database');
 const { authenticateToken, requireAdmin } = require('../middleware/auth');
+const { sendAlert } = require('../utils/notifier');
 
 const SECRET_KEY = process.env.JWT_SECRET;
 
@@ -44,6 +45,15 @@ router.post('/login', authLimiter, (req, res) => {
                 username: user.username,
                 role: user.role || 'User'
             }, SECRET_KEY, { expiresIn: '8h' });
+
+            // Dispatch login alert
+            sendAlert('user_login', {
+                title: 'User Login',
+                text: `User "${user.username}" successfully logged in.`,
+                htmlText: `🔑 <b>[User Login]</b>\nUser: <code>${user.username}</code>\nRole: <b>${user.role || 'User'}</b>\nIP: <code>${req.ip || 'unknown'}</code>`,
+                type: 'info'
+            }).catch(alertErr => console.error('[Login Alert Error]:', alertErr.message));
+
             return res.json({
                 token,
                 username: user.username,

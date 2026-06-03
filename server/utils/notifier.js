@@ -1,5 +1,6 @@
 const axios = require('axios');
 const db = require('../config/database');
+const { activities } = require('../config/sharedState');
 
 /**
  * Helper to format bytes into readable sizes
@@ -18,7 +19,7 @@ const formatSize = (bytes) => {
  */
 const getTelegramSettings = () => {
     return new Promise((resolve) => {
-        db.all("SELECT key, value FROM app_settings WHERE key LIKE 'telegram%'", (err, rows) => {
+        db.all("SELECT key, value FROM app_settings WHERE key LIKE 'telegram%' OR key LIKE 'alert%'", (err, rows) => {
             if (err || !rows) return resolve({});
             const settings = {};
             rows.forEach(r => settings[r.key] = r.value);
@@ -52,73 +53,126 @@ const sendTelegramMessage = async (text) => {
 };
 
 /**
+ * Core alert dispatcher function
+ * Checks user settings to determine if Telegram and/or In-App notification should be dispatched.
+ * 
+ * @param {string} eventKey Event identifier (e.g. 'sync_success', 'sync_failure', 'user_login')
+ * @param {object} details Notification details { title, text, htmlText, type }
+ */
+const sendAlert = async (eventKey, { title, text, htmlText, type = 'info' }) => {
+    try {
+        const settings = await getTelegramSettings();
+        
+        // 1. Resolve Telegram Toggle (legacy fallback to notifySync / notifyAi settings)
+        let isTelegramEnabled = false;
+        if (settings[`alert_${eventKey}_telegram`] !== undefined) {
+            isTelegramEnabled = settings[`alert_${eventKey}_telegram`] === '1';
+        } else {
+            if (eventKey.startsWith('sync_')) {
+                isTelegramEnabled = settings.telegramNotifySync === '1';
+            } else if (eventKey.startsWith('ai_')) {
+                isTelegramEnabled = settings.telegramNotifyAi === '1';
+            } else {
+                isTelegramEnabled = false; // Default off for logins, offline alerts unless checked
+            }
+        }
+
+        // 2. Resolve In-App/Browser Notification Toggle (default to true/enabled)
+        const isInAppEnabled = settings[`alert_${eventKey}_inapp`] !== undefined
+            ? settings[`alert_${eventKey}_inapp`] === '1'
+            : true;
+
+        // 3. Dispatch to Telegram
+        if (isTelegramEnabled) {
+            await sendTelegramMessage(htmlText);
+        }
+
+        // 4. Dispatch to In-App Activities log
+        if (isInAppEnabled && activities) {
+            activities.unshift({
+                id: Date.now() + Math.random(),
+                type: eventKey,
+                name: title,
+                status: text,
+                timestamp: new Date().toISOString(),
+                error: type // matches UI severity levels ('info', 'warning', 'error')
+            });
+            
+            // Limit buffer to 100 items
+            if (activities.length > 100) {
+                activities.pop();
+            }
+        }
+    } catch (err) {
+        console.error(`[Alert Dispatcher Error] eventKey: ${eventKey}:`, err.message);
+    }
+};
+
+/**
  * Formats and sends a sync completion notification
  */
 const sendSyncAlert = async (task, result) => {
-    try {
-        const settings = await getTelegramSettings();
-        if (settings.telegramNotifySync !== '1') return;
-
-        const { name } = task;
-        const { status, filesCopied, bytesTransferred, errors } = result;
-        
-        let statusEmoji = 'ℹ️';
-        if (status === 'Success') statusEmoji = '✅';
-        else if (status === 'Partial Success') statusEmoji = '⚠️';
-        else if (status === 'Failed') statusEmoji = '❌';
-
-        let text = `${statusEmoji} <b>[Sync Task Completed]</b>\n`;
-        text += `<b>Task Name:</b> ${name}\n`;
-        text += `<b>Status:</b> ${status}\n`;
-        text += `<b>Files Copied:</b> ${filesCopied || 0}\n`;
-        text += `<b>Bytes Transferred:</b> ${formatSize(bytesTransferred || 0)}\n`;
-        
-        if (errors) {
-            const errStr = Array.isArray(errors) ? errors.join('\n') : errors;
-            text += `<b>Errors:</b>\n<pre>${errStr.substring(0, 500)}</pre>\n`;
-        }
-
-        await sendTelegramMessage(text);
-    } catch (err) {
-        console.error('[Telegram Sync Alert Error]:', err.message);
+    const { name } = task;
+    const { status, filesCopied, bytesTransferred, errors } = result;
+    
+    const isSuccess = status === 'Success' || status === 'Partial Success';
+    const eventKey = isSuccess ? 'sync_success' : 'sync_failure';
+    const statusEmoji = isSuccess ? '✅' : '❌';
+    const severity = isSuccess ? 'info' : 'error';
+    
+    const title = `Sync Job: ${name}`;
+    let text = `Sync status: ${status}. Copied ${filesCopied} files (${formatSize(bytesTransferred)}).`;
+    if (errors) {
+        text += ` Error notes: ${errors}`;
     }
+    
+    let htmlText = `${statusEmoji} <b>[Sync Task Completed]</b>\n`;
+    htmlText += `<b>Task Name:</b> ${name}\n`;
+    htmlText += `<b>Status:</b> ${status}\n`;
+    htmlText += `<b>Files Copied:</b> ${filesCopied || 0}\n`;
+    htmlText += `<b>Bytes Transferred:</b> ${formatSize(bytesTransferred || 0)}\n`;
+    if (errors) {
+        htmlText += `<b>Errors:</b>\n<pre>${errors.substring(0, 500)}</pre>\n`;
+    }
+
+    await sendAlert(eventKey, { title, text, htmlText, type: severity });
 };
 
 /**
  * Formats and sends an AI Automator notification
  */
 const sendAiAlert = async (command, result) => {
-    try {
-        const settings = await getTelegramSettings();
-        if (settings.telegramNotifyAi !== '1') return;
-
-        const { status, logs, filesAffected } = result;
-        
-        let statusEmoji = 'ℹ️';
-        if (status === 'Success') statusEmoji = '✅';
-        else if (status === 'Failed') statusEmoji = '❌';
-
-        let text = `${statusEmoji} <b>[AI Automator Action]</b>\n`;
-        text += `<b>Command:</b> <code>${command}</code>\n`;
-        text += `<b>Status:</b> ${status}\n`;
-        
-        if (filesAffected && filesAffected.length > 0) {
-            text += `<b>Files Affected:</b> ${filesAffected.length}\n`;
-            text += `<pre>${filesAffected.slice(0, 10).join('\n')}${filesAffected.length > 10 ? '\n...and more' : ''}</pre>\n`;
-        }
-        
-        if (logs) {
-            const logStr = Array.isArray(logs) ? logs.join('\n') : logs;
-            text += `<b>Logs:</b>\n<pre>${logStr.substring(0, 500)}</pre>`;
-        }
-
-        await sendTelegramMessage(text);
-    } catch (err) {
-        console.error('[Telegram AI Alert Error]:', err.message);
+    const { status, logs, filesAffected } = result;
+    const isSuccess = status === 'Success';
+    
+    const commandLower = command.toLowerCase();
+    const isClean = commandLower.includes('clean') || commandLower.includes('delete') || commandLower.includes('clear');
+    const eventKey = isClean ? 'ai_clean' : 'ai_organize';
+    
+    const statusEmoji = isSuccess ? '✅' : '❌';
+    const severity = isSuccess ? 'info' : 'error';
+    const actionName = isClean ? 'Junk Cleanup' : 'File Organization';
+    
+    const title = `AI Automator: ${actionName}`;
+    const text = `AI ${actionName} status: ${status}. Affected ${filesAffected ? filesAffected.length : 0} files.`;
+    
+    let htmlText = `${statusEmoji} <b>[AI Automator Action]</b>\n`;
+    htmlText += `<b>Command:</b> <code>${command}</code>\n`;
+    htmlText += `<b>Status:</b> ${status}\n`;
+    if (filesAffected && filesAffected.length > 0) {
+        htmlText += `<b>Files Affected:</b> ${filesAffected.length}\n`;
     }
+    
+    if (logs) {
+        const logStr = Array.isArray(logs) ? logs.join('\n') : logs;
+        htmlText += `<b>Logs:</b>\n<pre>${logStr.substring(0, 500)}</pre>`;
+    }
+
+    await sendAlert(eventKey, { title, text, htmlText, type: severity });
 };
 
 module.exports = {
+    sendAlert,
     sendSyncAlert,
     sendAiAlert
 };

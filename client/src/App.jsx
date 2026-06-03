@@ -27,6 +27,7 @@ import ContextMenu from './components/ContextMenu';
 import InspectorSidebar from './components/InspectorSidebar';
 import SyncCenter from './components/SyncCenter';
 import AIAutomator from './components/AIAutomator';
+import AlertManagement from './components/AlertManagement';
 
 const API_BASE = '/api';
 
@@ -1414,6 +1415,7 @@ function App() {
                 {!guestToken && (
                     <div className="sidebar-group">
                         <p className="nav-group-label">Administrative</p>
+                        <NavItem active={view === 'alerts'} onClick={() => setView('alerts')} icon={<Bell size={20} />} label="Alert Management" />
                         <NavItem active={view === 'settings'} onClick={() => setView('settings')} icon={<Settings size={20} />} label="Settings" />
                     </div>
                 )}
@@ -2588,6 +2590,17 @@ function App() {
                         {view === 'ai_automate' && (
                             <motion.div key="aia" initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
                                 <AIAutomator agents={agentStorage} showToast={showToast} />
+                            </motion.div>
+                        )}
+
+                        {view === 'alerts' && (
+                            <motion.div key="alt" initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                                <AlertManagement 
+                                    settings={settings} 
+                                    updateSetting={updateSetting} 
+                                    activities={activities} 
+                                    showToast={showToast} 
+                                />
                             </motion.div>
                         )}
                     </AnimatePresence>

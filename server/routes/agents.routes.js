@@ -7,6 +7,7 @@ const fs = require('fs');
 const db = require('../config/database');
 const { agents, metricsHistory, localLogBuffer } = require('../config/sharedState');
 const { authenticateToken } = require('../middleware/auth');
+const { sendAlert } = require('../utils/notifier');
 const checkDiskSpace = require('check-disk-space').default;
 
 // --- CPU usage calculation for Master Server ---
@@ -79,8 +80,19 @@ setInterval(async () => {
             if (agentMetrics.length > 30) agentMetrics.shift();
             metricsHistory[id] = agentMetrics;
         } catch (err) {
+            const wasOnline = agent.online !== false;
             // Agent is offline or error occurred
             agent.online = false;
+
+            if (wasOnline) {
+                sendAlert('agent_offline', {
+                    title: `Agent Offline: ${agent.hostname}`,
+                    text: `Agent Node "${agent.hostname}" (${agent.url}) disconnected or went offline.`,
+                    htmlText: `⚠️ <b>[Agent Offline]</b>\nNode: <code>${agent.hostname}</code>\nURL: <code>${agent.url}</code>\nStatus: <b>Offline / Unreachable</b>`,
+                    type: 'warning'
+                }).catch(alertErr => console.error('[Agent Offline Alert Error]:', alertErr.message));
+            }
+
             const agentMetrics = metricsHistory[id] || [];
             agentMetrics.push({
                 timestamp: new Date().toISOString(),
