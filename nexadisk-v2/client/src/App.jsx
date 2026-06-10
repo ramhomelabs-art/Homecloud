@@ -967,20 +967,44 @@ function App() {
     };
 
     const fetchAllData = async () => {
+        const fetchSafely = async (endpoint, fallback) => {
+            try {
+                const res = await axios.get(`${API_BASE}${endpoint}`, { timeout: 4000 });
+                return res.data;
+            } catch (err) {
+                console.warn(`[fetchAllData] Failed to fetch ${endpoint}:`, err.message);
+                return fallback;
+            }
+        };
+
         try {
-            const [localRes, metricsRes, activitiesRes, shareRes, netRes] = await Promise.all([
-                axios.get(`${API_BASE}/storage/local`),
-                axios.get(`${API_BASE}/agents/metrics`),
-                axios.get(`${API_BASE}/activities`),
-                axios.get(`${API_BASE}/share/list`),
-                axios.get(`${API_BASE}/network/list`)
+            const [localData, metricsData, activitiesData, shareData, netData] = await Promise.all([
+                fetchSafely('/storage/local', {
+                    hostname: 'Local Master',
+                    platform: 'win32',
+                    ip: '127.0.0.1',
+                    cpu: 0,
+                    memory: 0,
+                    disks: [{
+                        mount: 'C:\\',
+                        size: 0,
+                        free: 0,
+                        used: 0,
+                        percentage: 0
+                    }]
+                }),
+                fetchSafely('/agents/metrics', { metricsHistory: {}, agents: [] }),
+                fetchSafely('/activities', []),
+                fetchSafely('/share/list', []),
+                fetchSafely('/network/list', [])
             ]);
-            setLocalStorageInfo(localRes.data);
-            setMetrics(metricsRes.data);
-            setAgentStorage(metricsRes.data.agents || []);
-            setActivities(activitiesRes.data);
-            setActiveShares(shareRes.data);
-            setNetworkShares(netRes.data);
+
+            setLocalStorageInfo(localData);
+            setMetrics(metricsData);
+            setAgentStorage(metricsData.agents || []);
+            setActivities(activitiesData);
+            setActiveShares(shareData);
+            setNetworkShares(netData);
             if (localStorage.getItem('userRole') === 'Admin') fetchUsers();
         } catch (e) {
             // Do not logout here — let the global interceptor handle 401s safely.

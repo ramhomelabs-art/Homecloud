@@ -166,10 +166,28 @@ const getLocalIP = () => {
 storageRouter.get('/local', authenticateToken, async (req, res) => {
     try {
         const rootPath = os.platform() === 'win32' ? 'C:' : '/';
-        const disk = await checkDiskSpace(rootPath);
+        
+        // Wrap checkDiskSpace in a 3-second timeout to prevent hanging on disconnected network drives on Windows
+        const diskPromise = checkDiskSpace(rootPath);
+        const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Disk space query timed out')), 3000)
+        );
+        
+        let disk;
+        try {
+            disk = await Promise.race([diskPromise, timeoutPromise]);
+        } catch (err) {
+            logger.warn(`[Cluster/Storage] checkDiskSpace failed or timed out: ${err.message}`);
+            disk = { size: 0, free: 0 };
+        }
         
         // Retrieve latest Master CPU & RAM metrics from clusterService telemetry history
         const latestLocal = clusterService.telemetryHistory.local[clusterService.telemetryHistory.local.length - 1] || { cpu: 0, memory: 0 };
+
+        const diskSize = disk.size || 0;
+        const diskFree = disk.free || 0;
+        const diskUsed = diskSize - diskFree;
+        const percentage = diskSize > 0 ? Math.round((diskUsed / diskSize) * 100) : 0;
 
         res.json({
             hostname: os.hostname(),
@@ -179,10 +197,10 @@ storageRouter.get('/local', authenticateToken, async (req, res) => {
             memory: latestLocal.memory || 0,
             disks: [{
                 mount: os.platform() === 'win32' ? 'C:\\' : '/',
-                size: disk.size,
-                free: disk.free,
-                used: disk.size - disk.free,
-                percentage: Math.round(((disk.size - disk.free) / disk.size) * 100)
+                size: diskSize,
+                free: diskFree,
+                used: diskUsed,
+                percentage: percentage
             }]
         });
     } catch (error) {
@@ -224,7 +242,7 @@ storageRouter.get('/devices', authenticateToken, async (req, res) => {
         } else if (platform === 'win32') {
             try {
                 const cmd = 'powershell "Get-CimInstance -ClassName Win32_LogicalDisk | Select-Object DeviceID, VolumeName, Size, FreeSpace, DriveType | ConvertTo-Json"';
-                const output = execSync(cmd).toString();
+                const output = execSync(cmd, { timeout: 4000 }).toString();
                 const rawDrives = JSON.parse(output);
                 const drivesList = Array.isArray(rawDrives) ? rawDrives : [rawDrives];
 
@@ -239,7 +257,8 @@ storageRouter.get('/devices', authenticateToken, async (req, res) => {
                     drivetype: d.DriveType
                 })).filter(d => d.size > 0 || d.type === 'network');
             } catch (winErr) {
-                drives = [{ name: 'C:', label: 'System Disk', size: 500 * 1024 * 1024 * 1024, type: 'disk' }];
+                logger.warn(`[Cluster/Storage] Win32 logical disk query failed or timed out: ${winErr.message}`);
+                drives = [{ name: 'C:', label: 'System Disk (Fallback)', size: 500 * 1024 * 1024 * 1024, type: 'disk' }];
             }
         }
 
