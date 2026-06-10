@@ -90,13 +90,33 @@ function executeRemoteCommands(conn) {
         
         // Commands to extract, build Debian package, install package, and restart service
         const commands = [
+            // 1. Ensure package lists are updated and curl/ca-certificates are installed
+            `echo "${PASSWORD}" | sudo -S apt-get update`,
+            `echo "${PASSWORD}" | sudo -S apt-get install -y curl ca-certificates gnupg`,
+            
+            // 2. Setup NodeSource repository and install Node.js (v20)
+            `curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -`,
+            `echo "${PASSWORD}" | sudo -S apt-get install -y nodejs`,
+            
+            // 3. Install PostgreSQL database
+            `echo "${PASSWORD}" | sudo -S apt-get install -y postgresql postgresql-contrib`,
+            
+            // 4. Install CIFS network mounting tools
+            `echo "${PASSWORD}" | sudo -S apt-get install -y cifs-utils`,
+            
+            // 5. Prepare and extract deployment bundle
             'mkdir -p /tmp/nexadisk-deploy',
             `tar -xzf ${remoteTarPath} -C /tmp/nexadisk-deploy`,
             'cd /tmp/nexadisk-deploy',
             'chmod +x install_deb.sh',
             './install_deb.sh',
-            `echo "${PASSWORD}" | sudo -S dpkg -i debian/build/nexadisk_*.deb || (echo "${PASSWORD}" | sudo -S apt-get update && echo "${PASSWORD}" | sudo -S apt-get install -f -y)`,
+            
+            // 6. Install the compiled Debian package
+            `echo "${PASSWORD}" | sudo -S dpkg -i debian/build/nexadisk_*.deb || (echo "${PASSWORD}" | sudo -S apt-get install -f -y)`,
+            
+            // 7. Restart and enable services
             `echo "${PASSWORD}" | sudo -S systemctl daemon-reload`,
+            `echo "${PASSWORD}" | sudo -S systemctl enable nexadisk`,
             `echo "${PASSWORD}" | sudo -S systemctl restart nexadisk`
         ].join(' && ');
 
