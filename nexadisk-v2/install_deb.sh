@@ -62,9 +62,9 @@ cp -r server/* "${PKG_DIR}"/usr/local/bin/${PACKAGE_NAME}/
 echo "Installing server production dependencies..."
 pushd "${PKG_DIR}"/usr/local/bin/${PACKAGE_NAME} > /dev/null
 if [ -f "package-lock.json" ]; then
-  npm ci --only=production
+  npm ci --only=production --legacy-peer-deps
 else
-  npm install --only=production
+  npm install --only=production --legacy-peer-deps
 fi
 popd > /dev/null
 
