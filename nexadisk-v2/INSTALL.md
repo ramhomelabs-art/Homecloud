@@ -159,3 +159,49 @@ sudo systemctl daemon-reload
 sudo systemctl enable nexadisk
 sudo systemctl start nexadisk
 ```
+
+---
+
+## 🔌 Offline / Local Installation
+
+NexaDisk supports fully local, offline installation for both the Master Server and Remote Agent nodes.
+
+### 1. Offline Master Server Installation (Debian VM)
+
+To deploy the Master Server to an offline Debian VM:
+
+1. **Download Packages on an Internet-Connected Machine**:
+   On a machine with internet access, run the download sequence to cache all required Debian packages (`nodejs`, `postgresql`, `cifs-utils`, and dependencies) locally:
+   ```bash
+   ./install_deb.sh --download-deps
+   ```
+   This will create a `dependencies/` folder in the root directory containing all the `.deb` files.
+
+2. **Transfer Project Folder to Offline VM**:
+   Compress and copy the entire `nexadisk-v2/` folder (including the newly created `dependencies/` directory) to the target Debian VM.
+
+3. **Install Offline**:
+   On the offline Debian VM, run the installer:
+   ```bash
+   ./install_deb.sh
+   ```
+   The script automatically detects the local `dependencies/` folder and installs all packages offline without requiring internet connectivity.
+
+---
+
+### 2. Remote Agent Node Provisioning
+
+To provision and install the agent on another machine (Windows or Linux):
+
+1. Log in to the NexaDisk Web UI, open the **Nodes** section, and click **Provision New Node**.
+2. Select the target Operating System (**Windows** or **Linux**) and click **Download Setup Package**.
+   - This downloads a pre-configured ZIP containing the agent codebase and a customized installer script (`install.ps1` or `install.sh`) prepopulated with your Master Node's URL and authentication key.
+3. Extract the ZIP package on the target machine.
+4. Run the installer with administrative privileges:
+   - **Linux**: `sudo ./install.sh`
+   - **Windows**: Right-click PowerShell, select **Run as Administrator**, then run `.\install.ps1`
+5. The installer will automatically:
+   - Verify Node.js is present (or download and install it, verifying SHA-256 checksums on Windows).
+   - Install local Node dependencies.
+   - Configure background startup scripts (systemd service on Linux, Startup Scheduled Task on Windows).
+

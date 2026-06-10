@@ -11,29 +11,119 @@
 # ==============================================================================
 set -e
 
+# Parse command-line options
+DOWNLOAD_ONLY=false
+if [ "$1" = "--download-deps" ] || [ "$1" = "-d" ]; then
+  DOWNLOAD_ONLY=true
+fi
+
+if [ "$DOWNLOAD_ONLY" = true ]; then
+  echo "=========================================================="
+  echo " Preparing Offline Dependencies Cache                     "
+  echo "=========================================================="
+  
+  if ! command -v apt-get >/dev/null 2>&1; then
+    echo "ERROR: apt-get not found. Package downloading is only supported on Debian/Ubuntu systems." >&2
+    exit 1
+  fi
+  
+  # Add NodeSource repo to fetch official Node.js (v20) package
+  echo "Setting up NodeSource repository..."
+  if ! command -v curl >/dev/null 2>&1; then
+    sudo apt-get update && sudo apt-get install -y curl
+  fi
+  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+  
+  # Create dependencies cache directory
+  mkdir -p dependencies/partial
+  
+  echo "Downloading required package .debs locally to './dependencies'..."
+  sudo apt-get update
+  sudo apt-get install -y --download-only -o Dir::Cache::archives="$(pwd)/dependencies" \
+    nodejs postgresql postgresql-contrib cifs-utils dpkg-dev fakeroot curl
+  
+  # Clean up partial directory structure if created by apt
+  if [ -d "dependencies/partial" ]; then
+    find dependencies/partial/ -name "*.deb" -exec mv {} dependencies/ \; 2>/dev/null || true
+    rm -rf dependencies/partial
+  fi
+  
+  echo "=========================================================="
+  echo " CACHE DOWNLOAD COMPLETE!                                 "
+  echo " All dependencies (.debs) are saved in: ./dependencies/   "
+  echo " Copy this entire folder to your offline server, and run  "
+  echo " ./install_deb.sh (without parameters) to install offline. "
+  echo "=========================================================="
+  exit 0
+fi
+
 echo "=========================================================="
 echo " Starting NexaDisk Debian Package Build Sequence          "
 echo "=========================================================="
 
-# 1. Verify required host build tools are present
-check_tool() {
-  if ! command -v "$1" >/dev/null 2>&1; then
-    echo "ERROR: Required build tool '$1' is missing. Please install it." >&2
-    exit 1
+# Check for pre-downloaded offline packages
+OFFLINE_MODE=false
+if [ -d "dependencies" ] && ls dependencies/*.deb >/dev/null 2>&1; then
+  OFFLINE_MODE=true
+  echo "Offline mode detected: Installing packages from local './dependencies' folder..."
+  sudo apt-get install -y ./dependencies/*.deb
+fi
+
+# 1. Verify and automatically install missing host build/runtime tools
+install_dependency() {
+  local tool=$1
+  local pkg=$2
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    echo "Host dependency '$tool' is missing. Attempting to install package '$pkg'..."
+    if command -v apt-get >/dev/null 2>&1; then
+      sudo apt-get update
+      sudo apt-get install -y "$pkg"
+    else
+      echo "ERROR: apt-get not found. Please install '$pkg' manually." >&2
+      exit 1
+    fi
   fi
 }
 
-check_tool dpkg-deb
-check_tool fakeroot
-check_tool node
-check_tool npm
+# Ensure curl is installed first (only if online)
+if [ "$OFFLINE_MODE" = false ]; then
+  install_dependency curl curl
+fi
 
-# 2. Check for CIFS mount dependencies (optional alert during build, check during post-install)
+# If node/npm is missing, configure NodeSource repository and install nodejs (v20)
+if ! command -v node >/dev/null 2>&1; then
+  if [ "$OFFLINE_MODE" = true ]; then
+    echo "ERROR: Node.js was not installed correctly by the local packages." >&2
+    exit 1
+  fi
+  echo "Node.js is missing. Configuring NodeSource repository and installing Node.js (v20)..."
+  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+  sudo apt-get install -y nodejs
+fi
+
+# Ensure packaging utilities are present
+install_dependency dpkg-deb dpkg-dev
+install_dependency fakeroot fakeroot
+
+# 2. Check and install PostgreSQL and CIFS dependencies
+if ! command -v psql >/dev/null 2>&1; then
+  echo "PostgreSQL is missing. Installing database packages..."
+  if command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get install -y postgresql postgresql-contrib
+  else
+    echo "ERROR: apt-get not found. Please install postgresql manually." >&2
+    exit 1
+  fi
+fi
+
 if ! command -v mount.cifs >/dev/null 2>&1; then
-  echo "WARNING: 'cifs-utils' was not found on this system."
-  echo "         CIFS/SMB network mounting requires 'cifs-utils'."
-  echo "         Please install it on the target server with: sudo apt install cifs-utils"
-  echo ""
+  echo "cifs-utils is missing. Installing CIFS network mounting tools..."
+  if command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get install -y cifs-utils
+  else
+    echo "ERROR: apt-get not found. Please install cifs-utils manually." >&2
+    exit 1
+  fi
 fi
 
 # 3. Setup build directory variables

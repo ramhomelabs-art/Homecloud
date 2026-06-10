@@ -24,12 +24,29 @@ router.get('/download/:os', authenticateToken, (req, res) => {
 
     // 2. Add installer templates
     const templateDir = path.join(__dirname, '..', 'templates');
+    const masterUrl = `${req.protocol}://${req.get('host')}`;
+    const agentKey = process.env.AGENT_KEY || 'nexadisk-agent-secret-key';
+
     if (osType === 'windows') {
         const pScript = path.join(templateDir, 'install.ps1');
-        if (fs.existsSync(pScript)) zip.addLocalFile(pScript, '', 'install.ps1');
+        if (fs.existsSync(pScript)) {
+            let content = fs.readFileSync(pScript, 'utf8');
+            content = content.replace(/__MASTER_URL__/g, masterUrl);
+            content = content.replace(/__AGENT_KEY__/g, agentKey);
+            zip.addFile('install.ps1', Buffer.from(content, 'utf8'));
+        } else {
+            logger.warn(`[Provisioning] Template install.ps1 not found at ${pScript}`);
+        }
     } else {
         const sScript = path.join(templateDir, 'install.sh');
-        if (fs.existsSync(sScript)) zip.addLocalFile(sScript, '', 'install.sh');
+        if (fs.existsSync(sScript)) {
+            let content = fs.readFileSync(sScript, 'utf8');
+            content = content.replace(/__MASTER_URL__/g, masterUrl);
+            content = content.replace(/__AGENT_KEY__/g, agentKey);
+            zip.addFile('install.sh', Buffer.from(content, 'utf8'));
+        } else {
+            logger.warn(`[Provisioning] Template install.sh not found at ${sScript}`);
+        }
     }
 
     try {
