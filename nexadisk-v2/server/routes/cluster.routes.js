@@ -7,6 +7,7 @@ const axios = require('axios');
 const checkDiskSpace = require('check-disk-space').default;
 const db = require('../config/database');
 const clusterService = require('../services/clusterService');
+const networkService = require('../services/networkService');
 const { authenticateToken, requireRole } = require('../middleware/auth');
 const logger = require('../utils/logger');
 
@@ -311,8 +312,8 @@ networkRouter.use(authenticateToken);
 // List active network shares from PG database
 networkRouter.get('/list', async (req, res) => {
     try {
-        const result = await db.query('SELECT id, path, label, username, type FROM network_shares');
-        res.json(result.rows);
+        const shares = await networkService.checkSharesStatus();
+        res.json(shares);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -416,171 +417,22 @@ networkRouter.post('/discover', async (req, res) => {
 
 // Mount a network share and save to database
 networkRouter.post('/mount', async (req, res) => {
-    const { path: sharePath, label, username, password, type } = req.body;
-    if (!sharePath || !label) {
-        return res.status(400).json({ error: 'Share path and label are required' });
+    try {
+        const result = await networkService.mountShare(req.body);
+        res.json(result);
+    } catch (err) {
+        logger.error(`[Cluster/Network] Mount error: ${err.message}`);
+        res.status(500).json({ error: err.message });
     }
-
-    const platform = os.platform();
-
-    if (platform === 'linux') {
-        let normalizedPath = sharePath.trim().replace(/\\/g, '/');
-        if (!normalizedPath.startsWith('//')) {
-            normalizedPath = '//' + normalizedPath.replace(/^\/+/, '');
-        }
-
-        const safeShare = sanitizeShellArg(normalizedPath);
-        const safeUser  = sanitizeShellArg(username);
-        const safePass  = sanitizeShellArg(password);
-        const safeLabel = label.replace(/[^a-zA-Z0-9_\-]/g, '_');
-        const mountPoint = path.join(MNT_BASE, safeLabel);
-
-        const credFile = path.join(os.tmpdir(), `nexadisk_cred_${Date.now()}`);
-        const hasAuth = safeUser && safePass;
-
-        const doMount = (credFilePath) => {
-            let mountOpts;
-            if (hasAuth) {
-                mountOpts = `credentials=${credFilePath},rw,uid=${process.getuid ? process.getuid() : 0},gid=${process.getgid ? process.getgid() : 0},file_mode=0664,dir_mode=0775,nounix,iocharset=utf8`;
-            } else {
-                mountOpts = `guest,ro,uid=${process.getuid ? process.getuid() : 0},gid=${process.getgid ? process.getgid() : 0},iocharset=utf8`;
-            }
-
-            const tryCommands = [
-                `mount -t cifs "${safeShare}" "${mountPoint}" -o ${mountOpts}`,
-                `sudo mount -t cifs "${safeShare}" "${mountPoint}" -o ${mountOpts}`
-            ];
-
-            const tryMount = (cmds) => {
-                if (cmds.length === 0) {
-                    if (credFilePath) try { fs.unlinkSync(credFilePath); } catch (e) { }
-                    return res.status(500).json({ error: 'Mount failed. Check cifs-utils installation.' });
-                }
-                const cmd = cmds[0];
-                exec(cmd, { timeout: 30000 }, async (e, so, se) => {
-                    if (e) {
-                        return tryMount(cmds.slice(1));
-                    }
-                    if (credFilePath) try { fs.unlinkSync(credFilePath); } catch (e) { }
-
-                    try {
-                        const dbRes = await db.query(
-                            'INSERT INTO network_shares (path, label, username, password, type) VALUES ($1, $2, $3, $4, $5) RETURNING id',
-                            [mountPoint, label, username || null, null, type || 'SMB']
-                        );
-                        res.json({ id: dbRes.rows[0].id, mountpoint: mountPoint });
-                    } catch (dbErr) {
-                        res.status(500).json({ error: dbErr.message });
-                    }
-                });
-            };
-
-            fs.mkdir(mountPoint, { recursive: true }, () => tryMount(tryCommands));
-        };
-
-        if (hasAuth) {
-            const credContent = `username=${safeUser}\npassword=${safePass}\n`;
-            fs.writeFile(credFile, credContent, { mode: 0o600 }, (err) => {
-                if (err) return res.status(500).json({ error: 'Failed to write credentials' });
-                doMount(credFile);
-            });
-        } else {
-            doMount(null);
-        }
-        return;
-    }
-
-    if (platform === 'win32') {
-        const safePath = sanitizeShellArg(sharePath);
-        const safeUser = sanitizeShellArg(username);
-        const safePass = (password || '').replace(/"/g, '');
-
-        const saveToDb = async (mountPath) => {
-            try {
-                const dbRes = await db.query(
-                    'INSERT INTO network_shares (path, label, username, password, type) VALUES ($1, $2, $3, $4, $5) RETURNING id',
-                    [mountPath, label, username || null, null, type || 'SMB']
-                );
-                res.json({ id: dbRes.rows[0].id });
-            } catch (dbErr) {
-                res.status(500).json({ error: dbErr.message });
-            }
-        };
-
-        const handleResult = (e, so, se, mountPath) => {
-            if (e) {
-                const errMsg = (se || so || e.message || 'Mount failed').trim();
-                if (errMsg.toLowerCase().includes('successfully') || errMsg.toLowerCase().includes('already')) {
-                    return saveToDb(mountPath);
-                }
-                return res.status(500).json({ error: errMsg });
-            }
-            saveToDb(mountPath);
-        };
-
-        if (safeUser && safePass) {
-            exec(`net use "${safePath}" /user:"${safeUser}" "${safePass}" /persistent:yes`,
-                { timeout: 30000 },
-                (e, so, se) => handleResult(e, so, se, sharePath)
-            );
-        } else {
-            exec(`net use "${safePath}" /persistent:yes`,
-                { timeout: 30000 },
-                (e, so, se) => handleResult(e, so, se, sharePath)
-            );
-        }
-        return;
-    }
-
-    res.status(400).json({ error: `Mounting not supported on platform: ${platform}` });
 });
 
 // Delete/unmount a network share
 networkRouter.delete('/:id', async (req, res) => {
     try {
-        const dbRes = await db.query('SELECT path, label FROM network_shares WHERE id = $1', [req.params.id]);
-        const r = dbRes.rows[0];
-
-        const doDelete = async () => {
-            await db.query('DELETE FROM network_shares WHERE id = $1', [req.params.id]);
-            res.json({ message: 'Disconnected successfully' });
-        };
-
-        if (!r) {
-            return res.json({ message: 'Already disconnected' });
-        }
-
-        const platform = os.platform();
-
-        if (platform === 'win32') {
-            exec(`net use "${r.path}" /delete /y`, { timeout: 15000 }, (err, so, se) => {
-                doDelete();
-            });
-            return;
-        }
-
-        if (platform === 'linux') {
-            const isNexaDiskMount = r.path && r.path.startsWith(MNT_BASE);
-            const safeMount = sanitizeShellArg(r.path);
-
-            const cleanup = () => {
-                if (isNexaDiskMount && r.path) {
-                    fs.rm(r.path, { recursive: true, force: true }, () => {
-                        doDelete();
-                    });
-                } else {
-                    doDelete();
-                }
-            };
-
-            exec(`umount -l "${safeMount}" 2>/dev/null || sudo umount -l "${safeMount}"`, { timeout: 15000 }, () => {
-                cleanup();
-            });
-            return;
-        }
-
-        doDelete();
+        await networkService.disconnectShare(req.params.id);
+        res.json({ message: 'Disconnected successfully' });
     } catch (err) {
+        logger.error(`[Cluster/Network] Disconnect error: ${err.message}`);
         res.status(500).json({ error: err.message });
     }
 });

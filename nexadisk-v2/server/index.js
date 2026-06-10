@@ -209,6 +209,10 @@ async function startServer() {
         // 1. Initialize DB tables
         await initDatabase();
 
+        // 1.5. Auto-remount saved network drives
+        const networkService = require('./services/networkService');
+        await networkService.init();
+
         // 2. Start telemetry polling
         const clusterService = require('./services/clusterService');
         clusterService.startTelemetryPolling();
