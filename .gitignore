@@ -39,3 +39,10 @@ build/
 # Testing
 coverage/
 .nyc_output/
+
+# Quarantine and Temp
+server/quarantine/
+quarantine/
+scratch/
+nexadisk-v2/server/quarantine/
+nexadisk-v2/scratch/
