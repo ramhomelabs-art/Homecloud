@@ -245,12 +245,14 @@ const SiteMeshModal = ({ show, onClose, showToast, onExploreSite }) => {
         }
     };
 
-    const copyCmd = () => {
-        navigator.clipboard.writeText(joinCommand);
+    const copyCmd = async () => {
+        const { copyTextToClipboard } = await import('../../utils/clipboard');
+        await copyTextToClipboard(joinCommand);
         setCopied(true);
         if (showToast) showToast('Join command copied to clipboard', 'success');
         setTimeout(() => setCopied(false), 2000);
     };
+
 
     const toggleSiteExpand = (id) => {
         setExpandedSites(prev => ({ ...prev, [id]: !prev[id] }));

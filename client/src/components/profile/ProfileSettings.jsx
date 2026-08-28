@@ -986,15 +986,15 @@ const ProfileSettings = ({ onProfileUpdate, embedded = false }) => {
                                     <span style={{ color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>CANNOT SCAN? ENTER THIS KEY:</span>
                                     <strong style={{ color: 'var(--text-primary)', fontSize: '13px', letterSpacing: '1px' }}>{mfaSecret ? mfaSecret.match(/.{1,4}/g).join(' ') : ''}</strong>
                                     <button
-                                        onClick={() => {
-                                            navigator.clipboard.writeText(mfaSecret).then(() => {
-                                                showToast('Secret key copied to clipboard', 'success');
-                                            }).catch(() => {
-                                                showToast('Could not copy — please copy the key manually', 'error');
-                                            });
+                                        onClick={async () => {
+                                            const { copyTextToClipboard } = await import('../../utils/clipboard');
+                                            const ok = await copyTextToClipboard(mfaSecret);
+                                            if (ok) showToast('Secret key copied to clipboard', 'success');
+                                            else showToast('Could not copy — please copy the key manually', 'error');
                                         }}
                                         style={{ display: 'block', margin: '10px auto 0', background: 'rgba(31,111,235,0.15)', border: '1px solid #1f6feb', color: '#58a6ff', padding: '4px 14px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit' }}
                                     >
+
                                         Copy Key
                                     </button>
                                 </div>

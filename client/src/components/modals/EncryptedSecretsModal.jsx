@@ -112,13 +112,15 @@ const EncryptedSecretsModal = ({ onClose, showToast }) => {
         setRevealedIds(next);
     };
 
-    const handleCopySecret = (id, payload) => {
+    const handleCopySecret = async (id, payload) => {
         const plain = decryptPayload(payload, masterKey);
-        navigator.clipboard.writeText(plain);
+        const { copyTextToClipboard } = await import('../../utils/clipboard');
+        await copyTextToClipboard(plain);
         setCopiedId(id);
         setTimeout(() => setCopiedId(null), 2000);
         if (showToast) showToast('Secret copied to clipboard', 'info');
     };
+
 
     return (
         <div style={{

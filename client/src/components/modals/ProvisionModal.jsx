@@ -52,12 +52,14 @@ const ProvisionModal = ({ show, onClose, onAgentAdded, showToast }) => {
         ? provisionInfo?.windowsCommand || `irm "${window.location.origin}/api/v1/provision/script/windows?token=${token}" | iex`
         : provisionInfo?.linuxCommand || `curl -fsSL "${window.location.origin}/api/v1/provision/script/linux?token=${token}" | sudo bash`;
 
-    const handleCopyCommand = () => {
-        navigator.clipboard.writeText(activeCommand);
+    const handleCopyCommand = async () => {
+        const { copyTextToClipboard } = await import('../../utils/clipboard');
+        await copyTextToClipboard(activeCommand);
         setCopied(true);
         if (showToast) showToast('Deployment command copied to clipboard!', 'success');
         setTimeout(() => setCopied(false), 2500);
     };
+
 
     const handleManualConnect = async (e) => {
         e.preventDefault();

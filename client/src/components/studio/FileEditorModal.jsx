@@ -165,12 +165,14 @@ const FileEditorModal = ({ file, onClose, showToast, onSaved }) => {
         }
     };
 
-    const handleCopy = () => {
-        navigator.clipboard.writeText(content);
+    const handleCopy = async () => {
+        const { copyTextToClipboard } = await import('../../utils/clipboard');
+        await copyTextToClipboard(content);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
         if (showToast) showToast('Copied to clipboard', 'info');
     };
+
 
     const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
 

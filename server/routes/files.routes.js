@@ -563,6 +563,25 @@ router.get('/list', async (req, res) => {
             const targetHost = targetParts[0];
             const targetShareName = targetParts[1] || '';
 
+            if (!targetShareName) {
+                const hostShares = sharesRes.rows.filter(row => {
+                    let cleanRow = (row.path || '').replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
+                    const rowParts = cleanRow.split('/');
+                    return rowParts[0]?.toLowerCase() === targetHost.toLowerCase();
+                });
+
+                if (hostShares.length > 0) {
+                    const shareItems = hostShares.map(s => ({
+                        name: s.label || s.path.split(/[\\/]/).pop(),
+                        isDirectory: true,
+                        size: 0,
+                        modified: new Date(),
+                        path: s.path
+                    }));
+                    return res.json(shareItems);
+                }
+            }
+
             const matchedShare = sharesRes.rows.find(row => {
                 let cleanRow = (row.path || '').replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
                 const rowParts = cleanRow.split('/');
@@ -583,6 +602,7 @@ router.get('/list', async (req, res) => {
             logger.warn(`[Files Routes] SMB listing error for ${targetPath}: ${smbErr.message}`);
             return res.status(500).json({ error: `Failed to list SMB share: ${smbErr.message}` });
         }
+
     }
 
     // Remote Cluster Site Mesh Filesystem Bridge

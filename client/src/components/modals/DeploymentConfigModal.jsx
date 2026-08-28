@@ -118,12 +118,14 @@ networks:
         }
     };
 
-    const copyToClipboard = () => {
-        navigator.clipboard.writeText(generatedCode);
+    const copyToClipboard = async () => {
+        const { copyTextToClipboard } = await import('../../utils/clipboard');
+        await copyTextToClipboard(generatedCode);
         setCopied(true);
         if (showToast) showToast('Configuration copied to clipboard!', 'success');
         setTimeout(() => setCopied(false), 2000);
     };
+
 
     const downloadFile = () => {
         const filename = tab === 'docker' ? 'docker-compose.yml' : tab === 'env' ? '.env.production' : tab === 'systemd' ? 'nexadisk.service' : 'nginx.conf';

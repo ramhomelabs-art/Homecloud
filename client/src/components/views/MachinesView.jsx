@@ -36,13 +36,15 @@ const NodeCard = ({
     const badgeBg = isCompliant ? 'rgba(16, 185, 129, 0.12)' : isQuarantined ? 'rgba(244, 63, 94, 0.12)' : 'rgba(245, 158, 11, 0.12)';
     const badgeText = isCompliant ? `SAFE (${complianceScore}%)` : isQuarantined ? `QUARANTINED (${complianceScore}%)` : 'AUDIT PENDING';
 
-    const copyIp = (e) => {
+    const copyIp = async (e) => {
         e.stopPropagation();
         if (ip) {
-            navigator.clipboard.writeText(ip);
+            const { copyTextToClipboard } = await import('../../utils/clipboard');
+            await copyTextToClipboard(ip);
             if (showToast) showToast(`IP ${ip} copied to clipboard`, 'success');
         }
     };
+
 
     return (
         <motion.div 
