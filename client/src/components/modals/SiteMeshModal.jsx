@@ -711,6 +711,32 @@ const SiteMeshModal = ({ show, onClose, showToast }) => {
                                                         </button>
                                                     </div>
                                                 </div>
+
+                                                <div style={{ marginTop: '8px', borderTop: '1px solid var(--border-subtle)', paddingTop: '12px' }}>
+                                                    <a
+                                                        href="/simulator.html"
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        style={{
+                                                            width: '100%',
+                                                            padding: '11px 16px',
+                                                            borderRadius: '10px',
+                                                            background: 'linear-gradient(135deg, rgba(14, 165, 233, 0.2), rgba(99, 102, 241, 0.2))',
+                                                            border: '1px solid rgba(14, 165, 233, 0.4)',
+                                                            color: '#38bdf8',
+                                                            fontSize: '13px',
+                                                            fontWeight: '800',
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            justifyContent: 'center',
+                                                            gap: '8px',
+                                                            textDecoration: 'none',
+                                                            boxSizing: 'border-box'
+                                                        }}
+                                                    >
+                                                        <ExternalLink size={15} /> 🧪 Open Secondary Server Simulator (Test Page)
+                                                    </a>
+                                                </div>
                                             </div>
                                         )}
                                     </div>

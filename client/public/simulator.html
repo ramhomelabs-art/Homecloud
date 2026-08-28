@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NexaDisk Secondary Server Simulator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-base: #060913;
+            --bg-surface-0: #0b1120;
+            --bg-surface-1: #0f172a;
+            --bg-surface-2: #1e293b;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --primary: #6366f1;
+            --accent-cyan: #0ea5e9;
+            --accent-emerald: #10b981;
+            --accent-amber: #f59e0b;
+            --accent-rose: #f43f5e;
+            --border-subtle: rgba(255, 255, 255, 0.08);
+            --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-base);
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.15) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(14, 165, 233, 0.12) 0px, transparent 50%);
+            color: var(--text-primary);
+            font-family: var(--font-sans);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 40px 20px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 900px;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        .header-card {
+            background: var(--bg-surface-0);
+            border: 1px solid var(--border-subtle);
+            border-radius: 20px;
+            padding: 24px 28px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+
+        .badge-sim {
+            background: rgba(245, 158, 11, 0.15);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            color: var(--accent-amber);
+            font-size: 11px;
+            font-weight: 800;
+            padding: 4px 10px;
+            border-radius: 8px;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+
+        .main-card {
+            background: var(--bg-surface-0);
+            border: 1px solid var(--border-subtle);
+            border-radius: 20px;
+            padding: 32px;
+            box-shadow: 0 25px 60px rgba(0,0,0,0.5);
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        .preset-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 12px;
+        }
+
+        .preset-card {
+            background: var(--bg-surface-1);
+            border: 1px solid var(--border-subtle);
+            border-radius: 14px;
+            padding: 16px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .preset-card:hover {
+            border-color: rgba(14, 165, 233, 0.4);
+            transform: translateY(-2px);
+        }
+
+        .preset-card.active {
+            border-color: var(--accent-cyan);
+            background: rgba(14, 165, 233, 0.08);
+            box-shadow: 0 0 20px rgba(14, 165, 233, 0.2);
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        label {
+            font-size: 12px;
+            font-weight: 800;
+            color: var(--text-muted);
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+
+        input, select {
+            background: var(--bg-surface-1);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            padding: 13px 16px;
+            color: var(--text-primary);
+            font-size: 14px;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.15s ease;
+        }
+
+        input:focus, select:focus {
+            border-color: var(--accent-cyan);
+            box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.15);
+        }
+
+        .btn-join {
+            background: linear-gradient(135deg, #0ea5e9, #6366f1);
+            color: #ffffff;
+            border: none;
+            border-radius: 14px;
+            padding: 15px 24px;
+            font-size: 15px;
+            font-weight: 800;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            box-shadow: 0 8px 24px rgba(14, 165, 233, 0.4);
+            transition: all 0.2s ease;
+        }
+
+        .btn-join:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 30px rgba(14, 165, 233, 0.55);
+        }
+
+        .btn-join:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* Terminal Console */
+        .console-card {
+            background: #050811;
+            border: 1px solid var(--border-subtle);
+            border-radius: 16px;
+            overflow: hidden;
+            font-family: var(--font-mono);
+        }
+
+        .console-header {
+            background: #090e1c;
+            padding: 10px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border-subtle);
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .console-body {
+            padding: 16px;
+            height: 220px;
+            overflow-y: auto;
+            font-size: 12.5px;
+            line-height: 1.6;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .log-info { color: #38bdf8; }
+        .log-success { color: #10b981; font-weight: 700; }
+        .log-warn { color: #f59e0b; }
+        .log-error { color: #f43f5e; font-weight: 700; }
+        .log-dim { color: #64748b; }
+
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            font-weight: 800;
+            padding: 4px 10px;
+            border-radius: 8px;
+        }
+
+        .status-idle { background: rgba(100, 116, 139, 0.2); color: var(--text-muted); }
+        .status-connecting { background: rgba(245, 158, 11, 0.2); color: var(--accent-amber); }
+        .status-connected { background: rgba(16, 185, 129, 0.2); color: var(--accent-emerald); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header-card">
+            <div style="display: flex; align-items: center; gap: 14px;">
+                <div style="width: 46px; height: 46px; border-radius: 12px; background: rgba(14, 165, 233, 0.15); display: flex; align-items: center; justify-content: center; color: var(--accent-cyan); font-size: 22px;">
+                    ⚡
+                </div>
+                <div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <h2 style="font-size: 19px; font-weight: 900;">Secondary Server Simulator</h2>
+                        <span class="badge-sim">Test Environment</span>
+                    </div>
+                    <p style="font-size: 12.5px; color: var(--text-secondary); margin-top: 2px;">
+                        Simulates a physical second PC or Proxmox VE server joining your Primary NexaDisk Cluster
+                    </p>
+                </div>
+            </div>
+            <div id="statusIndicator" class="status-pill status-idle">
+                ⚪ UNPAIRED STANDALONE
+            </div>
+        </div>
+
+        <!-- Main Pairing Card -->
+        <div class="main-card">
+            <div>
+                <h3 style="font-size: 16px; font-weight: 900; margin-bottom: 6px;">Step 1: Choose Hardware & Hypervisor Profile</h3>
+                <p style="font-size: 13px; color: var(--text-secondary);">Select the type of server or PC you are simulating to join the mesh:</p>
+            </div>
+
+            <!-- Server Presets -->
+            <div class="preset-grid">
+                <div class="preset-card active" onclick="selectPreset('proxmox')">
+                    <div style="font-size: 18px; margin-bottom: 6px;">🖥️ Proxmox VE 8.1</div>
+                    <div style="font-size: 12px; color: var(--text-secondary);">AMD EPYC 64-Core, 64GB ECC, ZFS RAID-Z2 (7TB) + Ceph (20TB)</div>
+                </div>
+                <div class="preset-card" onclick="selectPreset('truenas')">
+                    <div style="font-size: 18px; margin-bottom: 6px;">🗄️ TrueNAS SCALE</div>
+                    <div style="font-size: 12px; color: var(--text-secondary);">Intel Xeon 16-Core, 128GB RAM, 8x NVMe ZFS Pool (48TB)</div>
+                </div>
+                <div class="preset-card" onclick="selectPreset('officepc')">
+                    <div style="font-size: 18px; margin-bottom: 6px;">🏢 Secondary PC / Lab</div>
+                    <div style="font-size: 12px; color: var(--text-secondary);">Intel Core i7-13700, 32GB RAM, 2TB Fast NVMe Storage</div>
+                </div>
+            </div>
+
+            <hr style="border: 0; border-top: 1px solid var(--border-subtle);">
+
+            <div>
+                <h3 style="font-size: 16px; font-weight: 900; margin-bottom: 6px;">Step 2: Connect to Primary Hub</h3>
+                <p style="font-size: 13px; color: var(--text-secondary);">Paste the pairing key generated from your Primary Server window:</p>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                <div class="form-group" style="grid-column: span 2;">
+                    <label>PRIMARY HUB URL</label>
+                    <input type="text" id="hubUrl" placeholder="http://localhost:5173 or http://localhost:5000">
+                </div>
+
+                <div class="form-group" style="grid-column: span 2;">
+                    <label>CLUSTER PAIRING TOKEN (FROM PRIMARY SERVER)</label>
+                    <input type="text" id="pairingToken" placeholder="nms_..." style="font-family: var(--font-mono); font-weight: 700; color: #38bdf8;">
+                </div>
+
+                <div class="form-group">
+                    <label>SIMULATED SERVER NAME</label>
+                    <input type="text" id="serverName" value="Site-EU-Frankfurt (Proxmox VE Cluster-02)">
+                </div>
+
+                <div class="form-group">
+                    <label>PHYSICAL LOCATION</label>
+                    <input type="text" id="location" value="Frankfurt, Germany (Equinix FR5)">
+                </div>
+            </div>
+
+            <button class="btn-join" id="joinBtn" onclick="runSimulatorJoin()">
+                🔗 Pair & Join Master Cluster Mesh
+            </button>
+        </div>
+
+        <!-- Terminal Console -->
+        <div class="console-card">
+            <div class="console-header">
+                <span>TERMINAL LOGS: /var/log/nexadisk-mesh-daemon.log</span>
+                <span id="tunnelStatus">mTLS Tunnel: Disconnected</span>
+            </div>
+            <div class="console-body" id="consoleLogs">
+                <span class="log-dim">[System Init] NexaDisk Node Daemon v2.4.0 started.</span>
+                <span class="log-dim">[System Init] Listening for cluster pairing directives...</span>
+            </div>
+        </div>
+
+        <div style="text-align: center; font-size: 12.5px; color: var(--text-muted);">
+            Once joined, switch back to your Primary NexaDisk tab to see this server, its disks, and agent nodes live!
+        </div>
+    </div>
+
+    <script>
+        // Auto-detect current origin as default Primary Hub URL
+        document.getElementById('hubUrl').value = window.location.origin;
+
+        const presets = {
+            proxmox: {
+                name: 'Site-EU-Frankfurt (Proxmox VE Cluster-02)',
+                location: 'Frankfurt, Germany (Equinix FR5)',
+                capacity: 40681930227712, // 37 TB
+                used: 14734928227712,     // 13.4 TB
+                details: {
+                    hypervisor: 'Proxmox VE 8.1.4 / KVM / QEMU (Linux 6.5.11-8-pve)',
+                    cpuModel: 'AMD EPYC 7763 64-Core Processor @ 3.50GHz (128 Threads)',
+                    cpuUsage: 12.4,
+                    ramTotalBytes: 68719476736,
+                    ramUsedBytes: 19327352832,
+                    datacenter: 'Equinix FR5 Datacenter, Frankfurt',
+                    tunnelCipher: 'ChaCha20-Poly1305 / TLS 1.3 mTLS',
+                    storagePools: [
+                        { name: 'local-zfs', type: 'ZFS RAID-Z2 (NVMe)', mountPoint: '/rpool/data', totalBytes: 7696581394432, usedBytes: 2849581394432, iops: '420,000 IOPS', status: 'ONLINE', health: 'HEALTHY' },
+                        { name: 'pve-ceph-storage', type: 'Ceph RBD Distributed Pool', mountPoint: '/mnt/pve/ceph-fast', totalBytes: 21990232555520, usedBytes: 8590232555520, iops: '280,000 IOPS', status: 'ONLINE', health: 'HEALTHY' },
+                        { name: 'nfs-backup-vault', type: 'NFS 4.2 High-Capacity Tier', mountPoint: '/mnt/nfs/vault', totalBytes: 10995116277760, usedBytes: 3295116277760, iops: '45,000 IOPS', status: 'ONLINE', health: 'HEALTHY' }
+                    ],
+                    agents: [
+                        { name: 'Frankfurt-PVE-Node-01', role: 'Compute & Hypervisor', ip: '10.240.10.12', uptime: '99.98%', loadAverage: '0.28, 0.19, 0.14' },
+                        { name: 'Frankfurt-Storage-Worker-02', role: 'ZFS Storage Daemon', ip: '10.240.10.13', uptime: '99.99%', loadAverage: '0.15, 0.12, 0.08' }
+                    ]
+                }
+            },
+            truenas: {
+                name: 'Site-US-Dallas (TrueNAS SCALE Cluster-03)',
+                location: 'Dallas, TX (Equinix DA1)',
+                capacity: 52776558133248, // 48 TB
+                used: 19791209299968,     // 18 TB
+                details: {
+                    hypervisor: 'TrueNAS SCALE 23.10 / Debian Linux (Kernel 6.1)',
+                    cpuModel: 'Intel Xeon Gold 6330 28-Core Processor @ 3.10GHz',
+                    cpuUsage: 18.2,
+                    ramTotalBytes: 137438953472,
+                    ramUsedBytes: 42949672960,
+                    datacenter: 'Equinix DA1 Datacenter, Dallas',
+                    tunnelCipher: 'AES-256-GCM / TLS 1.3 mTLS',
+                    storagePools: [
+                        { name: 'tank-zfs-nvme', type: 'ZFS RAID-Z3 (Exos + NVMe Tier)', mountPoint: '/mnt/tank', totalBytes: 43980465111040, usedBytes: 16492674416640, iops: '310,000 IOPS', status: 'ONLINE', health: 'HEALTHY' },
+                        { name: 'ssd-cache-pool', type: 'L2ARC Fast Read Cache', mountPoint: '/mnt/cache', totalBytes: 8796093022208, usedBytes: 3298534883328, iops: '650,000 IOPS', status: 'ONLINE', health: 'HEALTHY' }
+                    ],
+                    agents: [
+                        { name: 'Dallas-TrueNAS-Node-01', role: 'Storage Controller', ip: '10.200.4.15', uptime: '100%', loadAverage: '0.41, 0.35, 0.22' }
+                    ]
+                }
+            },
+            officepc: {
+                name: 'Office-Lab-PC (Secondary Node)',
+                location: 'Office / Home Lab Rack',
+                capacity: 2199023255552, // 2 TB
+                used: 659706976665,      // 600 GB
+                details: {
+                    hypervisor: 'Ubuntu Server 24.04 LTS (Kernel 6.8)',
+                    cpuModel: 'Intel Core i7-13700K 16-Core Processor',
+                    cpuUsage: 6.8,
+                    ramTotalBytes: 34359738368,
+                    ramUsedBytes: 8589934592,
+                    datacenter: 'Home Lab Rack',
+                    tunnelCipher: 'ChaCha20-Poly1305 / TLS 1.3',
+                    storagePools: [
+                        { name: 'local-nvme-pool', type: 'NVMe Gen4 PCIe SSD', mountPoint: '/var/lib/nexadisk', totalBytes: 2199023255552, usedBytes: 659706976665, iops: '120,000 IOPS', status: 'ONLINE', health: 'HEALTHY' }
+                    ],
+                    agents: [
+                        { name: 'Office-Agent-01', role: 'File Sync Worker', ip: '192.168.1.185', uptime: '99.9%', loadAverage: '0.08, 0.05, 0.02' }
+                    ]
+                }
+            }
+        };
+
+        let currentPreset = 'proxmox';
+
+        function selectPreset(key) {
+            currentPreset = key;
+            document.querySelectorAll('.preset-card').forEach((c, idx) => {
+                c.classList.remove('active');
+            });
+            event.currentTarget.classList.add('active');
+
+            const p = presets[key];
+            document.getElementById('serverName').value = p.name;
+            document.getElementById('location').value = p.location;
+            appendLog(`[Preset] Loaded profile: ${p.name}`, 'log-info');
+        }
+
+        function appendLog(msg, className = '') {
+            const consoleBox = document.getElementById('consoleLogs');
+            const row = document.createElement('div');
+            if (className) row.className = className;
+            const time = new Date().toLocaleTimeString();
+            row.textContent = `[${time}] ${msg}`;
+            consoleBox.appendChild(row);
+            consoleBox.scrollTop = consoleBox.scrollHeight;
+        }
+
+        async function runSimulatorJoin() {
+            const hubUrl = document.getElementById('hubUrl').value.trim().replace(/\/+$/, '');
+            const token = document.getElementById('pairingToken').value.trim();
+            const serverName = document.getElementById('serverName').value.trim();
+            const location = document.getElementById('location').value.trim();
+
+            if (!hubUrl || !token) {
+                appendLog('❌ Error: Primary Hub URL and Pairing Token are required!', 'log-error');
+                alert('Please provide both the Primary Hub URL and the Pairing Token generated on Server 1.');
+                return;
+            }
+
+            const joinBtn = document.getElementById('joinBtn');
+            const statusInd = document.getElementById('statusIndicator');
+            const tunnelStatus = document.getElementById('tunnelStatus');
+
+            joinBtn.disabled = true;
+            joinBtn.textContent = '⏳ Establishing Reverse mTLS Tunnel...';
+            statusInd.className = 'status-pill status-connecting';
+            statusInd.textContent = '🟡 HANDSHAKING...';
+
+            appendLog(`--------------------------------------------------`, 'log-dim');
+            appendLog(`🚀 Initiating join sequence to Primary Hub: ${hubUrl}...`, 'log-info');
+
+            setTimeout(async () => {
+                appendLog(`🔒 [Security] Generating ephemeral ECDSA keypair (NIST P-256)...`, 'log-info');
+                appendLog(`🔍 [Pre-flight] Discovered ${presets[currentPreset].details.storagePools.length} storage pools (${(presets[currentPreset].capacity / 1099511627776).toFixed(1)} TB Total)...`, 'log-info');
+                appendLog(`📡 [Tunnel] Sending zero-trust pairing payload to /api/v1/sitemesh/pair...`, 'log-info');
+
+                try {
+                    const presetData = presets[currentPreset];
+                    const payload = {
+                        token: token,
+                        siteName: serverName || presetData.name,
+                        location: location || presetData.location,
+                        endpointUrl: `wss://${window.location.hostname}:5001`,
+                        storageCapacityBytes: presetData.capacity,
+                        storageUsedBytes: presetData.used,
+                        details: presetData.details
+                    };
+
+                    const response = await fetch(`${hubUrl}/api/v1/sitemesh/pair`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    const data = await response.json();
+
+                    if (!response.ok) {
+                        throw new Error(data.error || 'Handshake rejected by Primary Hub');
+                    }
+
+                    appendLog(`✅ [Tunnel Established] ${data.message}`, 'log-success');
+                    appendLog(`✨ [Site ID Registered] ${data.siteId}`, 'log-success');
+                    appendLog(`🎉 [Live] Outbound reverse mTLS tunnel active. Transmitting continuous heartbeat telemetry...`, 'log-success');
+
+                    statusInd.className = 'status-pill status-connected';
+                    statusInd.textContent = '🟢 PAIRED & ONLINE';
+                    tunnelStatus.textContent = 'mTLS Tunnel: CONNECTED (18.2ms)';
+                    tunnelStatus.style.color = '#10b981';
+
+                    joinBtn.textContent = '✅ Server Successfully Paired!';
+                } catch (err) {
+                    appendLog(`❌ [Connection Failed] ${err.message}`, 'log-error');
+                    statusInd.className = 'status-pill status-idle';
+                    statusInd.textContent = '🔴 PAIRING FAILED';
+                    joinBtn.disabled = false;
+                    joinBtn.textContent = '🔗 Retry Join Master Cluster';
+                }
+            }, 800);
+        }
+    </script>
+</body>
+</html>
