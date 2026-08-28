@@ -14,24 +14,32 @@ services:
       - NODE_ENV=production
       - PORT=5000
       - HOST=0.0.0.0
-      - JWT_SECRET=${JWT_SECRET:-change_this_to_a_random_32_byte_secret_in_prod}
-      - AGENT_KEY=${AGENT_KEY:-change_this_agent_key_in_prod}
-      - HMAC_ENCRYPTION_SECRET=${HMAC_ENCRYPTION_SECRET:-change_this_hmac_secret_in_prod}
+      - JWT_SECRET=${JWT_SECRET:-nexadisk_enterprise_jwt_secret_change_in_production_64chars_key}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855}
+      - AGENT_KEY=${AGENT_KEY:-nexadisk_enterprise_agent_secret_key_change_in_production}
+      - HMAC_ENCRYPTION_SECRET=${HMAC_ENCRYPTION_SECRET:-nexadisk_enterprise_hmac_secret_change_in_production}
       - DATABASE_URL=postgres://nexadisk:nexadisk_secret_pass@postgres:5432/nexadisk_db
       - DB_HOST=postgres
       - DB_PORT=5432
       - DB_NAME=nexadisk_db
       - DB_USER=nexadisk
       - DB_PASSWORD=nexadisk_secret_pass
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
       - STORAGE_ROOT=/var/lib/nexadisk/storage
       - TRASH_STORAGE_ROOT=/var/lib/nexadisk/trash
+      - PROFILE_STORAGE_ROOT=/var/lib/nexadisk/profiles
     volumes:
       - nexadisk-data:/var/lib/nexadisk/storage
       - nexadisk-trash:/var/lib/nexadisk/trash
+      - nexadisk-profiles:/var/lib/nexadisk/profiles
+      - nexadisk-backups:/var/lib/nexadisk/backups
       - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_started
     networks:
       - nexadisk-net
 
@@ -67,6 +75,8 @@ services:
 volumes:
   nexadisk-data:
   nexadisk-trash:
+  nexadisk-profiles:
+  nexadisk-backups:
   postgres-data:
   redis-data:
 
