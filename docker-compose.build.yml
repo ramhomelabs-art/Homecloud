@@ -22,6 +22,7 @@ services:
       - DATABASE_URL=postgres://nexadisk:nexadisk_secret_pass@postgres:5432/nexadisk_db
       - DB_HOST=postgres
       - DB_PORT=5432
+      - DB_DATABASE=nexadisk_db
       - DB_NAME=nexadisk_db
       - DB_USER=nexadisk
       - DB_PASSWORD=nexadisk_secret_pass

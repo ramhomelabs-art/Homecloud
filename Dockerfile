@@ -6,7 +6,7 @@
 FROM node:20-alpine AS client-builder
 WORKDIR /app/client
 COPY client/package*.json ./
-RUN npm ci --silent || npm install --silent
+RUN npm ci --legacy-peer-deps || npm install --legacy-peer-deps
 COPY client/ ./
 RUN npm run build
 
@@ -20,7 +20,7 @@ RUN apk add --no-cache smartmontools ffmpeg openssl bash iproute2 ca-certificate
 # Install server dependencies
 WORKDIR /app/server
 COPY server/package*.json ./
-RUN npm ci --only=production --silent || npm install --only=production --silent
+RUN npm ci --only=production --legacy-peer-deps || npm install --only=production --legacy-peer-deps
 
 # Copy server application code & built client bundle
 COPY server/ ./
