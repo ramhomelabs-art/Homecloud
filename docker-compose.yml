@@ -3,9 +3,7 @@ version: '3.8'
 services:
   # NexaDisk Master Storage Server & Web UI
   nexadisk-master:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/ramhomelabs-art/homecloud:latest
     container_name: nexadisk-master
     restart: always
     ports:
