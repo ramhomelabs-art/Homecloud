@@ -2474,23 +2474,29 @@ function App() {
                                             const paddingTop = 10;
                                             const chartHeight = height - paddingTop - paddingBottom;
                                             
+                                            const divisor = Math.max(1, netHistory.length - 1);
                                             const rxPoints = netHistory.map((d, i) => {
-                                                const x = (i / (netHistory.length - 1)) * width;
-                                                const y = height - paddingBottom - (d.rx / maxVal) * chartHeight;
-                                                return `${x.toFixed(1)},${y.toFixed(1)}`;
+                                                const x = (i / divisor) * width;
+                                                const rawY = height - paddingBottom - ((d.rx || 0) / maxVal) * chartHeight;
+                                                const safeX = Number.isFinite(x) ? x : 0;
+                                                const safeY = Number.isFinite(rawY) ? rawY : height - paddingBottom;
+                                                return `${safeX.toFixed(1)},${safeY.toFixed(1)}`;
                                             });
                                             
                                             const txPoints = netHistory.map((d, i) => {
-                                                const x = (i / (netHistory.length - 1)) * width;
-                                                const y = height - paddingBottom - (d.tx / maxVal) * chartHeight;
-                                                return `${x.toFixed(1)},${y.toFixed(1)}`;
+                                                const x = (i / divisor) * width;
+                                                const rawY = height - paddingBottom - ((d.tx || 0) / maxVal) * chartHeight;
+                                                const safeX = Number.isFinite(x) ? x : 0;
+                                                const safeY = Number.isFinite(rawY) ? rawY : height - paddingBottom;
+                                                return `${safeX.toFixed(1)},${safeY.toFixed(1)}`;
                                             });
 
-                                            const rxLine = `M ${rxPoints.join(" L ")}`;
+                                            const rxLine = rxPoints.length > 0 ? `M ${rxPoints.join(" L ")}` : `M 0,${height - paddingBottom}`;
                                             const rxArea = `${rxLine} L ${width},${height - paddingBottom} L 0,${height - paddingBottom} Z`;
                                             
-                                            const txLine = `M ${txPoints.join(" L ")}`;
+                                            const txLine = txPoints.length > 0 ? `M ${txPoints.join(" L ")}` : `M 0,${height - paddingBottom}`;
                                             const txArea = `${txLine} L ${width},${height - paddingBottom} L 0,${height - paddingBottom} Z`;
+
 
                                             return (
                                                 <motion.div
