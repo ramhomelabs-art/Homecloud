@@ -21,6 +21,8 @@ const notificationService = require('../services/notificationService');
 const { authenticateToken, requireRole } = require('../middleware/auth');
 const logger = require('../utils/logger');
 
+const cryptoHelper = require('../utils/cryptoHelper');
+
 router.use(authenticateToken);
 
 // Local tracking of asynchronous operations in progress
@@ -243,16 +245,94 @@ const getWindowsDrives = () => {
     });
 };
 
+const listSmbFiles = async (sharePath, subPath = '', username = '', password = '') => {
+    let clean = sharePath.trim().replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
+    const parts = clean.split('/');
+    const host = parts[0];
+    const shareName = parts[1] || '';
+    const uncShare = `//${host}/${shareName}`;
+
+    let internalSub = (subPath || '').replace(/^[\\\/]+/, '').replace(/\\/g, '/');
+    if (internalSub.startsWith(shareName + '/')) {
+        internalSub = internalSub.slice(shareName.length + 1);
+    }
+
+    const cdCmd = internalSub ? `cd "${internalSub.replace(/"/g, '')}"; ` : '';
+    const listCmd = `${cdCmd}ls`;
+
+    const env = { ...process.env, PASSWD: password || '' };
+    const safeUser = (username || '').replace(/[;&|`$<>\\"']/g, '');
+    const safeShare = uncShare.replace(/[;&|`$<>\\"']/g, '');
+
+    const cmd = safeUser
+        ? `smbclient "${safeShare}" -U "${safeUser}" -t 10 -c '${listCmd}'`
+        : `smbclient "${safeShare}" -N -t 10 -c '${listCmd}'`;
+
+    return new Promise((resolve, reject) => {
+        exec(cmd, { env, timeout: 15000 }, (err, stdout, stderr) => {
+            if (err) {
+                const errMsg = (stderr || stdout || err.message || '').trim();
+                return reject(new Error(`Failed to browse SMB files: ${errMsg}`));
+            }
+
+            const lines = stdout.split('\n');
+            const files = [];
+
+            for (let line of lines) {
+                line = line.trim();
+                if (!line || line.startsWith('Domain=') || line.startsWith('OS=') || line.startsWith('Server=')) continue;
+
+                const match = line.match(/^(.+?)\s+([DAHRSVN]+)\s+(\d+)\s+([A-Za-z0-9:\s]+)$/);
+                if (match) {
+                    const name = match[1].trim();
+                    const attr = match[2].trim();
+                    const size = parseInt(match[3], 10) || 0;
+                    const dateStr = match[4].trim();
+
+                    if (name === '.' || name === '..') continue;
+
+                    const isDir = attr.includes('D');
+                    const itemRelPath = internalSub ? `${internalSub}/${name}` : name;
+                    const fullItemPath = `\\\\${host}\\${shareName}\\${itemRelPath.replace(/\//g, '\\')}`;
+
+                    files.push({
+                        name,
+                        isDirectory: isDir,
+                        size: isDir ? 0 : size,
+                        modified: new Date(dateStr) || new Date(),
+                        path: fullItemPath
+                    });
+                }
+            }
+            resolve(files);
+        });
+    });
+};
+
 const getRootListing = async (req) => {
     if (process.platform === 'win32') {
         const drives = await getWindowsDrives();
-        return drives.map(d => ({
+        const driveItems = drives.map(d => ({
             name: d + '\\',
             isDirectory: true,
             size: 0,
             modified: new Date(),
             path: d + '\\'
         }));
+        
+        try {
+            const sharesRes = await db.query('SELECT label, path, type FROM network_shares');
+            sharesRes.rows.forEach(row => {
+                driveItems.push({
+                    name: `[${row.type || 'Share'}] ${row.label}`,
+                    isDirectory: true,
+                    size: 0,
+                    modified: new Date(),
+                    path: row.path
+                });
+            });
+        } catch (e) {}
+        return driveItems;
     } else {
         const rootItems = [];
         
@@ -265,19 +345,17 @@ const getRootListing = async (req) => {
             path: storageProvider.localBase
         });
 
-        // 2. Query Mounted Network Shares
+        // 2. Query all Mounted & Cloud Network Shares
         try {
-            const sharesRes = await db.query('SELECT label, path FROM network_shares');
+            const sharesRes = await db.query('SELECT label, path, type FROM network_shares');
             sharesRes.rows.forEach(row => {
-                if (fs.existsSync(row.path)) {
-                    rootItems.push({
-                        name: `[Share] ${row.label}`,
-                        isDirectory: true,
-                        size: 0,
-                        modified: new Date(),
-                        path: row.path
-                    });
-                }
+                rootItems.push({
+                    name: `[${row.type || 'Share'}] ${row.label}`,
+                    isDirectory: true,
+                    size: 0,
+                    modified: new Date(),
+                    path: row.path
+                });
             });
         } catch (dbErr) {
             logger.error(`[Files Routes] Failed to fetch network shares for root listing: ${dbErr.message}`);
@@ -290,6 +368,38 @@ const getRootListing = async (req) => {
 // ── GET /api/v1/files/list ───────────────────────────────────────────────────
 router.get('/list', async (req, res) => {
     const { path: targetPath, agentId } = req.query;
+
+    // Direct SMB / CIFS Network Share Bridge
+    const isSmb = targetPath && (targetPath.startsWith('\\\\') || targetPath.startsWith('//') || targetPath.startsWith('smb://'));
+    if (isSmb) {
+        try {
+            const sharesRes = await db.query('SELECT * FROM network_shares');
+            let cleanTarget = targetPath.replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
+            const targetParts = cleanTarget.split('/');
+            const targetHost = targetParts[0];
+            const targetShareName = targetParts[1] || '';
+
+            const matchedShare = sharesRes.rows.find(row => {
+                let cleanRow = (row.path || '').replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
+                const rowParts = cleanRow.split('/');
+                return rowParts[0]?.toLowerCase() === targetHost.toLowerCase() && 
+                       (rowParts[1] || '').toLowerCase() === targetShareName.toLowerCase();
+            });
+
+            const user = matchedShare?.username || '';
+            let pass = '';
+            if (matchedShare?.password) {
+                try { pass = cryptoHelper.decrypt(matchedShare.password); } catch (e) { pass = matchedShare.password; }
+            }
+
+            const subPath = targetParts.slice(2).join('/');
+            const files = await listSmbFiles(targetPath, subPath, user, pass);
+            return res.json(files);
+        } catch (smbErr) {
+            logger.warn(`[Files Routes] SMB listing error for ${targetPath}: ${smbErr.message}`);
+            return res.status(500).json({ error: `Failed to list SMB share: ${smbErr.message}` });
+        }
+    }
 
     // Remote Cluster Site Mesh Filesystem Bridge
     if (targetPath && (targetPath.startsWith('/sitemesh/') || targetPath.startsWith('sitemesh/'))) {
@@ -351,12 +461,10 @@ router.get('/list', async (req, res) => {
 
         const locker = await vaultService.getLockerForPath(resolvedRaw);
         if (locker) {
-            // Check if locked
             if (!vaultService.hasKeys(locker.id)) {
                 return res.status(403).json({ error: 'Vault is locked', lockerId: locker.id });
             }
             
-            // Decrypted directory listing
             const keys = vaultService.getKeys(locker.id);
             const physicalPath = await vaultService.resolveVaultPath(req, targetPath || '');
             let files;
@@ -364,9 +472,7 @@ router.get('/list', async (req, res) => {
                 files = await storageProvider.readdir(physicalPath);
             } catch (readErr) {
                 if (readErr.code === 'ENOENT') {
-                    logger.warn(`[Files Routes] Decrypted directory not found: ${physicalPath}. Falling back to root.`);
-                    const rootItems = await getRootListing(req);
-                    return res.json(rootItems);
+                    return res.json([]);
                 }
                 throw readErr;
             }
@@ -396,12 +502,11 @@ router.get('/list', async (req, res) => {
             files = await storageProvider.readdir(targetPath || '');
         } catch (readErr) {
             if (readErr.code === 'ENOENT') {
-                logger.warn(`[Files Routes] Standard directory not found: ${targetPath}. Falling back to root.`);
-                const rootItems = await getRootListing(req);
-                return res.json(rootItems);
+                return res.json([]);
             }
             throw readErr;
         }
+
 
         const mappedFiles = files.map(f => {
             const fVirtualPath = path.join(targetPath || '', f.name);

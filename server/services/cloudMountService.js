@@ -1,6 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { exec } = require('child_process');
 const db = require('../config/database');
 const logger = require('../utils/logger');
 const cryptoHelper = require('../utils/cryptoHelper');
@@ -237,9 +238,75 @@ class CloudMountService {
             }
         }
 
+        // Direct SMB querying for Windows / NAS network drives
+        if (mount.type === 'SMB' && mount.path) {
+            try {
+                let clean = mount.path.trim().replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
+                const parts = clean.split('/');
+                const host = parts[0];
+                const shareName = parts[1] || '';
+                const uncShare = `//${host}/${shareName}`;
+
+                let internalSub = (subPath || '').replace(/^[\\\/]+/, '').replace(/\\/g, '/');
+                if (internalSub.startsWith(shareName + '/')) {
+                    internalSub = internalSub.slice(shareName.length + 1);
+                }
+
+                const cdCmd = internalSub ? `cd "${internalSub.replace(/"/g, '')}"; ` : '';
+                const listCmd = `${cdCmd}ls`;
+
+                const env = { ...process.env, PASSWD: mount.password || '' };
+                const safeUser = (mount.username || '').replace(/[;&|`$<>\\"']/g, '');
+                const safeShare = uncShare.replace(/[;&|`$<>\\"']/g, '');
+
+                const cmd = safeUser
+                    ? `smbclient "${safeShare}" -U "${safeUser}" -t 10 -c '${listCmd}'`
+                    : `smbclient "${safeShare}" -N -t 10 -c '${listCmd}'`;
+
+                return await new Promise((resolve) => {
+                    exec(cmd, { env, timeout: 15000 }, (err, stdout, stderr) => {
+                        if (err) {
+                            return resolve([]);
+                        }
+
+                        const lines = stdout.split('\n');
+                        const files = [];
+
+                        for (let line of lines) {
+                            line = line.trim();
+                            if (!line || line.startsWith('Domain=') || line.startsWith('OS=') || line.startsWith('Server=')) continue;
+
+                            const match = line.match(/^(.+?)\s+([DAHRSVN]+)\s+(\d+)\s+([A-Za-z0-9:\s]+)$/);
+                            if (match) {
+                                const name = match[1].trim();
+                                const attr = match[2].trim();
+                                const size = parseInt(match[3], 10) || 0;
+                                const dateStr = match[4].trim();
+
+                                if (name === '.' || name === '..') continue;
+
+                                const isDir = attr.includes('D');
+                                files.push({
+                                    name,
+                                    isDirectory: isDir,
+                                    size: isDir ? 0 : size,
+                                    modifiedAt: new Date(dateStr).toISOString(),
+                                    type: isDir ? 'folder' : path.extname(name).slice(1) || 'file'
+                                });
+                            }
+                        }
+                        resolve(files);
+                    });
+                });
+            } catch (e) {
+                logger.warn(`[CloudMountService] SMB list error: ${e.message}`);
+            }
+        }
+
         // Return clean empty list for new/unpopulated cloud mounts
         return [];
     }
+
 
     /**
      * Direct Cloud-to-Cluster File Import
