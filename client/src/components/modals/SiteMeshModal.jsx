@@ -60,12 +60,16 @@ const SiteMeshModal = ({ show, onClose, showToast, onExploreSite }) => {
 
     useEffect(() => {
         if (show) {
-            fetchData();
+            fetchData(true);
+            const liveInterval = setInterval(() => {
+                fetchData(false);
+            }, 3500);
+            return () => clearInterval(liveInterval);
         }
     }, [show]);
 
-    const fetchData = async () => {
-        setLoading(true);
+    const fetchData = async (showLoadingState = false) => {
+        if (showLoadingState) setLoading(true);
         const token = localStorage.getItem('token') || '';
         const headers = { Authorization: `Bearer ${token}` };
         try {
@@ -77,18 +81,24 @@ const SiteMeshModal = ({ show, onClose, showToast, onExploreSite }) => {
             if (sitesRes.data && sitesRes.data.master) {
                 setMasterInfo(sitesRes.data.master);
                 setSites(sitesRes.data.sites || []);
+                if (!secondarySiteName && sitesRes.data.master.name) {
+                    setSecondarySiteName(sitesRes.data.master.name);
+                }
+                if (!secondaryLocation && sitesRes.data.master.location) {
+                    setSecondaryLocation(sitesRes.data.master.location);
+                }
             } else if (Array.isArray(sitesRes.data)) {
                 setSites(sitesRes.data);
             }
 
             setSyncJobs(jobsRes.data || []);
-            if (sitesRes.data?.sites?.length > 0) {
+            if (sitesRes.data?.sites?.length > 0 && !targetSiteId) {
                 setTargetSiteId(sitesRes.data.sites[0].id);
             }
         } catch (e) {
             console.error('Failed to load Site Mesh data', e);
         } finally {
-            setLoading(false);
+            if (showLoadingState) setLoading(false);
         }
     };
 
@@ -143,8 +153,8 @@ const SiteMeshModal = ({ show, onClose, showToast, onExploreSite }) => {
             const res = await axios.post(`${API_BASE}/v1/sitemesh/join-hub`, {
                 hubUrl,
                 pairingToken: joinToken,
-                siteName: secondarySiteName,
-                location: secondaryLocation
+                siteName: secondarySiteName || masterInfo?.name || 'Secondary Node',
+                location: secondaryLocation || masterInfo?.location || 'Primary Datacenter / On-Premise Host'
             }, { headers: { Authorization: `Bearer ${token}` } });
 
             if (showToast) showToast(res.data.message || 'Successfully joined Primary Cluster Hub!', 'success');

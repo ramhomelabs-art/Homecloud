@@ -44,20 +44,78 @@ class SiteMeshService {
 
     // Get live Master primary node telemetry and specs
     async getMasterNodeInfo() {
-        let diskSize = 0;
-        let diskFree = 0;
-        try {
-            const rootPath = os.platform() === 'win32' ? 'C:\\' : '/';
-            const disk = await checkDiskSpace(rootPath);
-            diskSize = disk.size || 0;
-            diskFree = disk.free || 0;
-        } catch (e) {
-            logger.warn(`[SiteMesh] checkDiskSpace error: ${e.message}`);
+        let storagePools = [];
+        let totalAggregatedSize = 0;
+        let totalAggregatedFree = 0;
+
+        if (os.platform() === 'win32') {
+            try {
+                const { execSync } = require('child_process');
+                const cmd = 'powershell "Get-CimInstance -ClassName Win32_LogicalDisk | Select-Object DeviceID, VolumeName, Size, FreeSpace, DriveType | ConvertTo-Json"';
+                const output = execSync(cmd, { timeout: 3500 }).toString();
+                const rawDrives = JSON.parse(output);
+                const drivesList = Array.isArray(rawDrives) ? rawDrives : [rawDrives];
+
+                for (const d of drivesList) {
+                    const size = parseInt(d.Size, 10) || 0;
+                    const free = parseInt(d.FreeSpace, 10) || 0;
+                    if (size > 0 && (d.DriveType === 3 || d.DriveType === 4)) {
+                        totalAggregatedSize += size;
+                        totalAggregatedFree += free;
+                        storagePools.push({
+                            id: `pool_${d.DeviceID.replace(':', '').toLowerCase()}`,
+                            name: d.VolumeName ? `${d.VolumeName} (${d.DeviceID})` : `Local Disk (${d.DeviceID})`,
+                            type: d.DriveType === 4 ? 'Network Storage Pool' : 'Host NVMe/SSD Storage Pool',
+                            mountPoint: `${d.DeviceID}\\`,
+                            totalBytes: size,
+                            usedBytes: size - free,
+                            status: 'ONLINE',
+                            health: 'HEALTHY',
+                            iops: '95,000 IOPS'
+                        });
+                    }
+                }
+            } catch (err) {
+                logger.warn(`[SiteMesh] PowerShell drive inspection error: ${err.message}`);
+            }
         }
+
+        if (storagePools.length === 0) {
+            try {
+                const rootPath = os.platform() === 'win32' ? 'C:\\' : '/';
+                const disk = await checkDiskSpace(rootPath);
+                const diskSize = disk.size || 0;
+                const diskFree = disk.free || 0;
+                totalAggregatedSize = diskSize;
+                totalAggregatedFree = diskFree;
+                storagePools.push({
+                    id: 'local_pool_root',
+                    name: 'primary-host-storage',
+                    type: 'Host NVMe/SSD Storage Pool',
+                    mountPoint: rootPath,
+                    totalBytes: diskSize,
+                    usedBytes: diskSize > diskFree ? diskSize - diskFree : 0,
+                    status: 'ONLINE',
+                    health: 'HEALTHY',
+                    iops: '95,000 IOPS'
+                });
+            } catch (e) {
+                logger.warn(`[SiteMesh] checkDiskSpace error: ${e.message}`);
+            }
+        }
+
+        let configuredLocation = 'Primary Datacenter / On-Premise Host';
+        let configuredSiteName = `${os.hostname()} (Primary Hub)`;
+
+        try {
+            const locRes = await db.query("SELECT value FROM app_settings WHERE key = 'site_location'");
+            if (locRes.rows[0]?.value) configuredLocation = locRes.rows[0].value;
+            const siteRes = await db.query("SELECT value FROM app_settings WHERE key = 'site_name'");
+            if (siteRes.rows[0]?.value) configuredSiteName = siteRes.rows[0].value;
+        } catch (e) {}
 
         const telemetryHistory = clusterService.telemetryHistory?.local || [];
         const latestLocal = telemetryHistory[telemetryHistory.length - 1] || { cpu: 0, memory: 0 };
-        const connectedAgentsCount = Object.keys(clusterService.agents || {}).length;
         const totalMem = os.totalmem();
         const freeMem = os.freemem();
         const usedMem = totalMem - freeMem;
@@ -80,7 +138,7 @@ class SiteMeshService {
         const localAgentsList = Object.values(clusterService.agents || {}).map(ag => ({
             id: ag.id || ag.agentId,
             name: ag.hostname || ag.name || `Agent-${ag.id?.substring(0, 6)}`,
-            role: 'Local Cluster Worker Node',
+            role: 'Cluster Worker Node',
             ip: ag.ip || '127.0.0.1',
             status: ag.status || 'online',
             compliance: ag.compliance || 'compliant',
@@ -90,7 +148,7 @@ class SiteMeshService {
 
         const localDetails = {
             hypervisor: `NexaDisk Master Host Node (${os.type()} ${os.release()})`,
-            datacenter: 'Primary Datacenter / On-Premise Hub',
+            datacenter: configuredLocation,
             ip: localIp,
             hostname: os.hostname(),
             cpuModel: cpuModel,
@@ -100,48 +158,26 @@ class SiteMeshService {
             osPlatform: `${os.platform()} ${os.arch()} (Node.js ${process.version})`,
             tunnelStatus: 'Primary Mesh Gateway & Certificate Authority',
             tunnelCipher: 'TLS 1.3 mTLS / AES-256-GCM',
-            storagePools: [
-                {
-                    id: 'local_pool_root',
-                    name: 'primary-host-storage',
-                    type: 'Host NVMe/SSD Storage Pool',
-                    mountPoint: os.platform() === 'win32' ? 'C:\\' : '/',
-                    totalBytes: diskSize,
-                    usedBytes: diskSize > diskFree ? diskSize - diskFree : 0,
-                    status: 'ONLINE',
-                    health: 'HEALTHY',
-                    iops: '95,000 IOPS'
-                }
-            ],
-            agents: localAgentsList.length > 0 ? localAgentsList : [
-                {
-                    id: 'agent_master_local',
-                    name: `${os.hostname()}-Worker-01`,
-                    role: 'Primary Fleet Coordinator',
-                    ip: localIp,
-                    status: 'online',
-                    compliance: 'compliant',
-                    version: '2.4.0',
-                    uptime: `${Math.floor(os.uptime() / 3600)}h ${Math.floor((os.uptime() % 3600) / 60)}m`
-                }
-            ]
+            storagePools: storagePools,
+            agents: localAgentsList
         };
 
         return {
             id: 'master-local',
-            name: `${os.hostname()} (Primary Hub)`,
+            name: configuredSiteName,
             hostname: os.hostname(),
+            location: configuredLocation,
             ip: localIp,
             platform: `${os.platform()} (${os.arch()})`,
             nodeVersion: process.version,
             status: 'online',
             role: 'Primary Cluster Hub & CA',
-            storageTotalBytes: diskSize,
-            storageUsedBytes: diskSize > diskFree ? diskSize - diskFree : 0,
-            storageFreeBytes: diskFree,
+            storageTotalBytes: totalAggregatedSize,
+            storageUsedBytes: totalAggregatedSize > totalAggregatedFree ? totalAggregatedSize - totalAggregatedFree : 0,
+            storageFreeBytes: totalAggregatedFree,
             cpu: latestLocal.cpu || 8.5,
             memory: Math.round((usedMem / totalMem) * 100),
-            connectedAgents: connectedAgentsCount || 1,
+            connectedAgents: localAgentsList.length,
             latencyMs: 0.1,
             details: localDetails
         };
