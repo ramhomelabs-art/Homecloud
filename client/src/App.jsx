@@ -4453,7 +4453,7 @@ function App() {
                     showToast={showToast}
                     onExploreSite={(siteId, siteName, poolMount) => {
                         setShowSiteMeshModal(false);
-                        setView('files');
+                        setView('browse');
                         if (!siteId || siteId === 'master-local') {
                             setExplorerMode('devices');
                             setSelectedDevice(null);
@@ -4464,7 +4464,7 @@ function App() {
                         } else {
                             // Remote federated secondary site
                             const targetPath = poolMount ? `/sitemesh/${siteId}/${encodeURIComponent(poolMount)}` : `/sitemesh/${siteId}/`;
-                            navigateTo(targetPath, 'files');
+                            navigateTo(targetPath, 'browse');
                             fetchDevices();
                             showToast(`Opened remote storage pool on ${siteName}`, 'info');
                         }
