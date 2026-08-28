@@ -1,7 +1,12 @@
-const fs = require('fs');
 const path = require('path');
+const fs = require('fs');
 const crypto = require('crypto');
-const AdmZip = require('adm-zip');
+let AdmZip;
+try {
+    AdmZip = require('adm-zip');
+} catch (_) {
+    AdmZip = require(path.join(__dirname, '../server/node_modules/adm-zip'));
+}
 const { execSync } = require('child_process');
 
 function computeFileSHA256(filePath) {
