@@ -92,7 +92,7 @@ const CloudMountHubView = ({ showToast, onExploreFiles }) => {
         try {
             const token = localStorage.getItem('token');
             const headers = token ? { Authorization: `Bearer ${token}` } : {};
-            const res = await axios.post('/api/v1/cluster/network/discover-shares', {
+            const res = await axios.post('/api/v1/network/discover-shares', {
                 path: smbHost,
                 username: formUsername,
                 password: formPassword
