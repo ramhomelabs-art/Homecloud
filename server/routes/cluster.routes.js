@@ -712,6 +712,17 @@ networkRouter.post('/mount', async (req, res) => {
     }
 });
 
+// Discover shares on a remote SMB server
+networkRouter.post('/discover-shares', async (req, res) => {
+    try {
+        const result = await networkService.discoverShares(req.body);
+        res.json(result);
+    } catch (err) {
+        logger.error(`[Cluster/Network] Discover shares error: ${err.message}`);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // Delete/unmount a network share
 networkRouter.delete('/:id', async (req, res) => {
     try {

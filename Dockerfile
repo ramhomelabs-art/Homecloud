@@ -15,7 +15,7 @@ FROM node:20-alpine AS runtime
 WORKDIR /app
 
 # Install hardware telemetry & media processing utilities
-RUN apk add --no-cache smartmontools ffmpeg openssl bash iproute2 ca-certificates
+RUN apk add --no-cache smartmontools ffmpeg openssl bash iproute2 ca-certificates samba-client cifs-utils
 
 # Install server dependencies
 WORKDIR /app/server

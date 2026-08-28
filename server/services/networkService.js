@@ -287,6 +287,119 @@ class NetworkService {
             });
         }
     }
+
+    /**
+     * Lists available SMB/CIFS shares for a remote host.
+     */
+    async discoverShares({ path: sharePath, username, password }) {
+        if (!sharePath) {
+            throw new Error('Host address is required');
+        }
+
+        const platform = os.platform();
+        // Extract host (IP or domain name)
+        let host = sharePath.trim().replace(/\\/g, '/');
+        host = host.replace(/^(smb:)?\/+/, '');
+        host = host.split('/')[0]; // Extract hostname/IP only
+
+        const safeHost = host.replace(/[;&|`$<>\\"']/g, '');
+        const safeUser = (username || '').replace(/[;&|`$<>\\"']/g, '');
+
+        if (platform === 'win32') {
+            return new Promise((resolve, reject) => {
+                const cmd = safeUser && password
+                    ? `net view "\\\\${safeHost}" /user:"${safeUser}" "${password.replace(/"/g, '')}"`
+                    : `net view "\\\\${safeHost}"`;
+
+                exec(cmd, { timeout: 12000 }, (err, stdout, stderr) => {
+                    if (err) {
+                        const errMsg = (stderr || stdout || err.message || '').trim();
+                        return reject(new Error(`Failed to list SMB shares: ${errMsg}`));
+                    }
+
+                    const lines = stdout.split('\n');
+                    const shares = [];
+                    let parsing = false;
+
+                    for (let line of lines) {
+                        line = line.trim();
+                        if (!line) continue;
+                        if (line.includes('Share name') && line.includes('Type')) {
+                            parsing = true;
+                            continue;
+                        }
+                        if (parsing) {
+                            if (line.startsWith('---') || line.startsWith('The command')) continue;
+                            const parts = line.split(/\s+/);
+                            if (parts.length >= 2) {
+                                const name = parts[0];
+                                const type = parts[1];
+                                if (type.toLowerCase() === 'disk') {
+                                    shares.push({
+                                        name,
+                                        type: 'Disk',
+                                        comment: parts.slice(2).join(' ') || ''
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    resolve(shares);
+                });
+            });
+        }
+
+        if (platform === 'linux') {
+            return new Promise((resolve, reject) => {
+                const env = { ...process.env, PASSWD: password };
+                const cmd = safeUser
+                    ? `smbclient -L "${safeHost}" -U "${safeUser}" -t 10`
+                    : `smbclient -L "${safeHost}" -N -t 10`;
+
+                exec(cmd, { env, timeout: 12000 }, (err, stdout, stderr) => {
+                    if (err) {
+                        const errMsg = (stderr || stdout || err.message || '').trim();
+                        return reject(new Error(`Failed to list SMB shares: ${errMsg}`));
+                    }
+
+                    const lines = stdout.split('\n');
+                    const shares = [];
+                    let parsingShares = false;
+
+                    for (let line of lines) {
+                        line = line.trim();
+                        if (!line) continue;
+
+                        if (line.includes('Sharename') && line.includes('Type')) {
+                            parsingShares = true;
+                            continue;
+                        }
+                        if (parsingShares) {
+                            if (line.startsWith('---') || line.startsWith('Reconnecting')) continue;
+                            const parts = line.split(/\s+/);
+                            if (parts.length >= 2) {
+                                const shareName = parts[0];
+                                const type = parts[1];
+                                if (type.toLowerCase() === 'disk') {
+                                    shares.push({
+                                        name: shareName,
+                                        type: 'Disk',
+                                        comment: parts.slice(2).join(' ') || ''
+                                    });
+                                }
+                            }
+                            if (line.includes('Server') && line.includes('Comment')) {
+                                break;
+                            }
+                        }
+                    }
+                    resolve(shares);
+                });
+            });
+        }
+
+        throw new Error(`SMB share discovery is not supported on this platform: ${platform}`);
+    }
 }
 
 const networkService = new NetworkService();

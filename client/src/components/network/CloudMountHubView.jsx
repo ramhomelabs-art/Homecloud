@@ -47,6 +47,12 @@ const CloudMountHubView = ({ showToast, onExploreFiles }) => {
     });
     const [submitting, setSubmitting] = useState(false);
 
+    // SMB Discovery State
+    const [smbHost, setSmbHost] = useState('');
+    const [discoveredShares, setDiscoveredShares] = useState(null);
+    const [discovering, setDiscovering] = useState(false);
+    const [discoveryError, setDiscoveryError] = useState('');
+
     // Remote File Explorer Modal State
     const [exploringMount, setExploringMount] = useState(null);
     const [remoteFiles, setRemoteFiles] = useState([]);
@@ -74,6 +80,39 @@ const CloudMountHubView = ({ showToast, onExploreFiles }) => {
     useEffect(() => {
         fetchMounts();
     }, []);
+
+    const handleDiscoverShares = async () => {
+        if (!smbHost) {
+            setDiscoveryError('Host address / IP is required to scan');
+            return;
+        }
+        setDiscovering(true);
+        setDiscoveryError('');
+        setDiscoveredShares([]);
+        try {
+            const token = localStorage.getItem('token');
+            const headers = token ? { Authorization: `Bearer ${token}` } : {};
+            const res = await axios.post('/api/v1/cluster/network/discover-shares', {
+                path: smbHost,
+                username: formUsername,
+                password: formPassword
+            }, { headers });
+            
+            if (res.data && res.data.length > 0) {
+                setDiscoveredShares(res.data);
+                if (showToast) showToast(`Found ${res.data.length} available SMB shares!`, 'success');
+            } else {
+                setDiscoveredShares([]);
+                setDiscoveryError('No shares found on host or anonymous access denied.');
+            }
+        } catch (err) {
+            console.error('Failed to discover SMB shares:', err);
+            setDiscoveryError(err.response?.data?.error || err.message || 'Failed to scan SMB shares');
+            if (showToast) showToast('Scan failed. Check host and credentials.', 'error');
+        } finally {
+            setDiscovering(false);
+        }
+    };
 
     const handleCreateMount = async (e) => {
         e.preventDefault();
@@ -188,6 +227,10 @@ const CloudMountHubView = ({ showToast, onExploreFiles }) => {
             sftpHost: '',
             sftpPort: '22'
         });
+        setSmbHost('');
+        setDiscoveredShares(null);
+        setDiscovering(false);
+        setDiscoveryError('');
     };
 
     return (
@@ -490,17 +533,39 @@ const CloudMountHubView = ({ showToast, onExploreFiles }) => {
 
                             {selectedProtocol === 'SMB' && (
                                 <>
-                                    <div>
-                                        <label style={{ display: 'block', fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: '6px' }}>SMB Network Path *</label>
-                                        <input 
-                                            className="m-input"
-                                            required
-                                            placeholder="e.g. \\192.168.1.100\SharedData or smb://nas.local/pool"
-                                            value={formPath}
-                                            onChange={e => setFormPath(e.target.value)}
-                                            style={{ width: '100%', outline: 'none' }}
-                                        />
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '10px', alignItems: 'end' }}>
+                                        <div style={{ flex: 1 }}>
+                                            <label style={{ display: 'block', fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: '6px' }}>SMB Server Host / IP *</label>
+                                            <input 
+                                                className="m-input"
+                                                placeholder="e.g. 192.168.1.100 or nas.local"
+                                                value={smbHost}
+                                                onChange={e => setSmbHost(e.target.value)}
+                                                style={{ width: '100%', outline: 'none' }}
+                                            />
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={handleDiscoverShares}
+                                            disabled={discovering || !smbHost}
+                                            className="btn-primary"
+                                            style={{
+                                                padding: '12px 16px',
+                                                borderRadius: '12px',
+                                                fontSize: '13px',
+                                                fontWeight: '800',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: '6px',
+                                                cursor: 'pointer',
+                                                height: '46px'
+                                            }}
+                                        >
+                                            {discovering ? <RefreshCw size={14} className="spin" /> : <Globe size={14} />}
+                                            {discovering ? 'Scanning...' : 'Scan Shares'}
+                                        </button>
                                     </div>
+
                                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                                         <div>
                                             <label style={{ display: 'block', fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: '6px' }}>Username</label>
@@ -524,8 +589,74 @@ const CloudMountHubView = ({ showToast, onExploreFiles }) => {
                                             />
                                         </div>
                                     </div>
+
+                                    {/* Scan Results Display */}
+                                    {discoveryError && (
+                                        <div style={{ color: '#f43f5e', fontSize: '12px', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 14px', background: '#f43f5e15', borderRadius: '12px', border: '1px solid #f43f5e30' }}>
+                                            <AlertCircle size={14} /> {discoveryError}
+                                        </div>
+                                    )}
+
+                                    {discoveredShares && discoveredShares.length > 0 && (
+                                        <div>
+                                            <label style={{ display: 'block', fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: '8px' }}>Select SMB Share to Connect *</label>
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '150px', overflowY: 'auto', padding: '6px', border: '1px solid var(--border-subtle)', borderRadius: '12px', background: 'var(--bg-surface-1)' }}>
+                                                {discoveredShares.map(share => {
+                                                    const sharePathString = `\\\\${smbHost.replace(/\\/g, '/').replace(/^\/+/, '')}\\${share.name}`;
+                                                    const isSelected = formPath === sharePathString;
+                                                    return (
+                                                        <div
+                                                            key={share.name}
+                                                            onClick={() => {
+                                                                setFormPath(sharePathString);
+                                                                if (!formLabel || formLabel.startsWith('SMB:')) {
+                                                                    setFormLabel(`SMB: ${share.name}`);
+                                                                }
+                                                            }}
+                                                            style={{
+                                                                display: 'flex',
+                                                                justifyContent: 'space-between',
+                                                                alignItems: 'center',
+                                                                padding: '10px 14px',
+                                                                borderRadius: '10px',
+                                                                background: isSelected ? 'var(--primary-light)' : 'transparent',
+                                                                border: `1px solid ${isSelected ? 'var(--primary)' : 'transparent'}`,
+                                                                color: isSelected ? 'var(--primary)' : 'var(--text-primary)',
+                                                                cursor: 'pointer',
+                                                                fontWeight: isSelected ? '800' : '600',
+                                                                fontSize: '13px',
+                                                                transition: '0.15s'
+                                                            }}
+                                                        >
+                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                                <Folder size={14} color={isSelected ? 'var(--primary)' : 'var(--text-dim)'} />
+                                                                <span>{share.name}</span>
+                                                            </div>
+                                                            {share.comment && (
+                                                                <span style={{ fontSize: '11px', color: 'var(--text-dim)', fontWeight: 'normal' }}>{share.comment}</span>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Final mount path display */}
+                                    <div>
+                                        <label style={{ display: 'block', fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: '6px' }}>Final Connection Path (Auto-generated)</label>
+                                        <input 
+                                            className="m-input"
+                                            required
+                                            readOnly
+                                            placeholder="Select a share above or enter host to list shares"
+                                            value={formPath}
+                                            style={{ width: '100%', outline: 'none', background: 'var(--bg-surface-2)', cursor: 'not-allowed', color: 'var(--text-secondary)' }}
+                                        />
+                                    </div>
                                 </>
                             )}
+
 
                             {selectedProtocol === 'S3' && (
                                 <>
