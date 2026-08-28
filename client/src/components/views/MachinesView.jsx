@@ -387,15 +387,6 @@ export default function MachinesView({
                             <Globe size={15} /> Site Mesh
                         </button>
                     )}
-                    {setShowDeployModal && (
-                        <button
-                            className="btn-outline"
-                            onClick={() => setShowDeployModal(true)}
-                            style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '9px 14px', borderRadius: '10px', fontWeight: '700', fontSize: '12.5px' }}
-                        >
-                            <Terminal size={15} /> Deploy Config
-                        </button>
-                    )}
                     {setShowUpdateModal && (
                         <button
                             className="btn-outline"
