@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
+    "reset-server": "node scripts/reset-server.js",
     "lint": "eslint .",
     "test": "jest",
     "migrate": "node-pg-migrate",

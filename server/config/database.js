@@ -538,21 +538,26 @@ async function initDatabase() {
             await client.query("INSERT INTO app_settings (key, value) VALUES ('appName', 'NexaDisk')");
         }
 
-        // Seed default admin user if not exists
-        const adminCheck = await client.query("SELECT * FROM users WHERE username = 'admin'");
-        if (adminCheck.rows.length === 0) {
-            const bcrypt = require('bcrypt');
-            const crypto = require('crypto');
-            const adminPass = crypto.randomBytes(16).toString('hex');
-            const adminPassHash = await bcrypt.hash(adminPass, 10);
-            await client.query(
-                "INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3)",
-                ['admin', adminPassHash, 'Admin']
-            );
-            logger.warn('******************************************************************');
-            logger.warn(`FIRST-RUN GENERATED ADMINISTRATOR PASSWORD: ${adminPass}`);
-            logger.warn('Please note down this password, log in, and change it immediately!');
-            logger.warn('******************************************************************');
+        // Check if initial setup is completed
+        const setupCheck = await client.query("SELECT value FROM app_settings WHERE key = 'initial_setup_completed'");
+        const isSetupCompleted = setupCheck.rows[0]?.value === 'true';
+
+        // Seed default admin user ONLY if not in initial setup mode and no users exist
+        if (isSetupCompleted) {
+            const adminCheck = await client.query("SELECT * FROM users WHERE username = 'admin'");
+            if (adminCheck.rows.length === 0) {
+                const bcrypt = require('bcrypt');
+                const crypto = require('crypto');
+                const adminPass = crypto.randomBytes(16).toString('hex');
+                const adminPassHash = await bcrypt.hash(adminPass, 10);
+                await client.query(
+                    "INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3)",
+                    ['admin', adminPassHash, 'Admin']
+                );
+                logger.warn('******************************************************************');
+                logger.warn(`REGENERATED ADMINISTRATOR PASSWORD: ${adminPass}`);
+                logger.warn('******************************************************************');
+            }
         }
 
         // Reset any sync tasks that were stuck in progress due to server crash/restart
