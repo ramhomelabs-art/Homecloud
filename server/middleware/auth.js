@@ -14,7 +14,7 @@ const SECRET_KEY = process.env.JWT_SECRET;
 // short-lived single-use tokens for browser streaming/download scenarios.
 const authenticateToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
+    const token = (authHeader && authHeader.split(' ')[1]) || req.query.token;
 
     if (!token) return res.status(401).json({ error: 'Access token required' });
 
@@ -24,6 +24,7 @@ const authenticateToken = (req, res, next) => {
         next();
     });
 };
+
 
 // 🛡️ Role-Based Access Control (RBAC) Middleware
 const requireRole = (allowedRoles = []) => {
