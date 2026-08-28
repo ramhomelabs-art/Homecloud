@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+*/node_modules/
+package-lock.json
+
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+
+# Local Data & User Uploads
+uploads/
+server/uploads/
+d:/opt/
+backups/
+scratch/
+quarantine/
+security_staging/
+logs/
+*.log
+
+# Build Caches & Bundles
+client/dist/
+dist/
+.vite/
+*.tsbuildinfo
+
+# OS & Editor specific files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Database files
+*.sqlite
+*.sqlite3
+*.db
+
+# Temporary archives
+*.tar.gz
+*.zip
+*.bak

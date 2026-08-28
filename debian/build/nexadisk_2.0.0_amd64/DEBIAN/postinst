@@ -1,0 +1,49 @@
+#!/bin/sh
+set -e
+
+# Create nexadisk system user/group if not exists
+if ! getent group nexadisk >/dev/null; then
+  groupadd --system nexadisk
+fi
+if ! getent passwd nexadisk >/dev/null; then
+  useradd --system --gid nexadisk --no-create-home --shell /bin/false nexadisk
+fi
+
+# Set proper file permissions
+chown -R nexadisk:nexadisk /usr/local/bin/nexadisk
+chown -R nexadisk:nexadisk /usr/local/bin/client
+chown -R nexadisk:nexadisk /var/lib/nexadisk
+chown -R nexadisk:nexadisk /etc/nexadisk
+
+# Generate production .env configuration
+if [ ! -f /usr/local/bin/.env ]; then
+  echo "Generating secure JWT_SECRET and AGENT_KEY credentials..."
+  JWT_SEC=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
+  AG_KEY=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
+  cat > /usr/local/bin/.env <<OUT
+PORT=5000
+NODE_ENV=production
+DB_USER=postgres
+DB_PASSWORD=postgres
+DB_HOST=localhost
+DB_DATABASE=nexadisk
+DB_PORT=5432
+STORAGE_TYPE=local
+LOCAL_STORAGE_BASE=/var/lib/nexadisk/uploads
+JWT_SECRET=${JWT_SEC}
+AGENT_KEY=${AG_KEY}
+OUT
+  chown nexadisk:nexadisk /usr/local/bin/.env
+  chmod 600 /usr/local/bin/.env
+fi
+
+# Configure passwordless sudo for mounting cifs shares
+if [ -d /etc/sudoers.d ]; then
+  echo "nexadisk ALL=(ALL) NOPASSWD: /bin/mount, /usr/bin/mount, /bin/umount, /usr/bin/umount" > /etc/sudoers.d/nexadisk
+  chmod 0440 /etc/sudoers.d/nexadisk
+fi
+
+# Reload systemd services
+if [ -d /run/systemd/system ]; then
+  systemctl daemon-reload || true
+fi

@@ -1,0 +1,412 @@
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
+import { motion, AnimatePresence } from 'framer-motion';
+import { 
+    Activity, Radio, ShieldAlert, ShieldCheck, Users, 
+    Wifi, Globe, Lock, Unlock, XCircle, RefreshCw, 
+    Server, Cpu, ArrowUpRight, ArrowDownLeft, Terminal,
+    Laptop, Smartphone, Bot, Eye, Trash2
+} from 'lucide-react';
+
+const formatBytes = (bytes) => {
+    if (!bytes || bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+};
+
+const NetworkTrafficView = ({ showToast }) => {
+    const [telemetry, setTelemetry] = useState(null);
+    const [sessions, setSessions] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [activeTab, setActiveTab] = useState('stream'); // 'stream' | 'sessions'
+    const [autoRefresh, setAutoRefresh] = useState(true);
+    const [filterMethod, setFilterMethod] = useState('ALL');
+
+    const fetchTrafficData = async (silent = false) => {
+        if (!silent) setLoading(true);
+        try {
+            const token = localStorage.getItem('token');
+            const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+            const [telRes, sessRes] = await Promise.all([
+                axios.get('/api/v1/traffic/live', { headers }),
+                axios.get('/api/v1/traffic/sessions', { headers })
+            ]);
+
+            setTelemetry(telRes.data);
+            setSessions(sessRes.data.sessions || []);
+        } catch (err) {
+            console.error('Failed to fetch traffic data', err);
+        } finally {
+            if (!silent) setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchTrafficData();
+        let interval = null;
+        if (autoRefresh) {
+            interval = setInterval(() => fetchTrafficData(true), 2500); // 2.5s poll for real-time smoothness
+        }
+        return () => clearInterval(interval);
+    }, [autoRefresh]);
+
+    const handleKillSession = async (sessionId, username) => {
+        try {
+            const token = localStorage.getItem('token');
+            const headers = token ? { Authorization: `Bearer ${token}` } : {};
+            await axios.post('/api/v1/traffic/kill-session', { sessionId }, { headers });
+            if (showToast) showToast(`Session for ${username} has been disconnected.`, 'info');
+            fetchTrafficData(true);
+        } catch (err) {
+            if (showToast) showToast('Failed to revoke session', 'error');
+        }
+    };
+
+    const handleBanClientIp = async (ip) => {
+        if (!window.confirm(`Are you sure you want to drop all traffic from IP ${ip}?`)) return;
+        try {
+            const token = localStorage.getItem('token');
+            const headers = token ? { Authorization: `Bearer ${token}` } : {};
+            await axios.post('/api/v1/traffic/ban-client', { ip, reason: 'Banned from Live Traffic Inspector' }, { headers });
+            if (showToast) showToast(`IP ${ip} has been blacklisted and disconnected.`, 'success');
+            fetchTrafficData(true);
+        } catch (err) {
+            if (showToast) showToast('Failed to ban client IP', 'error');
+        }
+    };
+
+    const requests = telemetry?.recentRequests || [];
+    const filteredRequests = filterMethod === 'ALL' 
+        ? requests 
+        : requests.filter(r => r.method === filterMethod);
+
+    return (
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '24px', padding: '10px 0' }}>
+            {/* Header Title */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+                <div>
+                    <h2 style={{ fontSize: '26px', fontWeight: '800', margin: 0, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <Wifi size={28} color="var(--primary)" /> Network Traffic & Active Sessions
+                    </h2>
+                    <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                        Real-time HTTP packet inspector, client device fingerprints, bandwidth consumption, and active sessions
+                    </p>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <button 
+                        onClick={() => setAutoRefresh(!autoRefresh)}
+                        className={autoRefresh ? 'btn-primary' : 'btn-secondary'}
+                        style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 14px', borderRadius: '10px', fontSize: '12px', fontWeight: '800' }}
+                    >
+                        <Radio size={14} style={{ animation: autoRefresh ? 'pulse 1s infinite' : 'none' }} />
+                        {autoRefresh ? 'Live Stream Active' : 'Stream Paused'}
+                    </button>
+                    <button 
+                        onClick={() => fetchTrafficData()}
+                        className="btn-secondary"
+                        style={{ padding: '8px 12px', borderRadius: '10px' }}
+                        title="Refresh Telemetry"
+                    >
+                        <RefreshCw size={14} className={loading ? 'spin' : ''} />
+                    </button>
+                </div>
+            </div>
+
+            {/* Top Telemetry Metric Cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
+                <div className="glass" style={{ padding: '20px', borderRadius: '16px', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-0)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase' }}>Total Inbound Requests</span>
+                        <Activity size={18} color="var(--primary)" />
+                    </div>
+                    <span style={{ fontSize: '28px', fontWeight: '900', color: 'var(--text-primary)' }}>{telemetry?.totalRequests || 0}</span>
+                    <span style={{ display: 'block', fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>Captured cluster requests</span>
+                </div>
+
+                <div className="glass" style={{ padding: '20px', borderRadius: '16px', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-0)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase' }}>Active Connected Sessions</span>
+                        <Users size={18} color="#10b981" />
+                    </div>
+                    <span style={{ fontSize: '28px', fontWeight: '900', color: '#10b981' }}>{sessions.length} Online</span>
+                    <span style={{ display: 'block', fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>Authenticated + Guest tokens</span>
+                </div>
+
+                <div className="glass" style={{ padding: '20px', borderRadius: '16px', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-0)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase' }}>Data Ingest / Outflow</span>
+                        <ArrowUpRight size={18} color="var(--accent-cyan)" />
+                    </div>
+                    <span style={{ fontSize: '22px', fontWeight: '900', color: 'var(--text-primary)' }}>
+                        {formatBytes(telemetry?.bytesIn)} <span style={{ fontSize: '14px', color: 'var(--text-dim)' }}>/ {formatBytes(telemetry?.bytesOut)}</span>
+                    </span>
+                    <span style={{ display: 'block', fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>Inbound payload / Outbound data</span>
+                </div>
+
+                <div className="glass" style={{ padding: '20px', borderRadius: '16px', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-0)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase' }}>Error & Block Rate</span>
+                        <ShieldAlert size={18} color={telemetry?.errorRate > 5 ? '#f43f5e' : '#10b981'} />
+                    </div>
+                    <span style={{ fontSize: '28px', fontWeight: '900', color: telemetry?.errorRate > 5 ? '#f43f5e' : '#10b981' }}>
+                        {telemetry?.errorRate || '0.0'}%
+                    </span>
+                    <span style={{ display: 'block', fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>4xx client & 5xx server errors</span>
+                </div>
+            </div>
+
+            {/* Tab Navigation */}
+            <div style={{ display: 'flex', gap: '8px', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '8px' }}>
+                <button
+                    onClick={() => setActiveTab('stream')}
+                    style={{
+                        padding: '8px 16px',
+                        borderRadius: '10px',
+                        background: activeTab === 'stream' ? 'rgba(99, 102, 241, 0.12)' : 'transparent',
+                        border: `1px solid ${activeTab === 'stream' ? 'var(--primary)' : 'transparent'}`,
+                        color: activeTab === 'stream' ? 'var(--primary)' : 'var(--text-secondary)',
+                        fontWeight: '800',
+                        fontSize: '13px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px'
+                    }}
+                >
+                    <Terminal size={15} /> Live Request Feed ({filteredRequests.length})
+                </button>
+                <button
+                    onClick={() => setActiveTab('sessions')}
+                    style={{
+                        padding: '8px 16px',
+                        borderRadius: '10px',
+                        background: activeTab === 'sessions' ? 'rgba(99, 102, 241, 0.12)' : 'transparent',
+                        border: `1px solid ${activeTab === 'sessions' ? 'var(--primary)' : 'transparent'}`,
+                        color: activeTab === 'sessions' ? 'var(--primary)' : 'var(--text-secondary)',
+                        fontWeight: '800',
+                        fontSize: '13px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px'
+                    }}
+                >
+                    <Users size={15} /> Active Connected Clients ({sessions.length})
+                </button>
+            </div>
+
+            {/* TAB 1: LIVE REQUEST FEED */}
+            {activeTab === 'stream' && (
+                <div className="glass" style={{ padding: '20px', borderRadius: '18px', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-0)', boxShadow: 'var(--shadow-md)' }}>
+                    {/* Method Filter Filter Bar */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+                        <span style={{ fontSize: '13px', fontWeight: '800', color: 'var(--text-primary)' }}>Real-Time Stream Buffer</span>
+                        <div style={{ display: 'flex', gap: '6px' }}>
+                            {['ALL', 'GET', 'POST', 'PUT', 'DELETE'].map(m => (
+                                <button
+                                    key={m}
+                                    onClick={() => setFilterMethod(m)}
+                                    style={{
+                                        padding: '4px 10px',
+                                        borderRadius: '6px',
+                                        fontSize: '11px',
+                                        fontWeight: '800',
+                                        border: '1px solid var(--border-subtle)',
+                                        background: filterMethod === m ? 'var(--primary)' : 'var(--bg-surface-2)',
+                                        color: filterMethod === m ? '#ffffff' : 'var(--text-primary)',
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    {m}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {filteredRequests.length === 0 ? (
+                        <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-dim)', fontSize: '13px' }}>
+                            No requests matching filter in stream buffer.
+                        </div>
+                    ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '520px', overflowY: 'auto' }}>
+                            {filteredRequests.map((r) => {
+                                const isSuccess = r.statusCode >= 200 && r.statusCode < 300;
+                                const isRedirect = r.statusCode >= 300 && r.statusCode < 400;
+                                const isClientErr = r.statusCode >= 400 && r.statusCode < 500;
+                                const isServerErr = r.statusCode >= 500;
+
+                                const statusColor = isSuccess ? '#10b981' : isRedirect ? '#0ea5e9' : isClientErr ? '#f59e0b' : '#f43f5e';
+                                const methodColor = r.method === 'GET' ? 'var(--accent-cyan)' : r.method === 'POST' ? 'var(--primary)' : r.method === 'DELETE' ? '#f43f5e' : '#f59e0b';
+
+                                return (
+                                    <div
+                                        key={r.id}
+                                        style={{
+                                            padding: '10px 14px',
+                                            borderRadius: '10px',
+                                            background: 'var(--bg-surface-2)',
+                                            border: '1px solid var(--border-subtle)',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'space-between',
+                                            flexWrap: 'wrap',
+                                            gap: '12px'
+                                        }}
+                                    >
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
+                                            {/* HTTP Method Badge */}
+                                            <span style={{
+                                                fontSize: '10px',
+                                                fontWeight: '900',
+                                                padding: '2px 6px',
+                                                borderRadius: '4px',
+                                                background: 'var(--bg-surface-0)',
+                                                border: `1px solid ${methodColor}`,
+                                                color: methodColor,
+                                                fontFamily: 'var(--font-mono)'
+                                            }}>
+                                                {r.method}
+                                            </span>
+
+                                            {/* Status Code */}
+                                            <span style={{
+                                                fontSize: '11px',
+                                                fontWeight: '800',
+                                                color: statusColor,
+                                                fontFamily: 'var(--font-mono)'
+                                            }}>
+                                                {r.statusCode}
+                                            </span>
+
+                                            {/* Route Path */}
+                                            <span style={{
+                                                fontSize: '12.5px',
+                                                fontWeight: '700',
+                                                color: 'var(--text-primary)',
+                                                fontFamily: 'var(--font-mono)',
+                                                whiteSpace: 'nowrap',
+                                                overflow: 'hidden',
+                                                textOverflow: 'ellipsis',
+                                                maxWidth: '300px'
+                                            }}>
+                                                {r.path}
+                                            </span>
+                                        </div>
+
+                                        {/* Client & Geolocation */}
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '11.5px', color: 'var(--text-secondary)' }}>
+                                            <span style={{ fontFamily: 'var(--font-mono)', fontWeight: '700', color: 'var(--text-primary)' }}>
+                                                {r.ip}
+                                            </span>
+
+                                            <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                {r.client?.type === 'Mobile' ? <Smartphone size={13} /> : r.client?.type === 'Bot / API' ? <Bot size={13} /> : <Laptop size={13} />}
+                                                {r.client?.browser} ({r.client?.os})
+                                            </span>
+
+                                            <span style={{ color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
+                                                {r.durationMs}ms
+                                            </span>
+
+                                            <button
+                                                onClick={() => handleBanClientIp(r.ip)}
+                                                className="btn-danger"
+                                                title="Block IP in Perimeter Firewall"
+                                                style={{ padding: '3px 8px', borderRadius: '6px', fontSize: '10px', fontWeight: '800' }}
+                                            >
+                                                Ban IP
+                                            </button>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* TAB 2: ACTIVE SESSIONS & CONNECTED USERS */}
+            {activeTab === 'sessions' && (
+                <div className="glass" style={{ padding: '20px', borderRadius: '18px', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-0)', boxShadow: 'var(--shadow-md)' }}>
+                    <h3 style={{ margin: '0 0 16px 0', fontSize: '15px', fontWeight: '800', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <Users size={18} color="#10b981" /> Currently Active User & Guest Sessions ({sessions.length})
+                    </h3>
+
+                    {sessions.length === 0 ? (
+                        <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-dim)', fontSize: '13px' }}>
+                            No active sessions detected.
+                        </div>
+                    ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                            {sessions.map((s) => (
+                                <div
+                                    key={s.id}
+                                    style={{
+                                        padding: '14px 18px',
+                                        borderRadius: '12px',
+                                        background: 'var(--bg-surface-2)',
+                                        border: '1px solid var(--border-subtle)',
+                                        display: 'flex',
+                                        justifyContent: 'space-between',
+                                        alignItems: 'center',
+                                        flexWrap: 'wrap',
+                                        gap: '12px'
+                                    }}
+                                >
+                                    <div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                            <strong style={{ fontSize: '14px', color: 'var(--text-primary)' }}>{s.username}</strong>
+                                            <span style={{
+                                                fontSize: '10px',
+                                                padding: '2px 6px',
+                                                borderRadius: '4px',
+                                                background: s.role?.toLowerCase() === 'admin' ? 'rgba(99, 102, 241, 0.15)' : s.role === 'Agent' ? 'rgba(14, 165, 233, 0.15)' : 'var(--bg-surface-0)',
+                                                color: s.role?.toLowerCase() === 'admin' ? 'var(--primary)' : s.role === 'Agent' ? '#0ea5e9' : 'var(--text-secondary)',
+                                                fontWeight: '800',
+                                                textTransform: 'uppercase'
+                                            }}>
+                                                {s.role === 'Agent' ? '🤖 Cluster Agent' : s.role}
+                                            </span>
+                                            <span style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
+                                                IP: {s.ip}
+                                            </span>
+                                        </div>
+
+                                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                            <span>Device: {s.client?.browser} on {s.client?.os}</span>
+                                            <span>•</span>
+                                            <span>Last Action: <code style={{ color: 'var(--primary)' }}>{s.currentAction}</code></span>
+                                        </div>
+                                    </div>
+
+                                    <div style={{ display: 'flex', gap: '8px' }}>
+                                        <button
+                                            onClick={() => handleKillSession(s.id, s.username)}
+                                            className="btn-secondary"
+                                            style={{ padding: '6px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: '700', color: '#f43f5e' }}
+                                        >
+                                            Disconnect
+                                        </button>
+                                        <button
+                                            onClick={() => handleBanClientIp(s.ip)}
+                                            className="btn-danger"
+                                            style={{ padding: '6px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: '800' }}
+                                        >
+                                            Ban IP
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+};
+
+export default NetworkTrafficView;

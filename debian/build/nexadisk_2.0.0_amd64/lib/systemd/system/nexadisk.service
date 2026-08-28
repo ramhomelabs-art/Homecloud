@@ -1,0 +1,15 @@
+[Unit]
+Description=NexaDisk Core Enterprise Server
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+WorkingDirectory=/usr/local/bin/nexadisk
+ExecStart=/usr/bin/node index.js
+Restart=on-failure
+User=nexadisk
+Group=nexadisk
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target

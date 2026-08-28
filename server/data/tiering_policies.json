@@ -1,0 +1,24 @@
+[
+  {
+    "id": "pol_logs_archive",
+    "name": "Auto-Archive System Logs",
+    "pattern": "*.log,*.tmp",
+    "sourceTier": "HOT",
+    "targetTier": "COLD",
+    "daysThreshold": 7,
+    "enabled": true,
+    "action": "MIGRATE",
+    "description": "Move diagnostic and execution logs older than 7 days to Cloud Cold storage"
+  },
+  {
+    "id": "pol_backups_glacier",
+    "name": "Archive Old Backups to Cold Tier",
+    "pattern": "*.tar.gz,*.zip,*.bak",
+    "sourceTier": "WARM",
+    "targetTier": "COLD",
+    "daysThreshold": 30,
+    "enabled": true,
+    "action": "MIGRATE",
+    "description": "Move historical archives and database dumps to S3 / Cloudflare R2 Glacier"
+  }
+]

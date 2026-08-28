@@ -1,0 +1,22 @@
+# ==============================================================================
+#  NEXADISK V2 - CLUSTER AGENT DOCKERFILE
+# ==============================================================================
+
+FROM node:20-alpine
+WORKDIR /app
+
+RUN apk add --no-cache smartmontools ffmpeg openssl bash iproute2 sysstat
+
+COPY agent/package*.json ./agent/
+WORKDIR /app/agent
+RUN npm ci --only=production --silent
+
+COPY agent/ ./
+
+ENV NODE_ENV=production
+ENV AGENT_PORT=5001
+ENV MASTER_URL=http://nexadisk-master:5000
+
+EXPOSE 5001
+
+CMD ["node", "index.js"]

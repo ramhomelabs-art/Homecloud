@@ -1,0 +1,8 @@
+Package: nexadisk
+Version: 2.0.0
+Section: utils
+Priority: optional
+Architecture: amd64
+Maintainer: Ram Nagaraj <ram@example.com>
+Depends: nodejs (>= 16.0.0), postgresql (>= 12), cifs-utils
+Description: NexaDisk v2 Enterprise Server with real-time updates, AV scanning, and web UI.

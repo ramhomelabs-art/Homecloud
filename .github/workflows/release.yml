@@ -1,0 +1,97 @@
+name: Release Package & Publish
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version tag (e.g. v2.4.0)'
+        required: true
+        default: 'v2.4.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build & Package NexaDisk Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: 'client/package.json'
+
+      - name: Build React Frontend
+        working-directory: ./client
+        run: |
+          npm ci || npm install --legacy-peer-deps
+          npm run build
+
+      - name: Package Distribution Bundle
+        run: |
+          VERSION=${{ github.ref_name || github.event.inputs.version || 'v2.4.0' }}
+          mkdir -p release-staging/nexadisk-v2
+
+          # Copy core server files
+          cp -r server release-staging/nexadisk-v2/
+          rm -rf release-staging/nexadisk-v2/server/node_modules
+          rm -rf release-staging/nexadisk-v2/server/logs/*
+          rm -rf release-staging/nexadisk-v2/server/uploads/*
+
+          # Copy agent files
+          cp -r agent release-staging/nexadisk-v2/
+          rm -rf release-staging/nexadisk-v2/agent/node_modules
+
+          # Copy compiled frontend dist
+          mkdir -p release-staging/nexadisk-v2/client
+          cp -r client/dist release-staging/nexadisk-v2/client/
+          cp client/package.json release-staging/nexadisk-v2/client/
+
+          # Copy root configs & installers
+          cp docker-compose.yml release-staging/nexadisk-v2/ 2>/dev/null || true
+          cp Dockerfile release-staging/nexadisk-v2/ 2>/dev/null || true
+          cp .env.example release-staging/nexadisk-v2/ 2>/dev/null || true
+          cp -r debian release-staging/nexadisk-v2/ 2>/dev/null || true
+          cp -r nginx release-staging/nexadisk-v2/ 2>/dev/null || true
+
+          # Create release manifest
+          cat <<EOF > release-staging/nexadisk-v2/release-manifest.json
+          {
+            "version": "${VERSION}",
+            "releaseDate": "$(date -u +%Y-%m-%d)",
+            "builtAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "commit": "${GITHUB_SHA}"
+          }
+          EOF
+
+          # Create Zip and Tarball archives
+          cd release-staging
+          zip -r ../nexadisk-${VERSION}.zip nexadisk-v2
+          tar -czvf ../nexadisk-${VERSION}.tar.gz nexadisk-v2
+          cd ..
+
+          # Generate SHA-256 Checksums
+          sha256sum nexadisk-${VERSION}.zip > checksums.sha256
+          sha256sum nexadisk-${VERSION}.tar.gz >> checksums.sha256
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "NexaDisk ${{ github.ref_name || github.event.inputs.version }}"
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            nexadisk-*.zip
+            nexadisk-*.tar.gz
+            checksums.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
