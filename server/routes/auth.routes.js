@@ -490,7 +490,7 @@ router.post('/settings/security-question', authenticateToken, async (req, res) =
 
 // 🔒 GET /api/v1/auth/verify (Confirm active admin/user session)
 router.get('/verify', authenticateToken, (req, res) => {
-    res.json({ valid: true, username: req.user.username, role: req.user.role });
+    res.json({ valid: true, id: req.user.id, username: req.user.username, role: req.user.role });
 });
 
 // 📥 POST /api/v1/auth/download-token

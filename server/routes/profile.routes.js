@@ -76,6 +76,12 @@ router.get('/avatar/:userId', async (req, res) => {
         const { userId } = req.params;
         const size = req.query.size || 'original'; // original, 256, 128, 64
         
+        // Validate UUID format to prevent database crashes
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!uuidRegex.test(userId)) {
+            return res.status(404).json({ error: 'Invalid user ID format' });
+        }
+
         const profile = await profileService.getUserProfile(userId);
         if (!profile || !profile.avatar_path) {
             // Return 404, frontend should show initials fallback

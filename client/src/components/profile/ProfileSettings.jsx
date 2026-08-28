@@ -113,11 +113,11 @@ const ProfileSettings = ({ onProfileUpdate, embedded = false }) => {
                 setMfaEnabled(Boolean(res.data.mfa_enabled));
             }
         } catch (err) {
-            // Fallback: load basic user info from verify endpoint if profile record is pending
             try {
                 const verifyRes = await axios.get('/api/v1/auth/verify');
                 if (verifyRes.data) {
                     const fallbackUser = {
+                        id: verifyRes.data.id,
                         username: verifyRes.data.username || 'Admin',
                         role: verifyRes.data.role || 'Admin',
                         display_name: verifyRes.data.username || 'Admin'
