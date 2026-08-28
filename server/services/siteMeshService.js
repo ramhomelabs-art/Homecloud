@@ -115,15 +115,18 @@ class SiteMeshService {
         };
     }
 
-    // Generate a secure one-time pairing token for secondary sites
-    generatePairingToken(siteName, location) {
+    // Generate a secure one-time pairing token for secondary sites to join
+    generatePairingToken(siteName = 'Secondary-Node', location = 'Remote Site', masterInfo = null) {
         const token = 'nms_' + crypto.randomBytes(24).toString('hex');
         const siteId = 'site_' + crypto.randomBytes(8).toString('hex');
         return {
             siteId,
-            siteName,
+            siteName: siteName || 'Secondary-Node',
             location: location || 'Remote Datacenter',
             pairingToken: token,
+            primaryHubName: masterInfo?.name || `${os.hostname()} (Primary Master Hub)`,
+            primaryHubIp: masterInfo?.ip || '127.0.0.1',
+            primaryHubLocation: 'Primary Datacenter / On-Premise Host',
             expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 hours
         };
     }

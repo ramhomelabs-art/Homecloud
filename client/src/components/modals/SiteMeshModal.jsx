@@ -113,22 +113,18 @@ const SiteMeshModal = ({ show, onClose, showToast }) => {
     };
 
     const handleGeneratePairingToken = async () => {
-        if (!newSiteName) {
-            if (showToast) showToast('Please enter a secondary site name', 'error');
-            return;
-        }
         const token = localStorage.getItem('token') || '';
         try {
             const res = await axios.post(`${API_BASE}/v1/sitemesh/token`, {
-                siteName: newSiteName,
+                siteName: newSiteName || 'Secondary-Node',
                 location: newSiteLocation || 'Remote Datacenter'
             }, { headers: { Authorization: `Bearer ${token}` } });
 
             setGeneratedToken(res.data);
             const hostUrl = window.location.origin;
-            const cmd = `curl -fsSL ${hostUrl}/api/v1/sitemesh/join-script?token=${res.data.pairingToken}&siteName=${encodeURIComponent(newSiteName)} | sudo bash`;
+            const cmd = `curl -fsSL ${hostUrl}/api/v1/sitemesh/join-script?token=${res.data.pairingToken} | sudo bash`;
             setJoinCommand(cmd);
-            if (showToast) showToast('Cluster join key generated!', 'success');
+            if (showToast) showToast('Cluster join information generated!', 'success');
             fetchData();
         } catch (e) {
             if (showToast) showToast('Failed to generate token: ' + (e.response?.data?.error || e.message), 'error');
@@ -646,59 +642,73 @@ const SiteMeshModal = ({ show, onClose, showToast }) => {
                                         </div>
                                     </div>
 
-                                    {/* Real Physical Server Join Key Generator */}
-                                    <div style={{ background: 'var(--bg-surface-1)', padding: '24px', borderRadius: '18px', border: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                                    {/* Primary Server Identity & Cluster Join Info Generator */}
+                                    <div style={{ background: 'var(--bg-surface-1)', padding: '24px', borderRadius: '18px', border: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', gap: '18px' }}>
                                         <div>
                                             <h4 style={{ margin: 0, fontSize: '16px', fontWeight: '900', color: 'var(--text-primary)' }}>
-                                                Generate Cluster Join Key for Secondary Server
+                                                Primary Cluster Hub Information
                                             </h4>
                                             <p style={{ margin: '4px 0 0', fontSize: '12.5px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
-                                                Generate a cryptographically signed one-time token. You can either paste this token on your secondary server's NexaDisk UI or run the automated bash script on Linux/Proxmox.
+                                                This machine is acting as your Primary Cluster Hub. Click below to generate the cryptographic cluster join token to connect any secondary server, PC, or Proxmox VE node.
                                             </p>
                                         </div>
 
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                                            <label style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)' }}>SECONDARY SITE NAME</label>
-                                            <input
-                                                type="text"
-                                                className="form-control"
-                                                placeholder="e.g. PC2-Office-Server, Proxmox-Node-02"
-                                                value={newSiteName}
-                                                onChange={(e) => setNewSiteName(e.target.value)}
-                                                style={{ padding: '11px 14px', borderRadius: '10px', fontSize: '13px', background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
-                                            />
+                                        {/* Primary Server Specs Bar */}
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', padding: '14px', background: 'var(--bg-surface-0)', borderRadius: '14px', border: '1px solid var(--border-subtle)' }}>
+                                            <div>
+                                                <div style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-muted)' }}>PRIMARY HUB HOSTNAME</div>
+                                                <div style={{ fontSize: '13.5px', fontWeight: '900', color: 'var(--text-primary)', marginTop: '2px' }}>
+                                                    {masterInfo?.name || 'Local Master Host'}
+                                                </div>
+                                            </div>
+
+                                            <div>
+                                                <div style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-muted)' }}>PRIMARY HUB URL / ENDPOINT</div>
+                                                <div style={{ fontSize: '13px', fontWeight: '900', color: 'var(--accent-cyan)', fontFamily: 'var(--font-mono)', marginTop: '2px' }}>
+                                                    {window.location.origin}
+                                                </div>
+                                            </div>
+
+                                            <div>
+                                                <div style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-muted)' }}>DATACENTER FACILITY</div>
+                                                <div style={{ fontSize: '13.5px', fontWeight: '900', color: 'var(--text-primary)', marginTop: '2px' }}>
+                                                    {masterInfo?.location || 'Primary On-Premise Host'}
+                                                </div>
+                                            </div>
                                         </div>
 
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                                            <label style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)' }}>PHYSICAL / CLOUD LOCATION</label>
-                                            <input
-                                                type="text"
-                                                className="form-control"
-                                                placeholder="e.g. Living Room Lab, Dallas DC-1"
-                                                value={newSiteLocation}
-                                                onChange={(e) => setNewSiteLocation(e.target.value)}
-                                                style={{ padding: '11px 14px', borderRadius: '10px', fontSize: '13px', background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
-                                            />
-                                        </div>
-
-                                        <button className="btn-primary" onClick={handleGeneratePairingToken} style={{ padding: '11px 18px', fontSize: '13px', fontWeight: '800', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-                                            <Plus size={16} /> Generate Pairing Key & Join Command
+                                        <button
+                                            className="btn-primary"
+                                            onClick={handleGeneratePairingToken}
+                                            style={{
+                                                padding: '12px 20px',
+                                                fontSize: '13.5px',
+                                                fontWeight: '900',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                gap: '8px',
+                                                background: 'linear-gradient(135deg, #6366f1, #0ea5e9)',
+                                                boxShadow: '0 4px 16px rgba(99, 102, 241, 0.35)'
+                                            }}
+                                        >
+                                            <Sparkles size={16} /> ✨ Generate Cluster Join Token & Pairing Information
                                         </button>
 
                                         {generatedToken && (
-                                            <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '12px', padding: '16px', background: 'var(--bg-surface-0)', borderRadius: '14px', border: '1px solid var(--border-subtle)' }}>
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', padding: '18px', background: 'var(--bg-surface-0)', borderRadius: '16px', border: '1px solid rgba(99, 102, 241, 0.35)' }}>
                                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                                     <span style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)' }}>PRIMARY HUB URL:</span>
                                                     <span style={{ fontSize: '13px', fontWeight: '800', color: 'var(--accent-cyan)', fontFamily: 'var(--font-mono)' }}>{window.location.origin}</span>
                                                 </div>
 
                                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                                    <span style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)' }}>JOIN TOKEN:</span>
+                                                    <span style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)' }}>CLUSTER PAIRING TOKEN:</span>
                                                     <span style={{ fontSize: '13px', fontWeight: '800', color: '#10b981', fontFamily: 'var(--font-mono)' }}>{generatedToken.pairingToken}</span>
                                                 </div>
 
-                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '6px' }}>
-                                                    <label style={{ fontSize: '11.5px', fontWeight: '800', color: 'var(--text-muted)' }}>OR EXECUTE 1-LINE BASH ON SECONDARY LINUX / PROXMOX SHELL:</label>
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '4px' }}>
+                                                    <label style={{ fontSize: '11.5px', fontWeight: '800', color: 'var(--text-muted)' }}>AUTOMATED 1-LINE BASH SCRIPT (FOR REMOTE LINUX / PROXMOX SHELL):</label>
                                                     <div style={{ display: 'flex', gap: '8px' }}>
                                                         <input
                                                             type="text"

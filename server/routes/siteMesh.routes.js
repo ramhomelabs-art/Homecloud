@@ -7,10 +7,9 @@ const logger = require('../utils/logger');
 // Generate Pairing Token for a new remote site
 router.post('/token', authenticateToken, requireRole(['Admin']), async (req, res) => {
     try {
-        const { siteName, location } = req.body;
-        if (!siteName) return res.status(400).json({ error: 'Site name is required' });
-
-        const tokenData = siteMeshService.generatePairingToken(siteName, location);
+        const { siteName, location } = req.body || {};
+        const masterInfo = await siteMeshService.getMasterNodeInfo();
+        const tokenData = siteMeshService.generatePairingToken(siteName || 'Secondary-Node', location, masterInfo);
         res.json(tokenData);
     } catch (err) {
         logger.error(`[SiteMesh Routes] Failed to generate token: ${err.message}`);
