@@ -762,9 +762,11 @@ function App() {
     };
 
     const fetchSettings = async () => {
+        const currentToken = localStorage.getItem('token') || token;
+        if (!currentToken) return;
         try {
-            const res = await axios.get(`${API_BASE}/settings`, {
-                headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+            const res = await axios.get('/api/v1/auth/settings', {
+                headers: { Authorization: `Bearer ${currentToken}` }
             });
             setSettings(res.data);
             if (res.data.appName) setAppName(res.data.appName);
@@ -776,9 +778,11 @@ function App() {
     };
 
     const updateSetting = async (key, value) => {
+        const currentToken = localStorage.getItem('token') || token;
+        if (!currentToken) return;
         try {
-            await axios.post(`${API_BASE}/settings/update`, { key, value }, {
-                headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+            await axios.post('/api/v1/auth/settings/update', { key, value }, {
+                headers: { Authorization: `Bearer ${currentToken}` }
             });
             fetchSettings();
             showToast('Settings saved', 'success');

@@ -716,10 +716,10 @@ const InitialSetupWizard = ({ onSetupComplete, onRedirectToLogin, showToast, onC
 
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%', maxWidth: '480px', marginTop: '6px' }}>
                             <button
-                                onClick={handleFinalLaunch}
+                                onClick={() => onRedirectToLogin ? onRedirectToLogin(adminUsername) : onSetupComplete?.(provisionResult?.token, provisionResult?.username, provisionResult?.role)}
                                 style={{
                                     width: '100%',
-                                    padding: '15px 28px',
+                                    padding: '16px 28px',
                                     borderRadius: '14px',
                                     background: 'linear-gradient(135deg, #10b981, #0ea5e9)',
                                     color: '#ffffff',
@@ -734,29 +734,7 @@ const InitialSetupWizard = ({ onSetupComplete, onRedirectToLogin, showToast, onC
                                     boxShadow: '0 8px 24px rgba(16, 185, 129, 0.4)'
                                 }}
                             >
-                                🚀 Launch NexaDisk Dashboard <ArrowRight size={18} />
-                            </button>
-
-                            <button
-                                onClick={() => onRedirectToLogin ? onRedirectToLogin(adminUsername) : handleFinalLaunch()}
-                                style={{
-                                    width: '100%',
-                                    padding: '12px 24px',
-                                    borderRadius: '14px',
-                                    background: 'rgba(255, 255, 255, 0.06)',
-                                    color: '#94a3b8',
-                                    border: '1px solid rgba(255, 255, 255, 0.1)',
-                                    fontSize: '13.5px',
-                                    fontWeight: '700',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    gap: '8px',
-                                    cursor: 'pointer',
-                                    transition: '0.2s'
-                                }}
-                            >
-                                <Lock size={15} /> Proceed to Login Screen
+                                <Lock size={18} /> Proceed to Login <ArrowRight size={18} />
                             </button>
                         </div>
                     </div>
