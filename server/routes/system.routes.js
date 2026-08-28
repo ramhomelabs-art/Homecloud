@@ -70,11 +70,13 @@ router.get('/settings', authenticateToken, async (req, res) => {
         const result = await db.query('SELECT key, value FROM app_settings');
         const settings = {};
         result.rows.forEach(r => { settings[r.key] = r.value; });
+        settings.platform = process.platform;
         res.json(settings);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
+
 
 // ── POST /api/v1/system/update ──────────────────────────────────────────────
 router.post('/update', authenticateToken, requireRole(['Admin']), (req, res) => {

@@ -104,7 +104,7 @@ class NetworkService {
      */
     async checkSharesStatus() {
         const checkDiskSpace = require('check-disk-space').default;
-        const result = await db.query('SELECT id, path, label, username, type FROM network_shares');
+        const result = await db.query('SELECT id, path, label, username, password, type FROM network_shares');
         const list = [];
 
         for (const row of result.rows) {
@@ -113,23 +113,68 @@ class NetworkService {
             let free = 0;
             let used = 0;
 
-            try {
-                // Perform a simple and quick directory read or access test with timeout to determine connection
-                const checkPromise = fs.promises.readdir(row.path);
-                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 2000));
-                await Promise.race([checkPromise, timeoutPromise]);
-                online = true;
+            const isSmb = row.path && (row.path.startsWith('\\\\') || row.path.startsWith('//') || row.path.startsWith('smb://') || (row.type && row.type.toUpperCase() === 'SMB'));
 
-                // Query storage size parameters if connected successfully
-                const diskPromise = checkDiskSpace(row.path);
-                const diskTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Disk Timeout')), 3000));
-                const diskInfo = await Promise.race([diskPromise, diskTimeout]);
-                
-                size = diskInfo.size || 0;
-                free = diskInfo.free || 0;
-                used = size - free;
-            } catch (err) {
-                online = false;
+            if (isSmb && process.platform !== 'win32') {
+                try {
+                    let pass = '';
+                    if (row.password) {
+                        try { pass = cryptoHelper.decrypt(row.password); } catch (e) { pass = row.password; }
+                    }
+
+                    let clean = (row.path || '').trim().replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
+                    const parts = clean.split('/');
+                    const host = parts[0];
+                    const shareName = parts[1] || '';
+                    const uncShare = `//${host}/${shareName}`;
+
+                    const env = { ...process.env, PASSWD: pass || '' };
+                    const safeUser = (row.username || '').replace(/[;&|`$<>\\"']/g, '');
+                    const safeShare = uncShare.replace(/[;&|`$<>\\"']/g, '');
+
+                    const cmd = safeUser
+                        ? `smbclient "${safeShare}" -U "${safeUser}" -t 5 -c 'du'`
+                        : `smbclient "${safeShare}" -N -t 5 -c 'du'`;
+
+                    const duOutput = await new Promise((resolve, reject) => {
+                        exec(cmd, { env, timeout: 6000 }, (err, stdout, stderr) => {
+                            if (err) return reject(err);
+                            resolve(stdout || '');
+                        });
+                    });
+
+                    const match = duOutput.match(/(\d+)\s+blocks\s+of\s+size\s+(\d+)\.\s+(\d+)\s+blocks\s+available/i);
+                    if (match) {
+                        const totalBlocks = parseInt(match[1], 10);
+                        const blockSize = parseInt(match[2], 10);
+                        const freeBlocks = parseInt(match[3], 10);
+                        size = totalBlocks * blockSize;
+                        free = freeBlocks * blockSize;
+                        used = size - free;
+                    }
+                    online = true;
+                } catch (err) {
+                    online = false;
+                }
+            } else {
+                try {
+                    if (fs.existsSync(row.path)) {
+                        const checkPromise = fs.promises.readdir(row.path);
+                        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 2000));
+                        await Promise.race([checkPromise, timeoutPromise]);
+                        online = true;
+
+                        const diskPromise = checkDiskSpace(row.path);
+                        const diskTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Disk Timeout')), 3000));
+                        const diskInfo = await Promise.race([diskPromise, diskTimeout]);
+                        
+                        size = diskInfo.size || 0;
+                        free = diskInfo.free || 0;
+                        used = size - free;
+                    }
+                } catch (err) {
+                    online = false;
+                }
             }
 
             list.push({
@@ -142,6 +187,7 @@ class NetworkService {
         }
         return list;
     }
+
 
     /**
      * Inner helper: executes OS-specific mount operations

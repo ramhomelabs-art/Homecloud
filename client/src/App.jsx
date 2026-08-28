@@ -653,7 +653,7 @@ function App() {
     const [inspectorOpen, setInspectorOpen] = useState(false);
     const [inspectorMetadata, setInspectorMetadata] = useState(null);
     const [loadingMetadata, setLoadingMetadata] = useState(false);
-    const [serverPlatform, setServerPlatform] = useState('win32'); // Default to win32, will be updated by settings
+    const [serverPlatform, setServerPlatform] = useState('linux'); // Default to linux, will be synced from server
 
     const navigateTo = (newPath, newMode, newDevice = null, skipHistory = false) => {
         if (!skipHistory) {
