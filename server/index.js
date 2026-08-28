@@ -250,25 +250,41 @@ app.use((req, res, next) => {
     next();
 });
 
+const isPrivateIp = (ip) => {
+    if (!ip) return false;
+    const normalized = ip.replace(/^::ffff:/, '');
+    if (normalized === '127.0.0.1' || normalized === '::1' || normalized === 'localhost') return true;
+    if (normalized.startsWith('10.')) return true;
+    if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(normalized)) return true;
+    if (normalized.startsWith('192.168.')) return true;
+    return false;
+};
+
 // General API limiter — balanced for dashboard polling while blocking DoS
 const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 2500,                 // Supports multi-device dashboard polling and telemetry
+    max: process.env.RATE_LIMIT_MAX ? parseInt(process.env.RATE_LIMIT_MAX) : 10000, // Increased default to support multi-tab polling
     message: { error: 'Too many requests from this IP, please try again later.' },
     standardHeaders: true,
     legacyHeaders: false,
-    skip: (req) => req.ip === '127.0.0.1' || req.ip === '::1' || req.ip === '::ffff:127.0.0.1'
+    skip: (req) => {
+        if (process.env.DISABLE_RATE_LIMITER === 'true') return true;
+        return isPrivateIp(req.ip);
+    }
 });
 app.use('/api/', apiLimiter);
 
 // Sensitive-operations limiter — for share creation, user management, admin ops
 const sensitiveOpsLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 100,
+    max: 500, // Increased threshold for multiple parallel operations
     message: { error: 'Too many sensitive operations from this IP. Please slow down.' },
     standardHeaders: true,
     legacyHeaders: false,
-    skip: (req) => req.ip === '127.0.0.1' || req.ip === '::1' || req.ip === '::ffff:127.0.0.1'
+    skip: (req) => {
+        if (process.env.DISABLE_RATE_LIMITER === 'true') return true;
+        return isPrivateIp(req.ip);
+    }
 });
 app.use('/api/v1/shares', sensitiveOpsLimiter);
 app.use('/api/v1/users', sensitiveOpsLimiter);
@@ -276,11 +292,15 @@ app.use('/api/v1/users', sensitiveOpsLimiter);
 // Strict rate limit for login and OTP endpoints to prevent brute-force
 const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 10,
+    max: 30, // Balanced for multiple tabs reloading
     message: { error: 'Too many authentication attempts. Please try again in 15 minutes.' },
     standardHeaders: true,
     legacyHeaders: false,
     skipSuccessfulRequests: true, // Only count failed attempts
+    skip: (req) => {
+        if (process.env.DISABLE_RATE_LIMITER === 'true') return true;
+        return isPrivateIp(req.ip);
+    }
 });
 app.use('/api/v1/auth/login', authLimiter);
 app.use('/api/share/auth', authLimiter);
