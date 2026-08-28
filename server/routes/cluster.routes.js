@@ -453,13 +453,67 @@ storageRouter.get('/devices', authenticateToken, async (req, res) => {
         }
 
         const totalSize = drives.reduce((acc, d) => acc + (d.size || 0), 0);
-        res.json([{
-            name: os.hostname(),
+        const hostNode = {
+            id: 'master_host',
+            name: `${os.hostname()} (Primary Master)`,
             type: 'host',
             size: totalSize,
             children: drives,
             status: 'online'
-        }]);
+        };
+
+        const resultNodes = [hostNode];
+
+        // Query registered active cluster sites
+        try {
+            const sitesRes = await db.query('SELECT * FROM cluster_sites ORDER BY created_at DESC');
+            const now = Date.now();
+            for (const site of sitesRes.rows) {
+                const details = site.details || {};
+                const storagePools = details.storagePools || [];
+                const lastHeartbeatTime = site.last_heartbeat ? new Date(site.last_heartbeat).getTime() : 0;
+                const isOnline = (now - lastHeartbeatTime) <= 12000 && site.status === 'connected';
+
+                const remoteDrives = storagePools.map(p => ({
+                    name: p.name,
+                    label: `${p.name} (${p.type || 'ZFS/Ceph'})`,
+                    size: Number(p.totalBytes || site.storage_capacity_bytes || 0),
+                    used: Number(p.usedBytes || site.storage_used_bytes || 0),
+                    free: Math.max(0, Number(p.totalBytes || 0) - Number(p.usedBytes || 0)),
+                    mountpoint: `/sitemesh/${site.id}/${p.name}`,
+                    type: 'cluster_pool',
+                    siteId: site.id,
+                    siteName: site.name,
+                    status: isOnline ? 'online' : 'offline'
+                }));
+
+                resultNodes.push({
+                    id: site.id,
+                    name: `🌐 ${site.name}`,
+                    label: `🌐 ${site.name}`,
+                    type: 'Cluster Site',
+                    size: Number(site.storage_capacity_bytes || 0),
+                    children: remoteDrives.length > 0 ? remoteDrives : [{
+                        name: 'cluster-storage-root',
+                        label: 'Cluster Storage Pool',
+                        size: Number(site.storage_capacity_bytes || 0),
+                        used: Number(site.storage_used_bytes || 0),
+                        free: Math.max(0, Number(site.storage_capacity_bytes || 0) - Number(site.storage_used_bytes || 0)),
+                        mountpoint: `/sitemesh/${site.id}/`,
+                        type: 'cluster_pool',
+                        siteId: site.id,
+                        siteName: site.name,
+                        status: isOnline ? 'online' : 'offline'
+                    }],
+                    status: isOnline ? 'online' : 'offline',
+                    location: site.location
+                });
+            }
+        } catch (sErr) {
+            logger.warn(`[Cluster/Storage] Failed to query cluster sites for devices list: ${sErr.message}`);
+        }
+
+        res.json(resultNodes);
     } catch (err) {
         logger.error(`[Cluster/Storage] Devices fetch error: ${err.message}`);
         res.status(500).json({ error: err.message });

@@ -44,6 +44,37 @@ router.post('/pair', async (req, res) => {
     }
 });
 
+// Periodic Heartbeat Ping from Connected Secondary Site or Simulator
+router.post('/heartbeat', async (req, res) => {
+    try {
+        const { siteId, latencyMs, storageCapacityBytes, storageUsedBytes } = req.body;
+        if (!siteId) return res.status(400).json({ error: 'siteId is required' });
+
+        const result = await siteMeshService.recordHeartbeat(siteId, {
+            latencyMs: Number(latencyMs) || 15,
+            storageCapacityBytes: Number(storageCapacityBytes),
+            storageUsedBytes: Number(storageUsedBytes)
+        });
+
+        res.json(result || { status: 'acknowledged' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Explicit Disconnect / Shutdown from Secondary Site or Simulator
+router.post('/disconnect', async (req, res) => {
+    try {
+        const { siteId, reason } = req.body;
+        if (!siteId) return res.status(400).json({ error: 'siteId is required' });
+
+        const result = await siteMeshService.disconnectSite(siteId, reason || 'Node Shutdown');
+        res.json(result || { status: 'disconnected' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // Provision Instant Demo Proxmox VE Site for Demonstration
 router.post('/demo-site', authenticateToken, requireRole(['Admin']), async (req, res) => {
     try {

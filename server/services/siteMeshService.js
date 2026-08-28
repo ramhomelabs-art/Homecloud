@@ -8,6 +8,38 @@ const checkDiskSpace = require('check-disk-space').default || require('check-dis
 class SiteMeshService {
     constructor() {
         this.activeTunnels = new Map(); // siteId -> { socket, lastPing, latency }
+        this.startHeartbeatWatchdog();
+    }
+
+    startHeartbeatWatchdog() {
+        if (this._watchdogInterval) return;
+        this._watchdogInterval = setInterval(() => this.checkSitesHeartbeat(), 4000);
+        logger.info('[SiteMesh] Started real-time site mesh heartbeat & offline watchdog (4s interval)');
+    }
+
+    async checkSitesHeartbeat() {
+        try {
+            const now = Date.now();
+            const res = await db.query('SELECT * FROM cluster_sites');
+            for (const site of res.rows) {
+                const lastHeartbeatTime = site.last_heartbeat ? new Date(site.last_heartbeat).getTime() : 0;
+                const elapsedMs = now - lastHeartbeatTime;
+                
+                // Missed heartbeat threshold: 12 seconds
+                if (elapsedMs > 12000 && site.status === 'connected') {
+                    await db.query("UPDATE cluster_sites SET status = 'offline' WHERE id = $1", [site.id]);
+                    logger.warn(`[SiteMesh Watchdog] Site "${site.name}" missed heartbeats (${Math.round(elapsedMs / 1000)}s elapsed). Marked OFFLINE.`);
+                    const notificationService = require('./notificationService');
+                    notificationService.sendInAppAlert(
+                        'Cluster Site Offline',
+                        `Secondary site "${site.name}" (${site.location || 'Remote'}) missed heartbeat ping. mTLS tunnel disconnected.`,
+                        'warning'
+                    );
+                }
+            }
+        } catch (e) {
+            // DB or table might be starting up
+        }
     }
 
     // Get live Master primary node telemetry and specs
@@ -286,9 +318,25 @@ class SiteMeshService {
             db.query('SELECT * FROM cluster_sites ORDER BY created_at DESC'),
             this.getMasterNodeInfo()
         ]);
+
+        const now = Date.now();
+        const formattedSites = sitesRes.rows.map(site => {
+            const lastHeartbeatTime = site.last_heartbeat ? new Date(site.last_heartbeat).getTime() : 0;
+            const elapsedMs = now - lastHeartbeatTime;
+            // Site is only considered online if heartbeat was received within last 12 seconds
+            const isOnline = elapsedMs <= 12000 && site.status === 'connected';
+
+            return {
+                ...site,
+                status: isOnline ? 'connected' : 'offline',
+                latency_ms: isOnline ? (site.latency_ms || 18) : null,
+                lastSeenSecondsAgo: Math.round(elapsedMs / 1000)
+            };
+        });
+
         return {
             master,
-            sites: sitesRes.rows
+            sites: formattedSites
         };
     }
 
@@ -303,6 +351,12 @@ class SiteMeshService {
 
     // Record site heartbeat & update telemetry
     async recordHeartbeat(siteId, { latencyMs = 15, storageCapacityBytes, storageUsedBytes } = {}) {
+        const existing = await db.query('SELECT * FROM cluster_sites WHERE id = $1', [siteId]);
+        if (existing.rows.length === 0) return null;
+        
+        const site = existing.rows[0];
+        const wasOffline = site.status !== 'connected';
+
         await db.query(`
             UPDATE cluster_sites
             SET status = 'connected',
@@ -312,6 +366,35 @@ class SiteMeshService {
                 last_heartbeat = CURRENT_TIMESTAMP
             WHERE id = $1
         `, [siteId, latencyMs, storageCapacityBytes, storageUsedBytes]);
+
+        if (wasOffline) {
+            logger.info(`[SiteMesh] Site "${site.name}" reconnected to cluster mesh.`);
+            const notificationService = require('./notificationService');
+            notificationService.sendInAppAlert(
+                'Cluster Site Reconnected',
+                `Secondary site "${site.name}" successfully re-established mTLS reverse tunnel.`,
+                'info'
+            );
+        }
+
+        return { success: true, status: 'connected' };
+    }
+
+    // Explicit site disconnect
+    async disconnectSite(siteId, reason = 'Client closed connection') {
+        const existing = await db.query('SELECT * FROM cluster_sites WHERE id = $1', [siteId]);
+        if (existing.rows.length === 0) return null;
+        const site = existing.rows[0];
+
+        await db.query("UPDATE cluster_sites SET status = 'offline' WHERE id = $1", [siteId]);
+        logger.info(`[SiteMesh] Site "${site.name}" disconnected (${reason}).`);
+        const notificationService = require('./notificationService');
+        notificationService.sendInAppAlert(
+            'Cluster Site Disconnected',
+            `Secondary site "${site.name}" closed its session (${reason}).`,
+            'warning'
+        );
+        return { success: true, status: 'offline' };
     }
 
     // List Cross-Site Sync Jobs

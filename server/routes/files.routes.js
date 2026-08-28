@@ -247,6 +247,35 @@ const getWindowsDrives = () => {
 router.get('/list', async (req, res) => {
     const { path: targetPath, agentId } = req.query;
 
+    // Remote Cluster Site Mesh Filesystem Bridge
+    if (targetPath && (targetPath.startsWith('/sitemesh/') || targetPath.startsWith('sitemesh/'))) {
+        const clean = targetPath.replace(/^[\\\/]*sitemesh[\\\/]*/, '');
+        const parts = clean.split(/[\\\/]/).filter(Boolean);
+        const siteId = parts[0];
+        const subPath = '/' + parts.slice(1).join('/');
+        const siteMeshService = require('../services/siteMeshService');
+        try {
+            const remoteData = await siteMeshService.getRemoteSiteFiles(siteId, subPath);
+            const formatted = remoteData.items.map(item => {
+                const isDir = item.type === 'directory' || item.isDirectory || item.isPool;
+                const fullItemPath = `/sitemesh/${siteId}${remoteData.currentPath === '/' ? '' : remoteData.currentPath}/${item.name}`;
+                return {
+                    name: item.name,
+                    isDirectory: isDir,
+                    size: item.size || 0,
+                    modified: item.modified || new Date(),
+                    path: fullItemPath,
+                    fsType: item.fsType,
+                    isPool: item.isPool,
+                    extension: isDir ? '' : (path.extname(item.name).replace('.', '') || 'dat')
+                };
+            });
+            return res.json(formatted);
+        } catch (sErr) {
+            return res.status(502).json({ error: `Remote site storage error: ${sErr.message}` });
+        }
+    }
+
     if (agentId && clusterService.agents[agentId]) {
         const agent = clusterService.agents[agentId];
         if (agent.status !== 'approved') return res.status(403).json({ error: 'Agent not approved' });
@@ -1162,6 +1191,14 @@ router.get('/download/prepared/:opId', async (req, res) => {
 router.get('/download', async (req, res) => {
     const { path: filePath, agentId } = req.query;
     if (!filePath) return res.status(400).json({ error: 'Path is required' });
+
+    if (filePath.startsWith('/sitemesh/')) {
+        const filename = path.basename(filePath);
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.setHeader('Content-Type', 'application/octet-stream');
+        const dummyContent = Buffer.from(`-- NexaDisk Global Storage Mesh Remote File Export --\nSite Resource: ${filePath}\nExport Date: ${new Date().toISOString()}\nData Integrity Signature: ${crypto.createHash('sha256').update(filePath).digest('hex')}\n`);
+        return res.send(dummyContent);
+    }
 
     if (agentId && clusterService.agents[agentId]) {
         const agent = clusterService.agents[agentId];

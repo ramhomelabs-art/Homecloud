@@ -476,16 +476,25 @@
                         throw new Error(data.error || 'Handshake rejected by Primary Hub');
                     }
 
+                    activeSiteId = data.siteId;
+                    activeHubUrl = hubUrl;
+
                     appendLog(`✅ [Tunnel Established] ${data.message}`, 'log-success');
                     appendLog(`✨ [Site ID Registered] ${data.siteId}`, 'log-success');
                     appendLog(`🎉 [Live] Outbound reverse mTLS tunnel active. Transmitting continuous heartbeat telemetry...`, 'log-success');
 
                     statusInd.className = 'status-pill status-connected';
-                    statusInd.textContent = '🟢 PAIRED & ONLINE';
+                    statusInd.textContent = '🟢 PAIRED & ONLINE (HEARTBEAT 3.5s)';
                     tunnelStatus.textContent = 'mTLS Tunnel: CONNECTED (18.2ms)';
                     tunnelStatus.style.color = '#10b981';
 
-                    joinBtn.textContent = '✅ Server Successfully Paired!';
+                    joinBtn.textContent = '✅ Server Connected Live! (Click to Disconnect)';
+                    joinBtn.disabled = false;
+                    joinBtn.onclick = runSimulatorDisconnect;
+                    joinBtn.style.background = 'linear-gradient(135deg, #f43f5e, #e11d48)';
+
+                    // Start continuous real-time heartbeat
+                    startHeartbeatLoop();
                 } catch (err) {
                     appendLog(`❌ [Connection Failed] ${err.message}`, 'log-error');
                     statusInd.className = 'status-pill status-idle';
@@ -495,6 +504,68 @@
                 }
             }, 800);
         }
+
+        let activeSiteId = null;
+        let activeHubUrl = null;
+        let heartbeatTimer = null;
+
+        function startHeartbeatLoop() {
+            if (heartbeatTimer) clearInterval(heartbeatTimer);
+            heartbeatTimer = setInterval(async () => {
+                if (!activeSiteId || !activeHubUrl) return;
+                try {
+                    const ping = Math.floor(12 + Math.random() * 10);
+                    const res = await fetch(`${activeHubUrl}/api/v1/sitemesh/heartbeat`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ siteId: activeSiteId, latencyMs: ping })
+                    });
+                    if (res.ok) {
+                        const tunnelStatus = document.getElementById('tunnelStatus');
+                        tunnelStatus.textContent = `mTLS Tunnel: CONNECTED (${ping}ms)`;
+                    }
+                } catch (e) {
+                    appendLog(`⚠️ [Heartbeat Timeout] Lost ping to Primary Hub`, 'log-warn');
+                }
+            }, 3500);
+        }
+
+        async function runSimulatorDisconnect() {
+            if (heartbeatTimer) clearInterval(heartbeatTimer);
+            heartbeatTimer = null;
+
+            if (activeSiteId && activeHubUrl) {
+                try {
+                    await fetch(`${activeHubUrl}/api/v1/sitemesh/disconnect`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ siteId: activeSiteId, reason: 'Manual Disconnect from Simulator' })
+                    });
+                } catch (e) {}
+            }
+
+            appendLog(`🔌 [Disconnected] Secondary node shut down. Reverse tunnel terminated.`, 'log-error');
+            const statusInd = document.getElementById('statusIndicator');
+            const tunnelStatus = document.getElementById('tunnelStatus');
+            const joinBtn = document.getElementById('joinBtn');
+
+            statusInd.className = 'status-pill status-idle';
+            statusInd.textContent = '🔴 DISCONNECTED (OFFLINE)';
+            tunnelStatus.textContent = 'mTLS Tunnel: Disconnected';
+            tunnelStatus.style.color = 'var(--text-muted)';
+
+            joinBtn.textContent = '🔗 Reconnect to Master Cluster';
+            joinBtn.style.background = 'linear-gradient(135deg, #0ea5e9, #6366f1)';
+            joinBtn.onclick = runSimulatorJoin;
+        }
+
+        // Notify server when window or tab is closed/refreshed
+        window.addEventListener('beforeunload', () => {
+            if (activeSiteId && activeHubUrl) {
+                const payload = JSON.stringify({ siteId: activeSiteId, reason: 'Browser Tab Closed / Refreshed' });
+                navigator.sendBeacon(`${activeHubUrl}/api/v1/sitemesh/disconnect`, payload);
+            }
+        });
     </script>
 </body>
 </html>

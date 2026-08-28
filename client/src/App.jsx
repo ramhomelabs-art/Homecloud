@@ -4395,6 +4395,14 @@ function App() {
                     show={showSiteMeshModal}
                     onClose={() => setShowSiteMeshModal(false)}
                     showToast={showToast}
+                    onExploreSite={(siteId, siteName, poolName) => {
+                        setShowSiteMeshModal(false);
+                        setView('files');
+                        const targetPath = poolName ? `/sitemesh/${siteId}/${poolName}` : `/sitemesh/${siteId}/`;
+                        navigateTo(targetPath, 'files');
+                        fetchDevices();
+                        showToast(`Opened remote storage pool on ${siteName}`, 'info');
+                    }}
                 />
             )}
             {showClusterUpdateModal && (

@@ -20,7 +20,7 @@ const formatBytes = (bytes) => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 };
 
-const SiteMeshModal = ({ show, onClose, showToast }) => {
+const SiteMeshModal = ({ show, onClose, showToast, onExploreSite }) => {
     const [masterInfo, setMasterInfo] = useState(null);
     const [sites, setSites] = useState([]);
     const [syncJobs, setSyncJobs] = useState([]);
@@ -407,7 +407,13 @@ const SiteMeshModal = ({ show, onClose, showToast }) => {
                                 isExpanded={expandedSites['master-local'] ?? true}
                                 onToggleExpand={() => toggleSiteExpand('master-local')}
                                 onInspect={() => setSelectedSiteInspector(masterInfo)}
-                                onBrowseStorage={() => handleOpenRemoteExplorer('master-local', masterInfo?.name || 'Primary Hub', '/')}
+                                onBrowseStorage={() => {
+                                    if (onExploreSite) {
+                                        onExploreSite('master-local', masterInfo?.name || 'Primary Hub');
+                                    } else {
+                                        handleOpenRemoteExplorer('master-local', masterInfo?.name || 'Primary Hub', '/');
+                                    }
+                                }}
                             />
 
                             {/* Secondary Remote Sites Section */}
@@ -481,7 +487,13 @@ const SiteMeshModal = ({ show, onClose, showToast }) => {
                                             isExpanded={expandedSites[site.id] ?? true}
                                             onToggleExpand={() => toggleSiteExpand(site.id)}
                                             onInspect={() => setSelectedSiteInspector(site)}
-                                            onBrowseStorage={() => handleOpenRemoteExplorer(site.id, site.name, '/')}
+                                            onBrowseStorage={() => {
+                                                if (onExploreSite) {
+                                                    onExploreSite(site.id, site.name);
+                                                } else {
+                                                    handleOpenRemoteExplorer(site.id, site.name, '/');
+                                                }
+                                            }}
                                             onUnpair={() => setSiteToUnpair(site.id)}
                                         />
                                     ))}
