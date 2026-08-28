@@ -8,7 +8,7 @@ import {
 
 const API_BASE = '/api/v1';
 
-const InitialSetupWizard = ({ onSetupComplete, showToast, onCancel }) => {
+const InitialSetupWizard = ({ onSetupComplete, onRedirectToLogin, showToast, onCancel }) => {
     // Current step: 'welcome' | 'identity' | 'admin' | 'consent' | 'provisioning' | 'ready'
     const [step, setStep] = useState('welcome');
     
@@ -714,29 +714,51 @@ const InitialSetupWizard = ({ onSetupComplete, showToast, onCancel }) => {
                             </div>
                         </div>
 
-                        <button
-                            onClick={handleFinalLaunch}
-                            style={{
-                                width: '100%',
-                                maxWidth: '480px',
-                                padding: '15px 28px',
-                                borderRadius: '14px',
-                                background: 'linear-gradient(135deg, #10b981, #0ea5e9)',
-                                color: '#ffffff',
-                                border: 'none',
-                                fontSize: '15px',
-                                fontWeight: '900',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                gap: '10px',
-                                cursor: 'pointer',
-                                boxShadow: '0 8px 24px rgba(16, 185, 129, 0.4)',
-                                marginTop: '6px'
-                            }}
-                        >
-                            🚀 Launch NexaDisk Dashboard <ArrowRight size={18} />
-                        </button>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%', maxWidth: '480px', marginTop: '6px' }}>
+                            <button
+                                onClick={handleFinalLaunch}
+                                style={{
+                                    width: '100%',
+                                    padding: '15px 28px',
+                                    borderRadius: '14px',
+                                    background: 'linear-gradient(135deg, #10b981, #0ea5e9)',
+                                    color: '#ffffff',
+                                    border: 'none',
+                                    fontSize: '15px',
+                                    fontWeight: '900',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: '10px',
+                                    cursor: 'pointer',
+                                    boxShadow: '0 8px 24px rgba(16, 185, 129, 0.4)'
+                                }}
+                            >
+                                🚀 Launch NexaDisk Dashboard <ArrowRight size={18} />
+                            </button>
+
+                            <button
+                                onClick={() => onRedirectToLogin ? onRedirectToLogin(adminUsername) : handleFinalLaunch()}
+                                style={{
+                                    width: '100%',
+                                    padding: '12px 24px',
+                                    borderRadius: '14px',
+                                    background: 'rgba(255, 255, 255, 0.06)',
+                                    color: '#94a3b8',
+                                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                                    fontSize: '13.5px',
+                                    fontWeight: '700',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: '8px',
+                                    cursor: 'pointer',
+                                    transition: '0.2s'
+                                }}
+                            >
+                                <Lock size={15} /> Proceed to Login Screen
+                            </button>
+                        </div>
                     </div>
                 )}
             </div>

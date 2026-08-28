@@ -267,21 +267,26 @@ function App() {
     const [mobileOpen, setMobileOpen] = useState(false);
     const [globalConfirmAction, setGlobalConfirmAction] = useState(null);
     const [showSetupWizard, setShowSetupWizard] = useState(false);
+    const [isSetupRequired, setIsSetupRequired] = useState(false);
 
     useEffect(() => {
         const checkSetupStatus = async () => {
             const urlParams = new URLSearchParams(window.location.search);
             if (urlParams.get('setup') === 'true') {
+                setIsSetupRequired(true);
                 setShowSetupWizard(true);
                 return;
             }
             try {
                 const res = await axios.get(`${API_BASE}/auth/setup/status`);
                 if (res.data?.setupRequired) {
+                    setIsSetupRequired(true);
                     setShowSetupWizard(true);
+                } else {
+                    setIsSetupRequired(false);
                 }
             } catch (e) {
-                // Ignore if backend offline
+                setIsSetupRequired(false);
             }
         };
         checkSetupStatus();
@@ -2153,9 +2158,16 @@ function App() {
         return (
             <InitialSetupWizard
                 onSetupComplete={(token, username, role) => {
-                    handleLogin(token, username, role);
+                    setIsSetupRequired(false);
                     setShowSetupWizard(false);
                     window.history.replaceState({}, document.title, window.location.pathname);
+                    handleLogin(token, username, role);
+                }}
+                onRedirectToLogin={(username) => {
+                    setIsSetupRequired(false);
+                    setShowSetupWizard(false);
+                    window.history.replaceState({}, document.title, window.location.pathname);
+                    showToast?.(`Setup completed! You can now log in as ${username}.`, 'success');
                 }}
                 showToast={showToast}
                 onCancel={() => setShowSetupWizard(false)}
@@ -2178,7 +2190,7 @@ function App() {
                 <AuthScreen 
                     handleLogin={handleLogin} 
                     appName={appName} 
-                    onOpenSetupWizard={() => setShowSetupWizard(true)}
+                    onOpenSetupWizard={isSetupRequired ? () => setShowSetupWizard(true) : null}
                 />
                 {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
             </>
