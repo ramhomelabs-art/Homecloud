@@ -1,9 +1,12 @@
 version: '3.8'
 
 services:
-  # NexaDisk Master Storage Server & Web UI
+  # NexaDisk Master Storage Server & Web UI (Local Build Mode)
   nexadisk-master:
     image: nexadisk-master:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: nexadisk-master
     restart: always
     ports:
@@ -41,7 +44,6 @@ services:
     networks:
       - nexadisk-net
 
-  # PostgreSQL 16 High-Performance Database
   postgres:
     image: postgres:16-alpine
     container_name: nexadisk-postgres
@@ -60,7 +62,6 @@ services:
     networks:
       - nexadisk-net
 
-  # Redis In-Memory Cache (for high-speed token & lock management)
   redis:
     image: redis:7-alpine
     container_name: nexadisk-redis
