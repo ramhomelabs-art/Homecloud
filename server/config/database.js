@@ -502,10 +502,12 @@ async function initDatabase() {
                 storage_capacity_bytes BIGINT DEFAULT 0,
                 storage_used_bytes BIGINT DEFAULT 0,
                 latency_ms INTEGER DEFAULT 0,
+                details JSONB DEFAULT '{}'::jsonb,
                 last_heartbeat TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             )
         `);
+        await client.query('ALTER TABLE cluster_sites ADD COLUMN IF NOT EXISTS details JSONB DEFAULT \'{}\'::jsonb');
 
         // 28. Create CROSS_SITE_SYNC_JOBS table for site-to-site replication
         await client.query(`

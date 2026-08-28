@@ -21,7 +21,7 @@ router.post('/token', authenticateToken, requireRole(['Admin']), async (req, res
 // Secondary Site Pairing Handshake
 router.post('/pair', async (req, res) => {
     try {
-        const { token, siteName, location, endpointUrl, storageCapacityBytes, storageUsedBytes } = req.body;
+        const { token, siteName, location, endpointUrl, storageCapacityBytes, storageUsedBytes, details } = req.body;
         if (!token) return res.status(400).json({ error: 'Pairing token is required' });
 
         const site = await siteMeshService.registerSite({
@@ -30,7 +30,8 @@ router.post('/pair', async (req, res) => {
             endpointUrl: endpointUrl || 'wss://tunnel.nexadisk.internal',
             tunnelToken: token,
             storageCapacityBytes: Number(storageCapacityBytes) || 1099511627776, // 1TB default
-            storageUsedBytes: Number(storageUsedBytes) || 214748364800 // 200GB default
+            storageUsedBytes: Number(storageUsedBytes) || 214748364800, // 200GB default
+            details: details || {}
         });
 
         res.json({
@@ -40,6 +41,20 @@ router.post('/pair', async (req, res) => {
         });
     } catch (err) {
         logger.error(`[SiteMesh Routes] Pairing failed: ${err.message}`);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Provision Instant Demo Proxmox VE Site for Demonstration
+router.post('/demo-site', authenticateToken, requireRole(['Admin']), async (req, res) => {
+    try {
+        const site = await siteMeshService.provisionDemoProxmoxSite();
+        res.json({
+            message: 'Proxmox VE Cluster-02 secondary site provisioned and connected',
+            site
+        });
+    } catch (err) {
+        logger.error(`[SiteMesh Routes] Demo site provisioning failed: ${err.message}`);
         res.status(500).json({ error: err.message });
     }
 });
