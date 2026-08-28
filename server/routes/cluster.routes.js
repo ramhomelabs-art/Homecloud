@@ -235,36 +235,68 @@ let lastDiskQueryTime = 0;
 storageRouter.get('/local', authenticateToken, async (req, res) => {
     try {
         const rootPath = storageProvider.localBase || (os.platform() === 'win32' ? 'C:\\' : '/');
-        const now = Date.now();
-        
-        let disk = cachedDiskSpace;
-        if (!disk || (now - lastDiskQueryTime > 10000)) {
-            // Wrap checkDiskSpace in a 6-second timeout
-            const diskPromise = checkDiskSpace(rootPath);
-            const timeoutPromise = new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Disk space query timed out')), 6000)
-            );
-            
+        let disks = [];
+
+        if (os.platform() === 'win32') {
             try {
-                disk = await Promise.race([diskPromise, timeoutPromise]);
-                cachedDiskSpace = disk;
-                lastDiskQueryTime = now;
-            } catch (err) {
-                logger.warn(`[Cluster/Storage] checkDiskSpace failed: ${err.message}`);
-                disk = cachedDiskSpace || { size: 0, free: 0 };
+                const cmd = 'powershell "Get-CimInstance -ClassName Win32_LogicalDisk | Select-Object DeviceID, VolumeName, Size, FreeSpace, DriveType | ConvertTo-Json"';
+                const output = execSync(cmd, { timeout: 3500 }).toString();
+                const rawDrives = JSON.parse(output);
+                const drivesList = Array.isArray(rawDrives) ? rawDrives : [rawDrives];
+
+                disks = drivesList.filter(d => (d.DriveType === 3 || d.DriveType === 4) && d.Size > 0).map(d => {
+                    const size = parseInt(d.Size, 10) || 0;
+                    const free = parseInt(d.FreeSpace, 10) || 0;
+                    const used = Math.max(0, size - free);
+                    const pct = size > 0 ? Math.round((used / size) * 100) : 0;
+                    return {
+                        mount: d.DeviceID + '\\',
+                        name: d.DeviceID,
+                        label: d.VolumeName || (d.DriveType === 4 ? 'Network Share' : 'Local Disk'),
+                        size: size,
+                        free: free,
+                        used: used,
+                        percentage: pct,
+                        type: d.DriveType === 4 ? 'network' : 'disk'
+                    };
+                });
+            } catch (winErr) {
+                logger.warn(`[Cluster/Storage] Win32 logical disk query failed: ${winErr.message}`);
             }
+        }
+
+        if (disks.length === 0) {
+            let disk = cachedDiskSpace;
+            const now = Date.now();
+            if (!disk || (now - lastDiskQueryTime > 10000)) {
+                try {
+                    disk = await checkDiskSpace(rootPath);
+                    cachedDiskSpace = disk;
+                    lastDiskQueryTime = now;
+                } catch (err) {
+                    disk = cachedDiskSpace || { size: 0, free: 0 };
+                }
+            }
+            const diskSize = disk?.size || 0;
+            const diskFree = disk?.free || 0;
+            const diskUsed = Math.max(0, diskSize - diskFree);
+            const percentage = diskSize > 0 ? Math.round((diskUsed / diskSize) * 100) : 0;
+
+            disks = [{
+                mount: rootPath,
+                name: 'Local Root',
+                size: diskSize,
+                free: diskFree,
+                used: diskUsed,
+                percentage: percentage
+            }];
         }
         
         // Retrieve latest Master CPU & RAM metrics from clusterService telemetry history
         const latestLocal = clusterService.telemetryHistory.local[clusterService.telemetryHistory.local.length - 1] || { cpu: 0, memory: 0 };
 
-        const diskSize = disk?.size || 0;
-        const diskFree = disk?.free || 0;
-        const diskUsed = Math.max(0, diskSize - diskFree);
-        const percentage = diskSize > 0 ? Math.round((diskUsed / diskSize) * 100) : 0;
-
-        // Calculate actual file category sizes in the uploads base directory
-        const categories = calculateCategorySizes(storageProvider.localBase, diskUsed);
+        const primaryDisk = disks[0] || { used: 0 };
+        const categories = calculateCategorySizes(storageProvider.localBase, primaryDisk.used);
 
         res.json({
             hostname: os.hostname(),
@@ -273,13 +305,7 @@ storageRouter.get('/local', authenticateToken, async (req, res) => {
             cpu: latestLocal.cpu || 0,
             memory: latestLocal.memory || 0,
             categories,
-            disks: [{
-                mount: rootPath,
-                size: diskSize,
-                free: diskFree,
-                used: diskUsed,
-                percentage: percentage
-            }]
+            disks: disks
         });
     } catch (error) {
         res.status(500).json({ error: error.message });
