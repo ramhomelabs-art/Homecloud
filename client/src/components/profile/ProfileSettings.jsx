@@ -239,6 +239,18 @@ const ProfileSettings = ({ onProfileUpdate, embedded = false }) => {
         }
     };
 
+    const handleAvatarSuccess = (updatedUser) => {
+        showToast('Avatar updated successfully!');
+        if (updatedUser) {
+            setUser(updatedUser);
+            setFormData(updatedUser);
+            if (onProfileUpdate) onProfileUpdate(updatedUser);
+        } else {
+            fetchUserProfile();
+        }
+        setShowAvatarDialog(false);
+    };
+
     const [confirmAction, setConfirmAction] = useState(null);
 
     const handleRevokeSession = (sessionId) => {
