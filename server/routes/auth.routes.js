@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const os = require('os');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const QRCode = require('qrcode');
@@ -9,6 +10,150 @@ const eventBus = require('../utils/eventBus');
 const logger = require('../utils/logger');
 const auditService = require('../services/auditService');
 const totp = require('../utils/totp');
+
+// 🌟 GET /api/v1/auth/setup/status
+router.get('/setup/status', async (req, res) => {
+    try {
+        const usersCountRes = await db.query('SELECT COUNT(*) FROM users');
+        const setupSettingRes = await db.query("SELECT value FROM app_settings WHERE key = 'initial_setup_completed'");
+        
+        const isCompleted = setupSettingRes.rows[0]?.value === 'true' && parseInt(usersCountRes.rows[0]?.count || 0) > 0;
+        
+        let localIp = '127.0.0.1';
+        const interfaces = os.networkInterfaces();
+        for (const name of Object.keys(interfaces)) {
+            for (const net of interfaces[name]) {
+                if (net.family === 'IPv4' && !net.internal) {
+                    localIp = net.address;
+                    break;
+                }
+            }
+        }
+
+        const cpus = os.cpus();
+
+        res.json({
+            setupRequired: !isCompleted,
+            systemInfo: {
+                hostname: os.hostname(),
+                platform: `${os.type()} ${os.release()} (${os.arch()})`,
+                totalMemory: os.totalmem(),
+                freeMemory: os.freemem(),
+                cpuModel: cpus[0]?.model || 'Multi-Core Processor',
+                cpuCores: cpus.length,
+                ip: localIp,
+                nodeVersion: process.version,
+                detectedLocation: 'Primary On-Premise Datacenter'
+            }
+        });
+    } catch (err) {
+        logger.error(`[Setup Status Error]: ${err.message}`);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// 🚀 POST /api/v1/auth/setup/complete
+router.post('/setup/complete', async (req, res) => {
+    const { 
+        adminUsername = 'admin', 
+        adminPassword, 
+        adminDisplayName = 'System Administrator',
+        adminEmail = 'admin@nexadisk.internal',
+        serverName, 
+        siteName, 
+        location, 
+        consentAgreed 
+    } = req.body;
+
+    if (!adminPassword || adminPassword.length < 6) {
+        return res.status(400).json({ error: 'Admin password must be at least 6 characters long' });
+    }
+
+    if (!consentAgreed) {
+        return res.status(400).json({ error: 'You must agree to the enterprise license and security terms to proceed' });
+    }
+
+    try {
+        const hashedPassword = await bcrypt.hash(adminPassword, 10);
+        const userId = 'user_admin_' + Date.now();
+
+        // 1. Insert or update the admin account
+        const existing = await db.query('SELECT * FROM users WHERE username = $1', [adminUsername]);
+        let user;
+        if (existing.rows.length > 0) {
+            const updateRes = await db.query(`
+                UPDATE users 
+                SET password_hash = $1, display_name = $2, email = $3, role = 'Admin' 
+                WHERE username = $4 
+                RETURNING id, username, role, display_name, email
+            `, [hashedPassword, adminDisplayName, adminEmail, adminUsername]);
+            user = updateRes.rows[0];
+        } else {
+            const insertRes = await db.query(`
+                INSERT INTO users (id, username, password_hash, role, display_name, email)
+                VALUES ($1, $2, $3, 'Admin', $4, $5)
+                RETURNING id, username, role, display_name, email
+            `, [userId, adminUsername, hashedPassword, adminDisplayName, adminEmail]);
+            user = insertRes.rows[0];
+        }
+
+        // 2. Save cluster server name & site settings
+        await db.query(`
+            INSERT INTO app_settings (key, value) 
+            VALUES ('initial_setup_completed', 'true')
+            ON CONFLICT (key) DO UPDATE SET value = 'true'
+        `);
+
+        if (serverName) {
+            await db.query(`
+                INSERT INTO app_settings (key, value) 
+                VALUES ('server_name', $1)
+                ON CONFLICT (key) DO UPDATE SET value = $1
+            `, [serverName]);
+        }
+
+        if (siteName) {
+            await db.query(`
+                INSERT INTO app_settings (key, value) 
+                VALUES ('site_name', $1)
+                ON CONFLICT (key) DO UPDATE SET value = $1
+            `, [siteName]);
+        }
+
+        if (location) {
+            await db.query(`
+                INSERT INTO app_settings (key, value) 
+                VALUES ('site_location', $1)
+                ON CONFLICT (key) DO UPDATE SET value = $1
+            `, [location]);
+        }
+
+        // 3. Generate JWT Token
+        const token = jwt.sign(
+            { id: user.id, username: user.username, role: user.role },
+            SECRET_KEY,
+            { expiresIn: '24h' }
+        );
+
+        logger.info(`[Initial Setup] NexaDisk Server setup successfully completed by ${user.username}. Server: ${serverName || os.hostname()}`);
+        eventBus.publish('USER_LOGIN', { username: user.username, role: user.role, ip: req.ip });
+
+        res.json({
+            success: true,
+            message: 'NexaDisk Server initialized successfully',
+            token,
+            username: user.username,
+            role: user.role,
+            id: user.id,
+            serverName: serverName || os.hostname(),
+            siteName: siteName || 'Primary-Hub',
+            location: location || 'Primary Datacenter'
+        });
+    } catch (err) {
+        logger.error(`[Setup Complete Error]: ${err.message}`, err);
+        res.status(500).json({ error: err.message });
+    }
+});
 
 // 🔒 POST /api/v1/auth/login
 router.post('/login', async (req, res) => {

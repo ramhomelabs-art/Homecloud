@@ -22,7 +22,8 @@ const SystemSettingsView = ({
     format24h, 
     setFormat24h, 
     showToast,
-    setView
+    setView,
+    onOpenSetupWizard
 }) => {
     const [activeTab, setActiveTab] = useState('branding');
     const [localAppName, setLocalAppName] = useState(appName);

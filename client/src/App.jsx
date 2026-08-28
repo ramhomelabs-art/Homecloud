@@ -57,6 +57,7 @@ import DeploymentConfigModal from './components/modals/DeploymentConfigModal';
 import SiteMeshModal from './components/modals/SiteMeshModal';
 import ClusterUpdateModal from './components/modals/ClusterUpdateModal';
 import ConfirmModal from './components/modals/ConfirmModal';
+import InitialSetupWizard from './components/setup/InitialSetupWizard';
 
 // Polyfill localStorage to automatically fall back to sessionStorage for auth properties.
 // This is critical for session-only configurations and subcomponents that query localStorage.getItem directly.
@@ -265,6 +266,26 @@ function App() {
     const [format24h, setFormat24h] = useState(localStorage.getItem('format24h') !== 'false');
     const [mobileOpen, setMobileOpen] = useState(false);
     const [globalConfirmAction, setGlobalConfirmAction] = useState(null);
+    const [showSetupWizard, setShowSetupWizard] = useState(false);
+
+    useEffect(() => {
+        const checkSetupStatus = async () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('setup') === 'true') {
+                setShowSetupWizard(true);
+                return;
+            }
+            try {
+                const res = await axios.get(`${API_BASE}/auth/setup/status`);
+                if (res.data?.setupRequired) {
+                    setShowSetupWizard(true);
+                }
+            } catch (e) {
+                // Ignore if backend offline
+            }
+        };
+        checkSetupStatus();
+    }, []);
 
 
     const fetchSystemVersion = async (silent = false) => {
@@ -2128,6 +2149,20 @@ function App() {
         );
     }
 
+    if (showSetupWizard) {
+        return (
+            <InitialSetupWizard
+                onSetupComplete={(token, username, role) => {
+                    handleLogin(token, username, role);
+                    setShowSetupWizard(false);
+                    window.history.replaceState({}, document.title, window.location.pathname);
+                }}
+                showToast={showToast}
+                onCancel={() => setShowSetupWizard(false)}
+            />
+        );
+    }
+
     if (!token && !guestToken) {
         const pathName = window.location.pathname;
         if (pathName.startsWith('/public/share/')) {
@@ -2140,7 +2175,11 @@ function App() {
         }
         return (
             <>
-                <AuthScreen handleLogin={handleLogin} appName={appName} />
+                <AuthScreen 
+                    handleLogin={handleLogin} 
+                    appName={appName} 
+                    onOpenSetupWizard={() => setShowSetupWizard(true)}
+                />
                 {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
             </>
         );
@@ -2256,6 +2295,7 @@ function App() {
                                     setFormat24h={setFormat24h}
                                     showToast={showToast}
                                     setView={setView}
+                                    onOpenSetupWizard={() => setShowSetupWizard(true)}
                                 />
                             </motion.div>
                         )}
@@ -5480,7 +5520,7 @@ const ActivityItem = ({ act }) => {
     );
 };
 
-const AuthScreen = ({ handleLogin, appName }) => {
+const AuthScreen = ({ handleLogin, appName, onOpenSetupWizard }) => {
     const [mode, setMode] = useState('login'); // 'login', 'forgot_username', 'forgot_verify', 'mfa_prompt'
     const [forgotUsername, setForgotUsername] = useState('');
     const [securityQuestion, setSecurityQuestion] = useState('');
@@ -5918,6 +5958,28 @@ const AuthScreen = ({ handleLogin, appName }) => {
                                     </span>
                                 </div>
                             </form>
+                        )}
+
+                        {onOpenSetupWizard && mode === 'login' && (
+                            <div style={{ marginTop: '22px', paddingTop: '16px', borderTop: '1px solid var(--border-subtle)', textAlign: 'center' }}>
+                                <button
+                                    type="button"
+                                    onClick={onOpenSetupWizard}
+                                    style={{
+                                        background: 'none',
+                                        border: 'none',
+                                        color: 'var(--accent-cyan)',
+                                        fontSize: '12.5px',
+                                        fontWeight: '800',
+                                        cursor: 'pointer',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '6px'
+                                    }}
+                                >
+                                    <Sparkles size={14} /> First Time Deployment? Run Setup Wizard
+                                </button>
+                            </div>
                         )}
                     </>
                 )}

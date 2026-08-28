@@ -806,24 +806,30 @@ const SiteMeshModal = ({ show, onClose, showToast, onExploreSite }) => {
 
                                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                                             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                                                <label style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)' }}>THIS SERVER NAME</label>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                    <label style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)' }}>THIS SERVER NAME</label>
+                                                    <span style={{ fontSize: '10px', color: '#10b981', fontWeight: '800' }}>✨ Auto-Detected</span>
+                                                </div>
                                                 <input
                                                     type="text"
                                                     className="form-control"
-                                                    placeholder="e.g. PC2-Office"
-                                                    value={secondarySiteName}
+                                                    placeholder={masterInfo?.name || "e.g. Local Server Host"}
+                                                    value={secondarySiteName !== '' ? secondarySiteName : (masterInfo?.name || '')}
                                                     onChange={(e) => setSecondarySiteName(e.target.value)}
                                                     style={{ padding: '11px 14px', borderRadius: '10px', fontSize: '13px', background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
                                                 />
                                             </div>
 
                                             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                                                <label style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)' }}>PHYSICAL LOCATION</label>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                    <label style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)' }}>PHYSICAL LOCATION</label>
+                                                    <span style={{ fontSize: '10px', color: '#10b981', fontWeight: '800' }}>✨ Auto-Detected</span>
+                                                </div>
                                                 <input
                                                     type="text"
                                                     className="form-control"
-                                                    placeholder="e.g. Office PC / Lab"
-                                                    value={secondaryLocation}
+                                                    placeholder={masterInfo?.location || "e.g. Primary Datacenter / On-Premise Host"}
+                                                    value={secondaryLocation !== '' ? secondaryLocation : (masterInfo?.location || '')}
                                                     onChange={(e) => setSecondaryLocation(e.target.value)}
                                                     style={{ padding: '11px 14px', borderRadius: '10px', fontSize: '13px', background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
                                                 />
