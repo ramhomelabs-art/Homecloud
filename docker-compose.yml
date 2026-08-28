@@ -3,6 +3,7 @@ version: '3.8'
 services:
   # NexaDisk Master Storage Server & Web UI
   nexadisk-master:
+    image: nexadisk-master:latest
     build:
       context: .
       dockerfile: Dockerfile
