@@ -4451,13 +4451,23 @@ function App() {
                     show={showSiteMeshModal}
                     onClose={() => setShowSiteMeshModal(false)}
                     showToast={showToast}
-                    onExploreSite={(siteId, siteName, poolName) => {
+                    onExploreSite={(siteId, siteName, poolMount) => {
                         setShowSiteMeshModal(false);
                         setView('files');
-                        const targetPath = poolName ? `/sitemesh/${siteId}/${poolName}` : `/sitemesh/${siteId}/`;
-                        navigateTo(targetPath, 'files');
-                        fetchDevices();
-                        showToast(`Opened remote storage pool on ${siteName}`, 'info');
+                        if (!siteId || siteId === 'master-local') {
+                            setExplorerMode('devices');
+                            setSelectedDevice(null);
+                            setPath('/');
+                            fetchDevices();
+                            fetchFiles('/');
+                            showToast(`Opened local storage on ${siteName || 'Primary Host'}`, 'info');
+                        } else {
+                            // Remote federated secondary site
+                            const targetPath = poolMount ? `/sitemesh/${siteId}/${encodeURIComponent(poolMount)}` : `/sitemesh/${siteId}/`;
+                            navigateTo(targetPath, 'files');
+                            fetchDevices();
+                            showToast(`Opened remote storage pool on ${siteName}`, 'info');
+                        }
                     }}
                 />
             )}

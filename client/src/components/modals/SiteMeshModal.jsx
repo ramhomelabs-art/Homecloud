@@ -1220,38 +1220,34 @@ const SiteCard = ({ site, isMaster, isExpanded, onToggleExpand, onInspect, onBro
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <div style={{ fontSize: '12.5px', fontWeight: '900', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
                                 <Cpu size={14} color="#10b981" />
-                                Cluster Agent Worker Nodes ({agents.length > 0 ? agents.length : 1})
+                                Cluster Agent Worker Nodes ({agents.length})
                             </div>
                             <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '700' }}>mTLS TUNNEL</span>
                         </div>
 
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                            {(agents.length > 0 ? agents : [
-                                {
-                                    id: 'default_agent',
-                                    name: `${site.hostname || site.name}-Worker`,
-                                    role: 'Cluster Hypervisor Node',
-                                    ip: site.ip || '127.0.0.1',
-                                    status: 'online',
-                                    uptime: 'Active',
-                                    version: '2.4.0'
-                                }
-                            ]).map((ag, idx) => (
-                                <div key={idx} style={{ padding: '12px 14px', borderRadius: '12px', background: 'var(--bg-surface-1)', border: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                        <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10b981', boxShadow: '0 0 8px rgba(16, 185, 129, 0.6)' }} />
-                                        <div>
-                                            <div style={{ fontSize: '13px', fontWeight: '800', color: 'var(--text-primary)' }}>{ag.name}</div>
-                                            <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                                                {ag.role} • IP: {ag.ip} • Uptime: {ag.uptime}
+                            {agents.length === 0 ? (
+                                <div style={{ padding: '16px', borderRadius: '12px', background: 'var(--bg-surface-1)', border: '1px dashed var(--border-subtle)', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>
+                                    No remote worker nodes attached. Use Provision Node to add worker agents.
+                                </div>
+                            ) : (
+                                agents.map((ag, idx) => (
+                                    <div key={idx} style={{ padding: '12px 14px', borderRadius: '12px', background: 'var(--bg-surface-1)', border: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                            <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10b981', boxShadow: '0 0 8px rgba(16, 185, 129, 0.6)' }} />
+                                            <div>
+                                                <div style={{ fontSize: '13px', fontWeight: '800', color: 'var(--text-primary)' }}>{ag.name}</div>
+                                                <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                                                    {ag.role} • IP: {ag.ip} • Uptime: {ag.uptime}
+                                                </div>
                                             </div>
                                         </div>
+                                        <span style={{ fontSize: '10.5px', fontWeight: '800', background: 'rgba(16, 185, 129, 0.12)', color: '#10b981', padding: '2px 8px', borderRadius: '6px' }}>
+                                            COMPLIANT v{ag.version || '2.4.0'}
+                                        </span>
                                     </div>
-                                    <span style={{ fontSize: '10.5px', fontWeight: '800', background: 'rgba(16, 185, 129, 0.12)', color: '#10b981', padding: '2px 8px', borderRadius: '6px' }}>
-                                        COMPLIANT v{ag.version || '2.4.0'}
-                                    </span>
-                                </div>
-                            ))}
+                                ))
+                            )}
                         </div>
                     </div>
                 </div>
