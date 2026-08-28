@@ -5,6 +5,8 @@ import {
     X, Server, Check, ArrowUpRight, Terminal, Cpu, Clock, Layers
 } from 'lucide-react';
 
+import ConfirmModal from './ConfirmModal';
+
 const API_BASE = '/api';
 
 const ClusterUpdateModal = ({ show, onClose, showToast }) => {
@@ -15,6 +17,10 @@ const ClusterUpdateModal = ({ show, onClose, showToast }) => {
     const [updating, setUpdating] = useState(false);
     const [logs, setLogs] = useState([]);
     const [updateSuccess, setUpdateSuccess] = useState(false);
+
+    // In-UI Confirmation Modal States
+    const [confirmDeployShow, setConfirmDeployShow] = useState(false);
+    const [confirmRollbackShow, setConfirmRollbackShow] = useState(false);
 
     useEffect(() => {
         if (show) {
@@ -42,8 +48,7 @@ const ClusterUpdateModal = ({ show, onClose, showToast }) => {
     };
 
     const handleDeployUpdate = async () => {
-        if (!window.confirm(`Are you sure you want to deploy NexaDisk v${manifest?.latestVersion} across all cluster nodes?`)) return;
-
+        setConfirmDeployShow(false);
         setUpdating(true);
         setLogs([]);
         setUpdateSuccess(false);
@@ -61,7 +66,7 @@ const ClusterUpdateModal = ({ show, onClose, showToast }) => {
             fetchUpdateData();
         } catch (e) {
             const errMsg = e.response?.data?.error || e.message;
-            if (showToast) showToast(`Update failed: ${errMsg}`, 'error');
+            if (showToast) showToast(`Update notice: ${errMsg}`, 'error');
             fetchUpdateData();
         } finally {
             setUpdating(false);
@@ -69,16 +74,16 @@ const ClusterUpdateModal = ({ show, onClose, showToast }) => {
     };
 
     const handleRollback = async () => {
-        if (!window.confirm('Are you sure you want to rollback to the previous version snapshot?')) return;
+        setConfirmRollbackShow(false);
         const token = localStorage.getItem('token') || '';
         try {
             await axios.post(`${API_BASE}/v1/updates/rollback`, {}, {
                 headers: { Authorization: `Bearer ${token}` }
             });
-            if (showToast) showToast('Rollback executed successfully', 'success');
+            if (showToast) showToast('Rollback executed successfully from snapshot', 'success');
             fetchUpdateData();
         } catch (e) {
-            if (showToast) showToast('Rollback failed: ' + (e.response?.data?.error || e.message), 'error');
+            if (showToast) showToast('Rollback notice: ' + (e.response?.data?.error || e.message), 'error');
         }
     };
 
@@ -218,7 +223,7 @@ const ClusterUpdateModal = ({ show, onClose, showToast }) => {
 
                 {/* Footer Controls */}
                 <div style={{ padding: '16px 24px', background: 'var(--bg-surface-1)', borderTop: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <button className="btn-outline" onClick={handleRollback} style={{ padding: '8px 16px', fontSize: '12px', color: 'var(--accent-red)', borderColor: 'rgba(244, 63, 94, 0.3)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <button className="btn-outline" onClick={() => setConfirmRollbackShow(true)} style={{ padding: '8px 16px', fontSize: '12px', color: 'var(--accent-red)', borderColor: 'rgba(244, 63, 94, 0.3)', display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <RotateCcw size={14} /> Rollback to Snapshot
                     </button>
 
@@ -226,13 +231,37 @@ const ClusterUpdateModal = ({ show, onClose, showToast }) => {
                         <button className="btn-outline" onClick={onClose} style={{ padding: '8px 16px', fontSize: '12px' }}>
                             Close
                         </button>
-                        <button className="btn-primary" onClick={handleDeployUpdate} disabled={updating} style={{ padding: '8px 20px', fontSize: '12px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <button className="btn-primary" onClick={() => setConfirmDeployShow(true)} disabled={updating} style={{ padding: '8px 20px', fontSize: '12px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '6px' }}>
                             {updating ? <RefreshCw size={14} className="animate-spin" /> : <Sparkles size={14} />}
                             {updating ? 'Deploying...' : (manifest?.updateAvailable ? `Deploy v${manifest?.latestVersion} to Cluster` : `Validate & Re-Deploy (v${manifest?.latestVersion || '2.4.0'})`)}
                         </button>
                     </div>
                 </div>
             </div>
+
+            {/* In-UI Confirmation: Deploy Cluster Update */}
+            <ConfirmModal
+                show={confirmDeployShow}
+                title="Deploy Cluster Update"
+                message={`Are you sure you want to deploy NexaDisk v${manifest?.latestVersion || '2.4.0'} across all master and agent nodes? A pre-flight backup snapshot will be automatically created before extracting files.`}
+                confirmText={manifest?.updateAvailable ? `Deploy v${manifest?.latestVersion}` : `Re-Deploy v${manifest?.latestVersion || '2.4.0'}`}
+                cancelText="Cancel"
+                type="primary"
+                onConfirm={handleDeployUpdate}
+                onCancel={() => setConfirmDeployShow(false)}
+            />
+
+            {/* In-UI Confirmation: Rollback Update */}
+            <ConfirmModal
+                show={confirmRollbackShow}
+                title="Rollback to Previous Snapshot"
+                message="Are you sure you want to rollback cluster binaries to the previous pre-update backup snapshot? Any modified runtime files will be reverted."
+                confirmText="Restore Snapshot"
+                cancelText="Cancel"
+                type="rollback"
+                onConfirm={handleRollback}
+                onCancel={() => setConfirmRollbackShow(false)}
+            />
         </div>
     );
 };

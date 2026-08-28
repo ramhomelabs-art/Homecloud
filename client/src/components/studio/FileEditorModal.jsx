@@ -8,6 +8,7 @@ import {
     Search, WrapText, ZoomIn, ZoomOut, CheckCircle2,
     Code2, FileText, CornerDownLeft
 } from 'lucide-react';
+import ConfirmModal from '../modals/ConfirmModal';
 
 const getLanguage = (fileName) => {
     if (!fileName) return 'text';
@@ -171,11 +172,11 @@ const FileEditorModal = ({ file, onClose, showToast, onSaved }) => {
         if (showToast) showToast('Copied to clipboard', 'info');
     };
 
+    const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
+
     const handleClose = () => {
         if (isDirty) {
-            if (window.confirm('You have unsaved changes. Are you sure you want to discard them?')) {
-                onClose();
-            }
+            setShowDiscardConfirm(true);
         } else {
             onClose();
         }
@@ -415,6 +416,21 @@ const FileEditorModal = ({ file, onClose, showToast, onSaved }) => {
                     </div>
                 </div>
             </motion.div>
+
+            {/* In-UI Confirmation: Discard Unsaved Changes */}
+            <ConfirmModal
+                show={showDiscardConfirm}
+                title="Discard Unsaved Changes?"
+                message="You have unsaved edits in this file. Are you sure you want to close without saving?"
+                confirmText="Discard & Close"
+                cancelText="Keep Editing"
+                type="warning"
+                onConfirm={() => {
+                    setShowDiscardConfirm(false);
+                    onClose();
+                }}
+                onCancel={() => setShowDiscardConfirm(false)}
+            />
         </div>
     );
 };

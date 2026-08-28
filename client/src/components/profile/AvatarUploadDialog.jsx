@@ -17,14 +17,16 @@ const AvatarUploadDialog = ({ user, onClose, onSuccess }) => {
     const [crop, setCrop] = useState();
     const [completedCrop, setCompletedCrop] = useState(null);
     const [isUploading, setIsUploading] = useState(false);
+    const [errorMsg, setErrorMsg] = useState('');
     const imgRef = useRef(null);
     const fileInputRef = useRef(null);
 
     const onSelectFile = (e) => {
         if (e.target.files && e.target.files.length > 0) {
+            setErrorMsg('');
             const file = e.target.files[0];
             if (file.size > 5 * 1024 * 1024) {
-                alert('File is too large (Max 5MB)');
+                setErrorMsg('File is too large (Max 5MB)');
                 return;
             }
             setCrop(undefined);
@@ -42,6 +44,7 @@ const AvatarUploadDialog = ({ user, onClose, onSuccess }) => {
     const handleSave = async () => {
         if (!completedCrop || !imgRef.current) return;
         
+        setErrorMsg('');
         setIsUploading(true);
         try {
             const image = imgRef.current;
@@ -80,7 +83,7 @@ const AvatarUploadDialog = ({ user, onClose, onSuccess }) => {
                 }
             }, 'image/png');
         } catch (err) {
-            alert(err.response?.data?.error || err.message || 'Upload failed');
+            setErrorMsg(err.response?.data?.error || err.message || 'Upload failed');
             setIsUploading(false);
         }
     };
@@ -104,6 +107,12 @@ const AvatarUploadDialog = ({ user, onClose, onSuccess }) => {
                     <h2 style={styles.title}>Update Profile Photo</h2>
                     <button onClick={onClose} style={styles.closeBtn}><X size={20} /></button>
                 </div>
+
+                {errorMsg && (
+                    <div style={{ padding: '10px 14px', borderRadius: '8px', background: 'rgba(244, 63, 94, 0.12)', border: '1px solid rgba(244, 63, 94, 0.3)', color: '#f43f5e', fontSize: '12.5px', fontWeight: '600', marginBottom: '16px' }}>
+                        {errorMsg}
+                    </div>
+                )}
 
                 {!imgSrc ? (
                     <div 

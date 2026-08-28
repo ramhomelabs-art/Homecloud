@@ -174,8 +174,9 @@ const GuestPortal = ({ shareId, showToast }) => {
             a.download = item.name + (item.isDirectory ? '.zip' : '');
             a.click();
             URL.revokeObjectURL(url);
-        } catch { alert('Download failed.'); }
-        finally {
+        } catch { 
+            if (showToast) showToast('Download failed. Please check your network connection.', 'error'); 
+        } finally {
             setDownloading(false);
             setDlProgress(null);
         }

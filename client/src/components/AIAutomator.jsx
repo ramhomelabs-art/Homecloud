@@ -6,6 +6,7 @@ import {
     Search, Archive, Tags, Layers
 } from 'lucide-react';
 import FolderPickerModal from './modals/FolderPickerModal';
+import ConfirmModal from './modals/ConfirmModal';
 
 const API_BASE = '/api';
 
@@ -202,8 +203,12 @@ const AIAutomator = ({ agents, showToast }) => {
         }
     };
 
-    const handleDeleteRule = async (id, name) => {
-        if (!window.confirm(`Permanently delete automation rule "${name}"?`)) return;
+    const [ruleToDelete, setRuleToDelete] = useState(null);
+
+    const confirmDeleteRule = async () => {
+        if (!ruleToDelete) return;
+        const { id, name } = ruleToDelete;
+        setRuleToDelete(null);
         try {
             const token = localStorage.getItem('token');
             const headers = token ? { Authorization: `Bearer ${token}` } : {};
@@ -214,6 +219,10 @@ const AIAutomator = ({ agents, showToast }) => {
         } catch (err) {
             showToast('Failed to delete rule', 'error');
         }
+    };
+
+    const handleDeleteRule = (id, name) => {
+        setRuleToDelete({ id, name });
     };
 
     const printToTerminal = (text, type = 'info') => {
@@ -1034,6 +1043,18 @@ const AIAutomator = ({ agents, showToast }) => {
                     showToast={showToast}
                 />
             )}
+
+            {/* In-UI Confirmation: Delete Rule */}
+            <ConfirmModal
+                show={!!ruleToDelete}
+                title="Delete Automation Rule"
+                message={`Are you sure you want to permanently delete automation rule "${ruleToDelete?.name}"?`}
+                confirmText="Delete Rule"
+                cancelText="Cancel"
+                type="danger"
+                onConfirm={confirmDeleteRule}
+                onCancel={() => setRuleToDelete(null)}
+            />
         </div>
     );
 };

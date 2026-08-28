@@ -102,7 +102,7 @@ const UploadPortal = ({ shareId }) => {
             }, 1200);
             
         } catch (e) {
-            alert(String(e.response?.data?.error || 'Upload failed. Please check file sizes or connection.'));
+            setError(String(e.response?.data?.error || 'Upload failed. Please check file sizes or connection.'));
             setUploading(false);
         }
     };

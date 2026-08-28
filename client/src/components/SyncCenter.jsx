@@ -6,6 +6,7 @@ import {
     RefreshCw, ChevronRight, Activity, Database, AlertCircle, Check, Info, X
 } from 'lucide-react';
 import FolderPickerModal from './modals/FolderPickerModal';
+import ConfirmModal from './modals/ConfirmModal';
 
 const API_BASE = '/api/v1';
 
@@ -156,8 +157,12 @@ const SyncCenter = ({ agents, showToast }) => {
         }
     };
 
-    const handleDeleteTask = async (id, name) => {
-        if (!window.confirm(`Permanently delete sync task "${name}"?`)) return;
+    const [taskToDelete, setTaskToDelete] = useState(null);
+
+    const confirmDeleteTask = async () => {
+        if (!taskToDelete) return;
+        const { id, name } = taskToDelete;
+        setTaskToDelete(null);
         try {
             const token = localStorage.getItem('token');
             const headers = token ? { Authorization: `Bearer ${token}` } : {};
@@ -167,6 +172,10 @@ const SyncCenter = ({ agents, showToast }) => {
         } catch (err) {
             showToast('Failed to delete sync task', 'error');
         }
+    };
+
+    const handleDeleteTask = (id, name) => {
+        setTaskToDelete({ id, name });
     };
 
     const handleViewHistory = async (task) => {
@@ -767,6 +776,18 @@ const SyncCenter = ({ agents, showToast }) => {
                     showToast={showToast}
                 />
             )}
+
+            {/* In-UI Confirmation: Delete Sync Task */}
+            <ConfirmModal
+                show={!!taskToDelete}
+                title="Delete Synchronization Task"
+                message={`Are you sure you want to permanently delete sync task "${taskToDelete?.name}"? Scheduled jobs for this task will be stopped.`}
+                confirmText="Delete Task"
+                cancelText="Cancel"
+                type="danger"
+                onConfirm={confirmDeleteTask}
+                onCancel={() => setTaskToDelete(null)}
+            />
         </div>
     );
 };

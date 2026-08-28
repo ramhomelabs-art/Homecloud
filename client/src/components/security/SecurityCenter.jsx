@@ -9,8 +9,12 @@ import {
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, CartesianGrid } from 'recharts';
 import FolderPickerModal from '../modals/FolderPickerModal';
 import AttackGeoMap from './AttackGeoMap';
+import ConfirmModal from '../modals/ConfirmModal';
 
-function SecurityCenter() {
+function SecurityCenter({ showToast: externalToast }) {
+    const showToast = (msg, type = 'info') => {
+        if (externalToast) externalToast(msg, type);
+    };
     const [stats, setStats] = useState(null);
     const [quarantine, setQuarantine] = useState([]);
     const [agents, setAgents] = useState([]);
@@ -113,6 +117,9 @@ function SecurityCenter() {
         }
     };
 
+    // In-UI Confirmation Modal State
+    const [confirmAction, setConfirmAction] = useState(null);
+
     const handleAuditNode = async (nodeId) => {
         setAuditingNode(nodeId);
         try {
@@ -122,10 +129,11 @@ function SecurityCenter() {
             setTimeout(() => {
                 setAuditingNode(null);
                 fetchData();
+                showToast(`Node audit initiated for ${nodeId}`, 'success');
             }, 1200);
         } catch (err) {
             setAuditingNode(null);
-            alert('Failed to initiate node audit');
+            showToast('Failed to initiate node audit', 'error');
         }
     };
 
@@ -140,8 +148,9 @@ function SecurityCenter() {
             const token = localStorage.getItem('token');
             const headers = token ? { Authorization: `Bearer ${token}` } : {};
             await axios.post('/api/v1/security/quarantine/approve', { id }, { headers });
+            showToast('File restored from quarantine', 'success');
             fetchData();
-        } catch (e) { alert('Failed to approve'); }
+        } catch (e) { showToast('Failed to approve file', 'error'); }
     };
 
     const handleReject = async (id) => {
@@ -149,8 +158,9 @@ function SecurityCenter() {
             const token = localStorage.getItem('token');
             const headers = token ? { Authorization: `Bearer ${token}` } : {};
             await axios.post('/api/v1/security/quarantine/reject', { id }, { headers });
+            showToast('Quarantined file deleted', 'info');
             fetchData();
-        } catch (e) { alert('Failed to reject'); }
+        } catch (e) { showToast('Failed to reject file', 'error'); }
     };
 
     const handleRescan = async (filePath) => {
@@ -158,8 +168,9 @@ function SecurityCenter() {
             const token = localStorage.getItem('token');
             const headers = token ? { Authorization: `Bearer ${token}` } : {};
             await axios.post('/api/v1/security/scan/file', { filePath }, { headers });
+            showToast('File rescan initiated', 'info');
             fetchData();
-        } catch (e) { alert('Failed to rescan file'); }
+        } catch (e) { showToast('Failed to rescan file', 'error'); }
     };
 
     const handleQuarantineRescan = async (id) => {
@@ -167,8 +178,9 @@ function SecurityCenter() {
             const token = localStorage.getItem('token');
             const headers = token ? { Authorization: `Bearer ${token}` } : {};
             await axios.post(`/api/v1/quarantine/${id}/scan`, {}, { headers });
+            showToast('Quarantined item rescan initiated', 'info');
             fetchData();
-        } catch (e) { alert('Failed to rescan quarantined file'); }
+        } catch (e) { showToast('Failed to rescan quarantined file', 'error'); }
     };
 
     const handleAllowScan = async (scanId) => {
@@ -176,18 +188,27 @@ function SecurityCenter() {
             const token = localStorage.getItem('token');
             const headers = token ? { Authorization: `Bearer ${token}` } : {};
             await axios.post(`/api/v1/security/scans/${scanId}/allow`, {}, { headers });
+            showToast('Threat allowed and whitelisted', 'success');
             fetchData();
-        } catch (e) { alert('Failed to allow threat'); }
+        } catch (e) { showToast('Failed to allow threat', 'error'); }
     };
 
-    const handleDeleteThreat = async (scanId) => {
-        if (!window.confirm('Clear this threat record and delete the file permanently?')) return;
-        try {
-            const token = localStorage.getItem('token');
-            const headers = token ? { Authorization: `Bearer ${token}` } : {};
-            await axios.delete(`/api/v1/security/scans/${scanId}`, { headers });
-            fetchData();
-        } catch (e) { alert('Failed to delete threat record'); }
+    const handleDeleteThreat = (scanId) => {
+        setConfirmAction({
+            title: 'Delete Threat Record & File',
+            message: 'Clear this threat record and delete the file permanently?',
+            confirmText: 'Delete Threat',
+            type: 'danger',
+            onConfirm: async () => {
+                try {
+                    const token = localStorage.getItem('token');
+                    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+                    await axios.delete(`/api/v1/security/scans/${scanId}`, { headers });
+                    showToast('Threat record deleted', 'success');
+                    fetchData();
+                } catch (e) { showToast('Failed to delete threat record', 'error'); }
+            }
+        });
     };
 
     const handleSavePolicy = async (e) => {
@@ -197,10 +218,10 @@ function SecurityCenter() {
             const token = localStorage.getItem('token');
             const headers = token ? { Authorization: `Bearer ${token}` } : {};
             await axios.post('/api/v1/security/policy', policy, { headers });
-            alert('Security policies updated successfully.');
+            showToast('Security policies updated successfully.', 'success');
             fetchData(true);
         } catch (err) {
-            alert('Failed to save policies');
+            showToast('Failed to save policies', 'error');
         } finally {
             setSavingPolicy(false);
         }
@@ -219,9 +240,10 @@ function SecurityCenter() {
                 agentId: scanNode
             }, { headers });
             setScanResults(res.data);
+            showToast('Manual scan complete', 'success');
             fetchData();
         } catch (err) {
-            alert(err.response?.data?.error || 'Manual scan failed');
+            showToast(err.response?.data?.error || 'Manual scan failed', 'error');
         } finally {
             setScanning(false);
         }
@@ -268,31 +290,40 @@ function SecurityCenter() {
                 axios.post('/api/v1/security/quarantine/approve', { id }, { headers })
             ));
             setSelectedQuarantineIds([]);
+            showToast(`Approved & restored ${ids.length} quarantine item(s)`, 'success');
             fetchData();
         } catch (e) {
-            alert('Failed to restore selected quarantine items');
+            showToast('Failed to restore selected quarantine items', 'error');
         } finally {
             setBulkProcessing(false);
         }
     };
 
-    const handleBulkRejectQuarantine = async (ids) => {
+    const handleBulkRejectQuarantine = (ids) => {
         if (!ids || ids.length === 0) return;
-        if (!window.confirm(`Delete ${ids.length} selected items permanently?`)) return;
-        setBulkProcessing(true);
-        try {
-            const token = localStorage.getItem('token');
-            const headers = token ? { Authorization: `Bearer ${token}` } : {};
-            await Promise.all(ids.map(id => 
-                axios.post('/api/v1/security/quarantine/reject', { id }, { headers })
-            ));
-            setSelectedQuarantineIds([]);
-            fetchData();
-        } catch (e) {
-            alert('Failed to delete selected quarantine items');
-        } finally {
-            setBulkProcessing(false);
-        }
+        setConfirmAction({
+            title: 'Delete Quarantine Items',
+            message: `Are you sure you want to permanently delete ${ids.length} selected quarantined items?`,
+            confirmText: `Delete ${ids.length} Items`,
+            type: 'danger',
+            onConfirm: async () => {
+                setBulkProcessing(true);
+                try {
+                    const token = localStorage.getItem('token');
+                    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+                    await Promise.all(ids.map(id => 
+                        axios.post('/api/v1/security/quarantine/reject', { id }, { headers })
+                    ));
+                    setSelectedQuarantineIds([]);
+                    showToast(`Deleted ${ids.length} quarantine item(s)`, 'success');
+                    fetchData();
+                } catch (e) {
+                    showToast('Failed to delete selected quarantine items', 'error');
+                } finally {
+                    setBulkProcessing(false);
+                }
+            }
+        });
     };
 
     const handleBulkAllowThreats = async (threats) => {
@@ -309,31 +340,40 @@ function SecurityCenter() {
                 }
             }));
             setSelectedThreatIds([]);
+            showToast(`Allowed & whitelisted ${threats.length} threat(s)`, 'success');
             fetchData();
         } catch (e) {
-            alert('Failed to allow selected threats');
+            showToast('Failed to allow selected threats', 'error');
         } finally {
             setBulkProcessing(false);
         }
     };
 
-    const handleBulkDeleteThreats = async (scanIds) => {
+    const handleBulkDeleteThreats = (scanIds) => {
         if (!scanIds || scanIds.length === 0) return;
-        if (!window.confirm(`Delete ${scanIds.length} selected threat records and files permanently?`)) return;
-        setBulkProcessing(true);
-        try {
-            const token = localStorage.getItem('token');
-            const headers = token ? { Authorization: `Bearer ${token}` } : {};
-            await Promise.all(scanIds.map(scanId => 
-                axios.delete(`/api/v1/security/scans/${scanId}`, { headers })
-            ));
-            setSelectedThreatIds([]);
-            fetchData();
-        } catch (e) {
-            alert('Failed to delete selected threats');
-        } finally {
-            setBulkProcessing(false);
-        }
+        setConfirmAction({
+            title: 'Delete Selected Threat Records',
+            message: `Are you sure you want to delete ${scanIds.length} selected threat records and files permanently?`,
+            confirmText: `Delete ${scanIds.length} Threats`,
+            type: 'danger',
+            onConfirm: async () => {
+                setBulkProcessing(true);
+                try {
+                    const token = localStorage.getItem('token');
+                    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+                    await Promise.all(scanIds.map(scanId => 
+                        axios.delete(`/api/v1/security/scans/${scanId}`, { headers })
+                    ));
+                    setSelectedThreatIds([]);
+                    showToast(`Deleted ${scanIds.length} threat record(s)`, 'success');
+                    fetchData();
+                } catch (e) {
+                    showToast('Failed to delete selected threats', 'error');
+                } finally {
+                    setBulkProcessing(false);
+                }
+            }
+        });
     };
 
     const handleBulkRescanThreats = async (threats) => {
@@ -350,9 +390,10 @@ function SecurityCenter() {
                 }
             }));
             setSelectedThreatIds([]);
+            showToast(`Rescan initiated for ${threats.length} threat(s)`, 'info');
             fetchData();
         } catch (e) {
-            alert('Failed to rescan selected threats');
+            showToast('Failed to rescan selected threats', 'error');
         } finally {
             setBulkProcessing(false);
         }
@@ -1452,9 +1493,24 @@ function SecurityCenter() {
                         setScanNode(node);
                         setPickerOpen(false);
                     }}
-                    showToast={(msg, type) => console.log(msg, type)}
+                    showToast={showToast}
                 />
             )}
+
+            {/* In-UI Confirmation Modal */}
+            <ConfirmModal
+                show={!!confirmAction}
+                title={confirmAction?.title || 'Confirm Action'}
+                message={confirmAction?.message || ''}
+                confirmText={confirmAction?.confirmText || 'Confirm'}
+                cancelText="Cancel"
+                type={confirmAction?.type || 'danger'}
+                onConfirm={() => {
+                    if (confirmAction?.onConfirm) confirmAction.onConfirm();
+                    setConfirmAction(null);
+                }}
+                onCancel={() => setConfirmAction(null)}
+            />
         </div>
     );
 }

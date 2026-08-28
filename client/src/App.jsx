@@ -56,6 +56,7 @@ import FileCommentsModal from './components/modals/FileCommentsModal';
 import DeploymentConfigModal from './components/modals/DeploymentConfigModal';
 import SiteMeshModal from './components/modals/SiteMeshModal';
 import ClusterUpdateModal from './components/modals/ClusterUpdateModal';
+import ConfirmModal from './components/modals/ConfirmModal';
 
 // Polyfill localStorage to automatically fall back to sessionStorage for auth properties.
 // This is critical for session-only configurations and subcomponents that query localStorage.getItem directly.
@@ -263,6 +264,7 @@ function App() {
     const [showClock, setShowClock] = useState(localStorage.getItem('showClock') !== 'false');
     const [format24h, setFormat24h] = useState(localStorage.getItem('format24h') !== 'false');
     const [mobileOpen, setMobileOpen] = useState(false);
+    const [globalConfirmAction, setGlobalConfirmAction] = useState(null);
 
 
     const fetchSystemVersion = async (silent = false) => {
@@ -1040,15 +1042,22 @@ function App() {
         }
     };
 
-    const handleDeleteUser = async (id) => {
-        if (!window.confirm('Are you sure you want to delete this user?')) return;
-        try {
-            await axios.post(`${API_BASE}/v1/auth/users/delete`, { id });
-            showToast('User deleted successfully', 'success');
-            fetchUsers();
-        } catch (e) {
-            showToast(e.response?.data?.error || 'Failed to delete user', 'error');
-        }
+    const handleDeleteUser = (id) => {
+        setGlobalConfirmAction({
+            title: 'Delete User Account',
+            message: 'Are you sure you want to permanently delete this user account?',
+            confirmText: 'Delete User',
+            type: 'danger',
+            onConfirm: async () => {
+                try {
+                    await axios.post(`${API_BASE}/v1/auth/users/delete`, { id });
+                    showToast('User deleted successfully', 'success');
+                    fetchUsers();
+                } catch (e) {
+                    showToast(e.response?.data?.error || 'Failed to delete user', 'error');
+                }
+            }
+        });
     };
 
     const fetchAllData = async () => {
@@ -4385,6 +4394,19 @@ function App() {
                     showToast={showToast}
                 />
             )}
+            <ConfirmModal
+                show={!!globalConfirmAction}
+                title={globalConfirmAction?.title || 'Confirm Action'}
+                message={globalConfirmAction?.message || ''}
+                confirmText={globalConfirmAction?.confirmText || 'Confirm'}
+                cancelText="Cancel"
+                type={globalConfirmAction?.type || 'danger'}
+                onConfirm={() => {
+                    if (globalConfirmAction?.onConfirm) globalConfirmAction.onConfirm();
+                    setGlobalConfirmAction(null);
+                }}
+                onCancel={() => setGlobalConfirmAction(null)}
+            />
             <ConfirmationModal
                 show={!!confirmModal}
                 message={confirmModal?.message}

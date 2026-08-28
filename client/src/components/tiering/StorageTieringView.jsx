@@ -9,6 +9,7 @@ import {
     Copy, Zap, FolderOpen, Folder, Eye, Search
 } from 'lucide-react';
 import FolderPickerModal from '../modals/FolderPickerModal';
+import ConfirmModal from '../modals/ConfirmModal';
 
 const formatBytes = (bytes) => {
     if (!bytes || bytes === 0) return '0 B';
@@ -176,15 +177,25 @@ const StorageTieringView = ({ showToast }) => {
         }
     };
 
-    const handleDeletePolicy = async (id) => {
-        if (!window.confirm('Delete this tiering rule?')) return;
-        try {
-            await axios.delete(`/api/v1/tiering/policies/${id}`, { headers: getHeaders() });
-            if (showToast) showToast('Rule deleted', 'success');
-            loadAll();
-        } catch (e) {
-            if (showToast) showToast(e.response?.data?.error || 'Failed to delete rule', 'error');
-        }
+    // In-UI Confirmation Modal State
+    const [confirmAction, setConfirmAction] = useState(null);
+
+    const handleDeletePolicy = (id) => {
+        setConfirmAction({
+            title: 'Delete Tiering Policy',
+            message: 'Are you sure you want to permanently delete this automated tiering policy?',
+            confirmText: 'Delete Policy',
+            type: 'danger',
+            onConfirm: async () => {
+                try {
+                    await axios.delete(`/api/v1/tiering/policies/${id}`, { headers: getHeaders() });
+                    if (showToast) showToast('Rule deleted', 'success');
+                    loadAll();
+                } catch (e) {
+                    if (showToast) showToast(e.response?.data?.error || 'Failed to delete rule', 'error');
+                }
+            }
+        });
     };
 
     const handleTogglePolicy = async (policy) => {
@@ -213,15 +224,22 @@ const StorageTieringView = ({ showToast }) => {
         }
     };
 
-    const handleDeleteSnapshot = async (id, label) => {
-        if (!window.confirm(`Permanently delete snapshot "${label}"?`)) return;
-        try {
-            await axios.delete(`/api/v1/tiering/snapshots/${id}`, { headers: getHeaders() });
-            if (showToast) showToast(`Snapshot "${label}" deleted successfully`, 'success');
-            loadAll(selectedTarget, customPath);
-        } catch (e) {
-            if (showToast) showToast(e.response?.data?.error || 'Failed to delete snapshot', 'error');
-        }
+    const handleDeleteSnapshot = (id, label) => {
+        setConfirmAction({
+            title: 'Delete Snapshot',
+            message: `Are you sure you want to permanently delete snapshot "${label}"?`,
+            confirmText: 'Delete Snapshot',
+            type: 'danger',
+            onConfirm: async () => {
+                try {
+                    await axios.delete(`/api/v1/tiering/snapshots/${id}`, { headers: getHeaders() });
+                    if (showToast) showToast(`Snapshot "${label}" deleted successfully`, 'success');
+                    loadAll(selectedTarget, customPath);
+                } catch (e) {
+                    if (showToast) showToast(e.response?.data?.error || 'Failed to delete snapshot', 'error');
+                }
+            }
+        });
     };
 
     const handleViewSnapshotManifest = async (snap) => {
@@ -235,15 +253,22 @@ const StorageTieringView = ({ showToast }) => {
         }
     };
 
-    const handleRestoreSnapshot = async (id) => {
-        if (!window.confirm('Restore cluster state to this point-in-time snapshot?')) return;
-        try {
-            const res = await axios.post(`/api/v1/tiering/snapshots/${id}/restore`, {}, { headers: getHeaders() });
-            if (showToast) showToast(res.data.message || 'Snapshot restored', 'success');
-            loadAll(selectedTarget, customPath);
-        } catch (e) {
-            if (showToast) showToast(e.response?.data?.error || 'Restore failed', 'error');
-        }
+    const handleRestoreSnapshot = (id) => {
+        setConfirmAction({
+            title: 'Restore Cluster State',
+            message: 'Are you sure you want to restore cluster files and database state to this point-in-time snapshot?',
+            confirmText: 'Restore Snapshot',
+            type: 'primary',
+            onConfirm: async () => {
+                try {
+                    const res = await axios.post(`/api/v1/tiering/snapshots/${id}/restore`, {}, { headers: getHeaders() });
+                    if (showToast) showToast(res.data.message || 'Snapshot restored', 'success');
+                    loadAll(selectedTarget, customPath);
+                } catch (e) {
+                    if (showToast) showToast(e.response?.data?.error || 'Restore failed', 'error');
+                }
+            }
+        });
     };
 
     return (
@@ -1002,6 +1027,21 @@ const StorageTieringView = ({ showToast }) => {
                     }}
                 />
             )}
+
+            {/* In-UI Confirmation Modal */}
+            <ConfirmModal
+                show={!!confirmAction}
+                title={confirmAction?.title || 'Confirm Action'}
+                message={confirmAction?.message || ''}
+                confirmText={confirmAction?.confirmText || 'Confirm'}
+                cancelText="Cancel"
+                type={confirmAction?.type || 'danger'}
+                onConfirm={() => {
+                    if (confirmAction?.onConfirm) confirmAction.onConfirm();
+                    setConfirmAction(null);
+                }}
+                onCancel={() => setConfirmAction(null)}
+            />
         </div>
     );
 };

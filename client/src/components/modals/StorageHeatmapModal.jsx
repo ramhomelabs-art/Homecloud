@@ -6,6 +6,7 @@ import {
     Trash2, Eye, ChevronRight, Layers, AlertCircle, 
     Sparkles, ArrowUpRight, BarChart2, ShieldAlert, Check
 } from 'lucide-react';
+import ConfirmModal from './ConfirmModal';
 
 const formatBytes = (bytes) => {
     if (!bytes || bytes === 0) return '0 B';
@@ -31,6 +32,7 @@ const StorageHeatmapModal = ({ path: initialPath = '', onClose, showToast, onNav
     const [treeData, setTreeData] = useState(null);
     const [activeCategory, setActiveCategory] = useState('all');
     const [deletingPath, setDeletingPath] = useState(null);
+    const [fileToDelete, setFileToDelete] = useState(null);
 
     const fetchTree = async (scanPath) => {
         setLoading(true);
@@ -52,8 +54,10 @@ const StorageHeatmapModal = ({ path: initialPath = '', onClose, showToast, onNav
         fetchTree(currentPath);
     }, [currentPath]);
 
-    const handleDeleteFile = async (filePath) => {
-        if (!window.confirm(`Are you sure you want to delete "${filePath.split(/[/\\]/).pop()}" to reclaim space?`)) return;
+    const confirmDeleteFile = async () => {
+        if (!fileToDelete) return;
+        const filePath = fileToDelete;
+        setFileToDelete(null);
         setDeletingPath(filePath);
         try {
             const token = localStorage.getItem('token');
@@ -69,6 +73,10 @@ const StorageHeatmapModal = ({ path: initialPath = '', onClose, showToast, onNav
         } finally {
             setDeletingPath(null);
         }
+    };
+
+    const handleDeleteFile = (filePath) => {
+        setFileToDelete(filePath);
     };
 
     const breadcrumbs = currentPath ? currentPath.split(/[/\\]/).filter(Boolean) : [];
@@ -407,6 +415,18 @@ const StorageHeatmapModal = ({ path: initialPath = '', onClose, showToast, onNav
                     )}
                 </div>
             </motion.div>
+
+            {/* In-UI Confirmation: Delete File */}
+            <ConfirmModal
+                show={!!fileToDelete}
+                title="Delete Large File"
+                message={`Are you sure you want to permanently delete "${fileToDelete ? fileToDelete.split(/[/\\]/).pop() : ''}" to reclaim disk space? This action cannot be undone.`}
+                confirmText="Delete File"
+                cancelText="Cancel"
+                type="danger"
+                onConfirm={confirmDeleteFile}
+                onCancel={() => setFileToDelete(null)}
+            />
         </div>
     );
 };

@@ -5,6 +5,8 @@ import {
     HardDrive, CheckCircle2, ArrowRight, Radio, Server, Copy, Check, Info, Cpu, Layers
 } from 'lucide-react';
 
+import ConfirmModal from './ConfirmModal';
+
 const API_BASE = '/api';
 
 const formatBytes = (bytes) => {
@@ -21,6 +23,7 @@ const SiteMeshModal = ({ show, onClose, showToast }) => {
     const [syncJobs, setSyncJobs] = useState([]);
     const [loading, setLoading] = useState(false);
     const [viewTab, setViewTab] = useState('sites'); // 'sites', 'sync', 'pair'
+    const [siteToUnpair, setSiteToUnpair] = useState(null);
 
     // Pairing form state
     const [newSiteName, setNewSiteName] = useState('');
@@ -131,8 +134,10 @@ const SiteMeshModal = ({ show, onClose, showToast }) => {
         }
     };
 
-    const handleDeleteSite = async (siteId) => {
-        if (!window.confirm('Are you sure you want to unpair this site from the mesh?')) return;
+    const confirmUnpairSite = async () => {
+        if (!siteToUnpair) return;
+        const siteId = siteToUnpair;
+        setSiteToUnpair(null);
         const token = localStorage.getItem('token') || '';
         try {
             await axios.delete(`${API_BASE}/v1/sitemesh/sites/${siteId}`, {
@@ -143,6 +148,10 @@ const SiteMeshModal = ({ show, onClose, showToast }) => {
         } catch (e) {
             if (showToast) showToast('Failed to remove site', 'error');
         }
+    };
+
+    const handleDeleteSite = (siteId) => {
+        setSiteToUnpair(siteId);
     };
 
     const copyCmd = () => {
@@ -413,6 +422,18 @@ const SiteMeshModal = ({ show, onClose, showToast }) => {
                     </button>
                 </div>
             </div>
+
+            {/* In-UI Confirmation: Unpair Site */}
+            <ConfirmModal
+                show={!!siteToUnpair}
+                title="Unpair Cluster Site"
+                message="Are you sure you want to disconnect and unpair this site from the cluster mesh topology?"
+                confirmText="Unpair Site"
+                cancelText="Cancel"
+                type="danger"
+                onConfirm={confirmUnpairSite}
+                onCancel={() => setSiteToUnpair(null)}
+            />
         </div>
     );
 };

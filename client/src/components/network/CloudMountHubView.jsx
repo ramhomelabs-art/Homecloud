@@ -7,6 +7,7 @@ import {
     Layers, Lock, Server, Cpu, Database, Cloud, Terminal, 
     Key, ShieldCheck, Play, Radio
 } from 'lucide-react';
+import ConfirmModal from '../modals/ConfirmModal';
 
 const formatBytes = (bytes) => {
     if (!bytes || bytes === 0) return '0 B';
@@ -153,8 +154,12 @@ const CloudMountHubView = ({ showToast, onExploreFiles }) => {
         }
     };
 
-    const handleDeleteMount = async (id, label) => {
-        if (!window.confirm(`Are you sure you want to disconnect "${label}"?`)) return;
+    const [mountToDisconnect, setMountToDisconnect] = useState(null);
+
+    const confirmDisconnectMount = async () => {
+        if (!mountToDisconnect) return;
+        const { id, label } = mountToDisconnect;
+        setMountToDisconnect(null);
         try {
             const token = localStorage.getItem('token');
             const headers = token ? { Authorization: `Bearer ${token}` } : {};
@@ -164,6 +169,10 @@ const CloudMountHubView = ({ showToast, onExploreFiles }) => {
         } catch (err) {
             if (showToast) showToast('Failed to disconnect mount', 'error');
         }
+    };
+
+    const handleDeleteMount = (id, label) => {
+        setMountToDisconnect({ id, label });
     };
 
     const resetForm = () => {
@@ -707,6 +716,18 @@ const CloudMountHubView = ({ showToast, onExploreFiles }) => {
                     </div>
                 </div>
             )}
+
+            {/* In-UI Confirmation: Disconnect Mount */}
+            <ConfirmModal
+                show={!!mountToDisconnect}
+                title="Disconnect Storage Mount"
+                message={`Are you sure you want to disconnect cloud mount "${mountToDisconnect?.label}"? Remote files will no longer be mapped.`}
+                confirmText="Disconnect Mount"
+                cancelText="Cancel"
+                type="danger"
+                onConfirm={confirmDisconnectMount}
+                onCancel={() => setMountToDisconnect(null)}
+            />
         </div>
     );
 };

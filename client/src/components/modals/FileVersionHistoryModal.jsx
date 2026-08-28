@@ -5,6 +5,7 @@ import {
     X, History, Clock, RotateCcw, FileText, CheckCircle2, 
     Calendar, User, HardDrive, RefreshCw, AlertCircle, Eye
 } from 'lucide-react';
+import ConfirmModal from './ConfirmModal';
 
 const formatBytes = (bytes) => {
     if (!bytes || bytes === 0) return '0 B';
@@ -18,6 +19,7 @@ const FileVersionHistoryModal = ({ file, onClose, showToast, onRestored }) => {
     const [loading, setLoading] = useState(true);
     const [historyData, setHistoryData] = useState(null);
     const [restoringVersion, setRestoringVersion] = useState(null);
+    const [versionToRestore, setVersionToRestore] = useState(null);
 
     const fetchHistory = async () => {
         setLoading(true);
@@ -40,8 +42,10 @@ const FileVersionHistoryModal = ({ file, onClose, showToast, onRestored }) => {
         if (file?.path) fetchHistory();
     }, [file]);
 
-    const handleRestore = async (version) => {
-        if (!window.confirm(`Restore "${file.name}" to state from ${new Date(version.timestamp).toLocaleString()}?`)) return;
+    const confirmRestore = async () => {
+        if (!versionToRestore) return;
+        const version = versionToRestore;
+        setVersionToRestore(null);
         setRestoringVersion(version.version);
         try {
             if (showToast) showToast(`Restored "${file.name}" to ${version.version}`, 'success');
@@ -52,6 +56,10 @@ const FileVersionHistoryModal = ({ file, onClose, showToast, onRestored }) => {
         } finally {
             setRestoringVersion(null);
         }
+    };
+
+    const handleRestore = (version) => {
+        setVersionToRestore(version);
     };
 
     return (
@@ -201,6 +209,18 @@ const FileVersionHistoryModal = ({ file, onClose, showToast, onRestored }) => {
                     )}
                 </div>
             </motion.div>
+
+            {/* In-UI Confirmation: Restore Version */}
+            <ConfirmModal
+                show={!!versionToRestore}
+                title="Restore File Version"
+                message={`Are you sure you want to restore "${file.name}" to its state from ${versionToRestore ? new Date(versionToRestore.timestamp).toLocaleString() : ''}?`}
+                confirmText="Restore Version"
+                cancelText="Cancel"
+                type="primary"
+                onConfirm={confirmRestore}
+                onCancel={() => setVersionToRestore(null)}
+            />
         </div>
     );
 };

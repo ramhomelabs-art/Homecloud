@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import Avatar from './Avatar';
 import AvatarUploadDialog from './AvatarUploadDialog';
+import ConfirmModal from '../modals/ConfirmModal';
 
 const formatBytes = (bytes) => {
     if (bytes === undefined || bytes === null || isNaN(bytes)) return '0.0 KB';
@@ -195,17 +196,27 @@ const ProfileSettings = ({ onProfileUpdate }) => {
         showToast('Profile photo updated', 'success');
     };
 
-    const handleRemoveAvatar = async () => {
-        if (!window.confirm('Remove profile photo?')) return;
-        try {
-            await axios.delete('/api/v1/profile/avatar');
-            const updated = { ...user, avatar_path: null, avatar_thumbnail_path: null };
-            setUser(updated);
-            if (onProfileUpdate) onProfileUpdate(updated);
-            showToast('Profile photo removed', 'success');
-        } catch (e) {
-            showToast('Failed to remove avatar', 'error');
-        }
+    // In-UI Confirmation Modal State
+    const [confirmAction, setConfirmAction] = useState(null);
+
+    const handleRemoveAvatar = () => {
+        setConfirmAction({
+            title: 'Remove Profile Photo',
+            message: 'Are you sure you want to remove your profile photo and reset to default initials?',
+            confirmText: 'Remove Photo',
+            type: 'warning',
+            onConfirm: async () => {
+                try {
+                    await axios.delete('/api/v1/profile/avatar');
+                    const updated = { ...user, avatar_path: null, avatar_thumbnail_path: null };
+                    setUser(updated);
+                    if (onProfileUpdate) onProfileUpdate(updated);
+                    showToast('Profile photo removed', 'success');
+                } catch (e) {
+                    showToast('Failed to remove avatar', 'error');
+                }
+            }
+        });
     };
 
     const fetchSessions = async () => {
@@ -220,27 +231,41 @@ const ProfileSettings = ({ onProfileUpdate }) => {
         }
     };
 
-    const handleRevokeSession = async (sessionId) => {
+    const handleRevokeSession = (sessionId) => {
         if (!sessionId) return;
-        if (!window.confirm('Are you sure you want to revoke this session? That device will be disconnected.')) return;
-        try {
-            await axios.delete(`/api/v1/auth/sessions/${sessionId}`);
-            showToast('Session revoked successfully', 'success');
-            fetchSessions();
-        } catch (e) {
-            showToast('Failed to revoke session', 'error');
-        }
+        setConfirmAction({
+            title: 'Revoke Device Session',
+            message: 'Are you sure you want to revoke this session? That device will be disconnected immediately.',
+            confirmText: 'Revoke Session',
+            type: 'danger',
+            onConfirm: async () => {
+                try {
+                    await axios.delete(`/api/v1/auth/sessions/${sessionId}`);
+                    showToast('Session revoked successfully', 'success');
+                    fetchSessions();
+                } catch (e) {
+                    showToast('Failed to revoke session', 'error');
+                }
+            }
+        });
     };
 
-    const handleRevokeOtherSessions = async () => {
-        if (!window.confirm('Log out from all other devices and keep only this current session active?')) return;
-        try {
-            await axios.post('/api/v1/auth/sessions/revoke-others');
-            showToast('All other sessions revoked successfully', 'success');
-            fetchSessions();
-        } catch (e) {
-            showToast('Failed to revoke other sessions', 'error');
-        }
+    const handleRevokeOtherSessions = () => {
+        setConfirmAction({
+            title: 'Revoke All Other Sessions',
+            message: 'Are you sure you want to log out from all other devices and keep only this current session active?',
+            confirmText: 'Log Out Others',
+            type: 'warning',
+            onConfirm: async () => {
+                try {
+                    await axios.post('/api/v1/auth/sessions/revoke-others');
+                    showToast('All other sessions revoked successfully', 'success');
+                    fetchSessions();
+                } catch (e) {
+                    showToast('Failed to revoke other sessions', 'error');
+                }
+            }
+        });
     };
 
     const handleConfirmDisableMfa = async (e) => {
@@ -1059,6 +1084,21 @@ const ProfileSettings = ({ onProfileUpdate }) => {
             )}
 
             {showAvatarDialog && <AvatarUploadDialog user={user} onClose={() => setShowAvatarDialog(false)} onSuccess={handleAvatarSuccess} />}
+
+            {/* In-UI Confirmation Modal */}
+            <ConfirmModal
+                show={!!confirmAction}
+                title={confirmAction?.title || 'Confirm Action'}
+                message={confirmAction?.message || ''}
+                confirmText={confirmAction?.confirmText || 'Confirm'}
+                cancelText="Cancel"
+                type={confirmAction?.type || 'danger'}
+                onConfirm={() => {
+                    if (confirmAction?.onConfirm) confirmAction.onConfirm();
+                    setConfirmAction(null);
+                }}
+                onCancel={() => setConfirmAction(null)}
+            />
         </div>
     );
 };

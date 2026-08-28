@@ -7,6 +7,7 @@ import {
     Server, Cpu, ArrowUpRight, ArrowDownLeft, Terminal,
     Laptop, Smartphone, Bot, Eye, Trash2
 } from 'lucide-react';
+import ConfirmModal from '../modals/ConfirmModal';
 
 const formatBytes = (bytes) => {
     if (!bytes || bytes === 0) return '0 B';
@@ -65,8 +66,12 @@ const NetworkTrafficView = ({ showToast }) => {
         }
     };
 
-    const handleBanClientIp = async (ip) => {
-        if (!window.confirm(`Are you sure you want to drop all traffic from IP ${ip}?`)) return;
+    const [ipToBan, setIpToBan] = useState(null);
+
+    const confirmBanIp = async () => {
+        if (!ipToBan) return;
+        const ip = ipToBan;
+        setIpToBan(null);
         try {
             const token = localStorage.getItem('token');
             const headers = token ? { Authorization: `Bearer ${token}` } : {};
@@ -76,6 +81,10 @@ const NetworkTrafficView = ({ showToast }) => {
         } catch (err) {
             if (showToast) showToast('Failed to ban client IP', 'error');
         }
+    };
+
+    const handleBanClientIp = (ip) => {
+        setIpToBan(ip);
     };
 
     const requests = telemetry?.recentRequests || [];
@@ -405,6 +414,18 @@ const NetworkTrafficView = ({ showToast }) => {
                     )}
                 </div>
             )}
+
+            {/* In-UI Confirmation: Ban IP */}
+            <ConfirmModal
+                show={!!ipToBan}
+                title="Blacklist & Ban Client IP"
+                message={`Are you sure you want to drop all traffic and immediately terminate active connections from IP ${ipToBan}?`}
+                confirmText="Ban Client IP"
+                cancelText="Cancel"
+                type="danger"
+                onConfirm={confirmBanIp}
+                onCancel={() => setIpToBan(null)}
+            />
         </div>
     );
 };

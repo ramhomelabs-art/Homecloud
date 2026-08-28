@@ -5,6 +5,7 @@ import {
     ChevronLeft, ChevronRight, RefreshCw, FileText, ExternalLink, Printer,
     RotateCw, BookOpen, Eye, Music
 } from 'lucide-react';
+import ConfirmModal from './ConfirmModal';
 
 const API_BASE = '/api';
 
@@ -19,6 +20,7 @@ const MediaPreviewModal = ({ media, onClose, onDownload, onNext, onPrev, showToa
     const [isSaving, setIsSaving] = useState(false);
     const [isEdited, setIsEdited] = useState(false);
     const [mdMode, setMdMode] = useState('split'); // 'edit', 'split', 'preview'
+    const [pendingDiscardAction, setPendingDiscardAction] = useState(null);
 
     const [pdfBlobUrl, setPdfBlobUrl] = useState(null);
     const [pdfLoading, setPdfLoading] = useState(false);
@@ -193,9 +195,7 @@ const MediaPreviewModal = ({ media, onClose, onDownload, onNext, onPrev, showToa
 
     const checkUnsaved = (callback) => {
         if (isEdited) {
-            if (window.confirm('You have unsaved changes. Are you sure you want to discard them?')) {
-                callback();
-            }
+            setPendingDiscardAction(() => callback);
         } else {
             callback();
         }
@@ -672,6 +672,21 @@ const MediaPreviewModal = ({ media, onClose, onDownload, onNext, onPrev, showToa
                     )}
                 </div>
             </div>
+
+            {/* In-UI Confirmation: Discard Unsaved Changes */}
+            <ConfirmModal
+                show={!!pendingDiscardAction}
+                title="Discard Unsaved Changes?"
+                message="You have unsaved edits in this file. Are you sure you want to discard them?"
+                confirmText="Discard Changes"
+                cancelText="Keep Editing"
+                type="warning"
+                onConfirm={() => {
+                    if (pendingDiscardAction) pendingDiscardAction();
+                    setPendingDiscardAction(null);
+                }}
+                onCancel={() => setPendingDiscardAction(null)}
+            />
         </div>
     );
 };

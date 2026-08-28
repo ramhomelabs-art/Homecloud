@@ -28,6 +28,7 @@ const getFileIcon = (title = '') => {
 const PublicPortal = ({ shareId }) => {
     const [info, setInfo]       = useState(null);
     const [error, setError]     = useState('');
+    const [dlError, setDlError] = useState('');
     const [loading, setLoading] = useState(true);
     const [dling, setDling]     = useState(false);
     const [dlProgress, setDlProgress] = useState(null);
@@ -41,6 +42,7 @@ const PublicPortal = ({ shareId }) => {
 
     const download = async (filePath = '') => {
         setDling(true);
+        setDlError('');
         const startTime = Date.now();
         setDlProgress({
             name: info?.title || 'download',
@@ -53,12 +55,12 @@ const PublicPortal = ({ shareId }) => {
         try {
             const r = await axios.post('/api/share/stream', { token: shareId, filePath }, {
                 responseType: 'blob',
-                onDownloadProgress: (progressEvent) => {
-                    const loaded = progressEvent.loaded || 0;
-                    const total = progressEvent.total || info?.totalSize || 0;
-                    const elapsed = (Date.now() - startTime) / 1000;
-                    const speed = elapsed > 0 ? (loaded / elapsed) : 0;
-                    const percent = total > 0 ? Math.min(100, Math.round((loaded * 100) / total)) : 0;
+                onDownloadProgress: (pe) => {
+                    const loaded = pe.loaded;
+                    const total = pe.total || info?.totalSize || loaded;
+                    const elapsed = Math.max(1, (Date.now() - startTime) / 1000);
+                    const speed = loaded / elapsed; // bytes/sec
+                    const percent = Math.min(100, Math.round((loaded / total) * 100));
 
                     setDlProgress({
                         name: info?.title || 'download',
@@ -76,7 +78,7 @@ const PublicPortal = ({ shareId }) => {
             a.click();
             URL.revokeObjectURL(url);
         } catch { 
-            alert('Download failed. Please try again or check your internet connection.'); 
+            setDlError('Download failed. Please try again or check your network connection.');
         } finally {
             setDling(false);
             setDlProgress(null);
@@ -182,6 +184,12 @@ const PublicPortal = ({ shareId }) => {
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 14px', background: 'var(--bg-surface-2)', borderRadius: '10px', border: '1px solid var(--border-subtle)', marginBottom: '24px', fontSize: '12px', color: 'var(--text-secondary)' }}>
                             <Shield size={14} color="var(--primary)" />
                             <span>This secure package expires on <strong>{new Date(info.expires_at).toLocaleDateString()}</strong></span>
+                        </div>
+                    )}
+
+                    {dlError && (
+                        <div style={{ padding: '12px 16px', borderRadius: '12px', background: 'rgba(244, 63, 94, 0.12)', border: '1px solid rgba(244, 63, 94, 0.3)', color: '#f43f5e', fontSize: '13px', fontWeight: '600', marginBottom: '18px', textAlign: 'center' }}>
+                            {dlError}
                         </div>
                     )}
 

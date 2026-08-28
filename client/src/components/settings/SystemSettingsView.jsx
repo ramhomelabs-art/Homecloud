@@ -8,6 +8,7 @@ import {
     Users, Plus, Trash2, Shield, UserCheck, X, Edit, KeyRound, ShieldAlert, Mail
 } from 'lucide-react';
 import ProfileSettings from '../profile/ProfileSettings';
+import ConfirmModal from '../modals/ConfirmModal';
 
 const SystemSettingsView = ({ 
     username, 
@@ -251,31 +252,48 @@ const SystemSettingsView = ({
         }
     };
 
-    const handleAdminDisableMfa = async (user) => {
-        if (!window.confirm(`Are you sure you want to remove Two-Factor Authentication (2FA / MFA) for user "${user.username}"? They will be able to log in with password only and reconfigure their authenticator device.`)) return;
-        try {
-            const res = await axios.post('/api/v1/auth/users/disable-mfa', { id: user.id }, { headers });
-            if (showToast) showToast(res.data?.message || `2FA removed for ${user.username}`, 'success');
-            if (editingUser) setEditingUser(null);
-            fetchAllUsers();
-        } catch (err) {
-            if (showToast) showToast(err.response?.data?.error || 'Failed to remove 2FA', 'error');
-        }
+    // In-UI Confirmation Modal State
+    const [confirmAction, setConfirmAction] = useState(null);
+
+    const handleAdminDisableMfa = (user) => {
+        setConfirmAction({
+            title: 'Remove Two-Factor Authentication (2FA / MFA)',
+            message: `Are you sure you want to remove Two-Factor Authentication (2FA / MFA) for user "${user.username}"? They will be able to log in with password only and reconfigure their authenticator device.`,
+            confirmText: 'Remove 2FA',
+            type: 'warning',
+            onConfirm: async () => {
+                try {
+                    const res = await axios.post('/api/v1/auth/users/disable-mfa', { id: user.id }, { headers });
+                    if (showToast) showToast(res.data?.message || `2FA removed for ${user.username}`, 'success');
+                    if (editingUser) setEditingUser(null);
+                    fetchAllUsers();
+                } catch (err) {
+                    if (showToast) showToast(err.response?.data?.error || 'Failed to remove 2FA', 'error');
+                }
+            }
+        });
     };
 
-    const handleDeleteUser = async (user) => {
+    const handleDeleteUser = (user) => {
         if (user.username === username) {
             if (showToast) showToast('Cannot delete currently logged in account', 'error');
             return;
         }
-        if (!window.confirm(`Permanently remove user account "${user.username}"?`)) return;
-        try {
-            await axios.post('/api/v1/auth/users/delete', { id: user.id }, { headers });
-            if (showToast) showToast(`User "${user.username}" deleted`, 'success');
-            fetchAllUsers();
-        } catch (err) {
-            if (showToast) showToast('Failed to delete user', 'error');
-        }
+        setConfirmAction({
+            title: 'Delete User Account',
+            message: `Are you sure you want to permanently remove user account "${user.username}"? This action cannot be undone.`,
+            confirmText: 'Delete Account',
+            type: 'danger',
+            onConfirm: async () => {
+                try {
+                    await axios.post('/api/v1/auth/users/delete', { id: user.id }, { headers });
+                    if (showToast) showToast(`User "${user.username}" deleted`, 'success');
+                    fetchAllUsers();
+                } catch (err) {
+                    if (showToast) showToast('Failed to delete user', 'error');
+                }
+            }
+        });
     };
 
     const tabs = [
@@ -955,6 +973,21 @@ const SystemSettingsView = ({
                     </div>
                 </div>
             )}
+
+            {/* In-UI Confirmation Modal */}
+            <ConfirmModal
+                show={!!confirmAction}
+                title={confirmAction?.title || 'Confirm Action'}
+                message={confirmAction?.message || ''}
+                confirmText={confirmAction?.confirmText || 'Confirm'}
+                cancelText="Cancel"
+                type={confirmAction?.type || 'danger'}
+                onConfirm={() => {
+                    if (confirmAction?.onConfirm) confirmAction.onConfirm();
+                    setConfirmAction(null);
+                }}
+                onCancel={() => setConfirmAction(null)}
+            />
         </div>
     );
 };

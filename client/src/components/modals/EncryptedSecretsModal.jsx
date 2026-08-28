@@ -5,6 +5,7 @@ import {
     KeyRound, Lock, Unlock, Plus, Trash2, Eye, 
     EyeOff, Copy, Check, X, Shield, RefreshCw, AlertCircle
 } from 'lucide-react';
+import ConfirmModal from './ConfirmModal';
 
 const EncryptedSecretsModal = ({ onClose, showToast }) => {
     const [secrets, setSecrets] = useState([]);
@@ -13,6 +14,7 @@ const EncryptedSecretsModal = ({ onClose, showToast }) => {
     const [isUnlocked, setIsUnlocked] = useState(false);
     const [revealedIds, setRevealedIds] = useState(new Set());
     const [copiedId, setCopiedId] = useState(null);
+    const [secretToDelete, setSecretToDelete] = useState(null);
 
     // New Secret Form
     const [showNewForm, setShowNewForm] = useState(false);
@@ -84,8 +86,10 @@ const EncryptedSecretsModal = ({ onClose, showToast }) => {
         }
     };
 
-    const handleDeleteSecret = async (id, title) => {
-        if (!window.confirm(`Delete secret "${title}"?`)) return;
+    const confirmDeleteSecret = async () => {
+        if (!secretToDelete) return;
+        const { id } = secretToDelete;
+        setSecretToDelete(null);
         try {
             const token = localStorage.getItem('token');
             const headers = token ? { Authorization: `Bearer ${token}` } : {};
@@ -95,6 +99,10 @@ const EncryptedSecretsModal = ({ onClose, showToast }) => {
         } catch (err) {
             if (showToast) showToast('Delete failed: ' + (err.response?.data?.error || err.message), 'error');
         }
+    };
+
+    const handleDeleteSecret = (id, title) => {
+        setSecretToDelete({ id, title });
     };
 
     const toggleReveal = (id) => {
@@ -379,6 +387,18 @@ const EncryptedSecretsModal = ({ onClose, showToast }) => {
                     )}
                 </div>
             </motion.div>
+
+            {/* In-UI Confirmation: Delete Secret */}
+            <ConfirmModal
+                show={!!secretToDelete}
+                title="Delete Encrypted Secret"
+                message={`Are you sure you want to permanently delete secret "${secretToDelete?.title}" from your encrypted vault?`}
+                confirmText="Delete Secret"
+                cancelText="Cancel"
+                type="danger"
+                onConfirm={confirmDeleteSecret}
+                onCancel={() => setSecretToDelete(null)}
+            />
         </div>
     );
 };

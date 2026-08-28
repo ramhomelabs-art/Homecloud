@@ -9,6 +9,7 @@ import {
     FileSpreadsheet, FileCode, AlertTriangle, RefreshCw, Radio,
     Volume2, VolumeX, DownloadCloud, Globe
 } from 'lucide-react';
+import ConfirmModal from './modals/ConfirmModal';
 
 // Discord logo SVG as inline component
 const DiscordIcon = ({ size = 18, color = 'currentColor' }) => (
@@ -106,8 +107,10 @@ const AlertManagement = ({ settings = {}, updateSetting, activities = [], showTo
         }
     };
 
-    const handleClearAlerts = async () => {
-        if (!window.confirm('Clear all triggered alert history?')) return;
+    const [confirmClearShow, setConfirmClearShow] = useState(false);
+
+    const executeClearAlerts = async () => {
+        setConfirmClearShow(false);
         setClearing(true);
         try {
             const token = localStorage.getItem('token');
@@ -120,6 +123,10 @@ const AlertManagement = ({ settings = {}, updateSetting, activities = [], showTo
         } finally {
             setClearing(false);
         }
+    };
+
+    const handleClearAlerts = () => {
+        setConfirmClearShow(true);
     };
 
     const handleExportLogs = () => {
@@ -457,6 +464,18 @@ const AlertManagement = ({ settings = {}, updateSetting, activities = [], showTo
                     </div>
                 </div>
             </div>
+
+            {/* In-UI Confirmation: Clear Alert History */}
+            <ConfirmModal
+                show={confirmClearShow}
+                title="Clear Alert & Incident History"
+                message="Are you sure you want to clear all triggered incident alert history? This cannot be undone."
+                confirmText="Clear History"
+                cancelText="Cancel"
+                type="danger"
+                onConfirm={executeClearAlerts}
+                onCancel={() => setConfirmClearShow(false)}
+            />
         </div>
     );
 };

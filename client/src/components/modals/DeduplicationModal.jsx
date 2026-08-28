@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Trash2, AlertTriangle, RefreshCw, X, FolderSync, Info, Check } from 'lucide-react';
+import ConfirmModal from './ConfirmModal';
 
 const API_BASE = '/api';
 
@@ -10,6 +11,7 @@ const DeduplicationModal = ({ path, agentId, onClose, onRefresh, showToast }) =>
     const [selectedFiles, setSelectedFiles] = useState(new Set());
     const [scanned, setScanned] = useState(false);
     const [deleting, setDeleting] = useState(false);
+    const [confirmDeleteShow, setConfirmDeleteShow] = useState(false);
 
     const performScan = async () => {
         setLoading(true);
@@ -82,10 +84,9 @@ const DeduplicationModal = ({ path, agentId, onClose, onRefresh, showToast }) =>
         return size;
     };
 
-    const handleDeduplicate = async () => {
+    const executeDeduplicate = async () => {
         if (selectedFiles.size === 0 || deleting) return;
-        if (!window.confirm(`Are you sure you want to permanently delete ${selectedFiles.size} duplicate files? This action cannot be undone.`)) return;
-
+        setConfirmDeleteShow(false);
         setDeleting(true);
         try {
             const token = localStorage.getItem('token');
@@ -103,6 +104,11 @@ const DeduplicationModal = ({ path, agentId, onClose, onRefresh, showToast }) =>
         } finally {
             setDeleting(false);
         }
+    };
+
+    const handleDeduplicate = () => {
+        if (selectedFiles.size === 0 || deleting) return;
+        setConfirmDeleteShow(true);
     };
 
     return (
@@ -229,6 +235,18 @@ const DeduplicationModal = ({ path, agentId, onClose, onRefresh, showToast }) =>
                     </>
                 )}
             </div>
+
+            {/* In-UI Confirmation: Delete Duplicates */}
+            <ConfirmModal
+                show={confirmDeleteShow}
+                title="Delete Duplicate Files"
+                message={`Are you sure you want to permanently delete ${selectedFiles.size} duplicate file(s) to reclaim ${formatBytes(calculateReclaimSpace())}? This action cannot be undone.`}
+                confirmText={`Delete ${selectedFiles.size} Files`}
+                cancelText="Cancel"
+                type="danger"
+                onConfirm={executeDeduplicate}
+                onCancel={() => setConfirmDeleteShow(false)}
+            />
         </div>
     );
 };
