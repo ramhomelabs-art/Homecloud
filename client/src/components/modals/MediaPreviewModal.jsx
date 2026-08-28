@@ -19,7 +19,9 @@ const MediaPreviewModal = ({ media, onClose, onDownload, onNext, onPrev, showToa
     const [isLoading, setIsLoading] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [isEdited, setIsEdited] = useState(false);
-    const [mdMode, setMdMode] = useState('split'); // 'edit', 'split', 'preview'
+    const tok = localStorage.getItem('token') || '';
+    const isGuest = !tok || !!shareId || !!localStorage.getItem('guestToken');
+    const [mdMode, setMdMode] = useState(isGuest ? 'preview' : 'split'); // 'edit', 'split', 'preview'
     const [pendingDiscardAction, setPendingDiscardAction] = useState(null);
 
     const [pdfBlobUrl, setPdfBlobUrl] = useState(null);
@@ -40,9 +42,6 @@ const MediaPreviewModal = ({ media, onClose, onDownload, onNext, onPrev, showToa
     useEffect(() => {
         if (zoom === 1) setOffset({ x: 0, y: 0 });
     }, [zoom]);
-
-    const tok = localStorage.getItem('token') || '';
-    const isGuest = !tok;
     let mediaUrl = '';
     if (media) {
         if (shareId) {
@@ -294,10 +293,15 @@ const MediaPreviewModal = ({ media, onClose, onDownload, onNext, onPrev, showToa
                                         <span style={{ fontSize: '10px', fontWeight: '800', background: 'rgba(14, 165, 233, 0.15)', color: 'var(--accent-cyan)', border: '1px solid rgba(14, 165, 233, 0.3)', padding: '2px 6px', borderRadius: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                                             {getFileLanguageBadge(media?.name)}
                                         </span>
+                                        {isGuest && (
+                                            <span style={{ fontSize: '10px', fontWeight: '800', background: 'rgba(100, 116, 139, 0.15)', color: '#94a3b8', border: '1px solid rgba(100, 116, 139, 0.3)', padding: '2px 6px', borderRadius: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                                🔒 Read Only
+                                            </span>
+                                        )}
                                         <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
                                             {lineCount} lines • {charCount.toLocaleString()} chars
                                         </span>
-                                        {isEdited && (
+                                        {!isGuest && isEdited && (
                                             <span style={{ fontSize: '10px', fontWeight: '700', background: 'rgba(245, 158, 11, 0.15)', color: 'var(--accent-gold)', border: '1px solid rgba(245, 158, 11, 0.3)', padding: '2px 6px', borderRadius: '4px' }}>
                                                 Unsaved (Ctrl+S)
                                             </span>
@@ -542,7 +546,7 @@ const MediaPreviewModal = ({ media, onClose, onDownload, onNext, onPrev, showToa
 
                                         return (
                                             <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
-                                                {isMarkdown && (
+                                                {isMarkdown && !isGuest && (
                                                     <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', background: 'var(--bg-surface-0)', padding: '4px', borderRadius: '10px', width: 'fit-content', border: '1px solid var(--border-subtle)' }}>
                                                         <button 
                                                             onClick={() => setMdMode('edit')}
@@ -584,9 +588,9 @@ const MediaPreviewModal = ({ media, onClose, onDownload, onNext, onPrev, showToa
                                                             display: 'flex',
                                                             flex: 1,
                                                             height: '100%',
-                                                            background: '#090d16',
+                                                            background: '#0a0e17',
                                                             borderRadius: '14px',
-                                                            border: '1px solid rgba(99, 102, 241, 0.25)',
+                                                            border: '1px solid rgba(255, 255, 255, 0.1)',
                                                             overflow: 'hidden',
                                                             position: 'relative',
                                                             boxShadow: '0 12px 32px rgba(0,0,0,0.4)',
@@ -615,6 +619,7 @@ const MediaPreviewModal = ({ media, onClose, onDownload, onNext, onPrev, showToa
                                                                 ref={textareaRef}
                                                                 value={textContent}
                                                                 onChange={(e) => {
+                                                                    if (isGuest) return;
                                                                     setTextContent(e.target.value);
                                                                     setIsEdited(true);
                                                                 }}

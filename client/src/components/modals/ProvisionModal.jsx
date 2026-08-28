@@ -7,8 +7,6 @@ import {
 import axios from 'axios';
 
 const ProvisionModal = ({ show, onClose, onAgentAdded, showToast }) => {
-    if (!show) return null;
-
     const [activeTab, setActiveTab] = useState('quick'); // 'quick' | 'manual' | 'offline'
     const [os, setOs] = useState('windows'); // 'windows' | 'linux'
     const [copied, setCopied] = useState(false);
@@ -26,6 +24,7 @@ const ProvisionModal = ({ show, onClose, onAgentAdded, showToast }) => {
     const token = localStorage.getItem('token') || '';
 
     useEffect(() => {
+        if (!show) return;
         const fetchInfo = async () => {
             try {
                 const res = await axios.get(`/api/v1/provision/info?token=${token}`, {
@@ -45,7 +44,9 @@ const ProvisionModal = ({ show, onClose, onAgentAdded, showToast }) => {
             }
         };
         fetchInfo();
-    }, [token]);
+    }, [token, show]);
+
+    if (!show) return null;
 
     const activeCommand = os === 'windows' 
         ? provisionInfo?.windowsCommand || `irm "${window.location.origin}/api/v1/provision/script/windows?token=${token}" | iex`

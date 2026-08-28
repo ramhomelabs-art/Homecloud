@@ -96,6 +96,43 @@ const GuestPortal = ({ shareId, showToast }) => {
         if (authed) loadFiles('');
     }, [authed]);
 
+    // 3. Idle Session Auto-Timeout (15 minutes inactivity watchdog)
+    useEffect(() => {
+        if (!authed) return;
+        let idleTimer = null;
+        const IDLE_LIMIT = 15 * 60 * 1000; // 15 minutes
+
+        const handleTimeout = () => {
+            localStorage.removeItem('guestToken');
+            document.cookie = `share_auth_${shareId}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
+            setAuthed(false);
+            if (info?.passwordRequired) {
+                setStep('password');
+            } else if (info?.emailRequired) {
+                setStep('otp_email');
+            } else {
+                setStep('idle');
+            }
+            setAuthErr('Session expired due to inactivity. Please authenticate to continue.');
+            if (showToast) showToast('Session expired due to inactivity.', 'warning');
+        };
+
+        const resetTimer = () => {
+            if (idleTimer) clearTimeout(idleTimer);
+            idleTimer = setTimeout(handleTimeout, IDLE_LIMIT);
+        };
+
+        resetTimer();
+
+        const events = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart'];
+        events.forEach(e => window.addEventListener(e, resetTimer, { passive: true }));
+
+        return () => {
+            if (idleTimer) clearTimeout(idleTimer);
+            events.forEach(e => window.removeEventListener(e, resetTimer));
+        };
+    }, [authed, shareId, info, showToast]);
+
     const loadFiles = async (subPath) => {
         setFilesLoading(true);
         try {
@@ -141,8 +178,9 @@ const GuestPortal = ({ shareId, showToast }) => {
     const downloadItem = async (item) => {
         setDownloading(true);
         const startTime = Date.now();
+        const dlName = item.name + (item.isDirectory ? '.zip' : '');
         setDlProgress({
-            name: item.name + (item.isDirectory ? '.zip' : ''),
+            name: dlName,
             loaded: 0,
             total: 0,
             speed: 0,
@@ -160,7 +198,7 @@ const GuestPortal = ({ shareId, showToast }) => {
                     const percent = total > 0 ? Math.round((loaded * 100) / total) : 0;
 
                     setDlProgress({
-                        name: item.name + (item.isDirectory ? '.zip' : ''),
+                        name: dlName,
                         loaded,
                         total,
                         speed,
@@ -168,12 +206,38 @@ const GuestPortal = ({ shareId, showToast }) => {
                     });
                 }
             });
-            const url = URL.createObjectURL(r.data);
+
+            // Check if server returned an error inside the blob
+            if (r.data.type && (r.data.type.includes('application/json') || r.data.type.includes('text/xml') || r.data.type.includes('application/xml'))) {
+                const text = await r.data.text();
+                try {
+                    const errJson = JSON.parse(text);
+                    if (errJson.error) {
+                        if (showToast) showToast(`Download failed: ${errJson.error}`, 'error');
+                        return;
+                    }
+                } catch (e) {
+                    if (text.includes('<Error>') || text.includes('AccessDenied')) {
+                        if (showToast) showToast('Access denied or file expired', 'error');
+                        return;
+                    }
+                }
+            }
+
+            const mimeType = r.headers['content-type'] || (item.isDirectory ? 'application/zip' : 'application/octet-stream');
+            const blob = new Blob([r.data], { type: mimeType });
+            const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
+            a.style.display = 'none';
             a.href = url;
-            a.download = item.name + (item.isDirectory ? '.zip' : '');
+            a.download = dlName;
+            document.body.appendChild(a);
             a.click();
-            URL.revokeObjectURL(url);
+            setTimeout(() => {
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }, 5000);
+            if (showToast) showToast(`Downloaded ${dlName}`, 'success');
         } catch { 
             if (showToast) showToast('Download failed. Please check your network connection.', 'error'); 
         } finally {

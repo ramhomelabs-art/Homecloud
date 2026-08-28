@@ -404,9 +404,9 @@ router.get('/files/:token', async (req, res) => {
 });
 
 // ─── GET /api/share/stream ───────────────────────────────────────────────────
-// Public (after auth) — stream file download for media viewers
+// Public (after auth) — stream file download or inline display for media viewers
 router.get('/stream', async (req, res) => {
-    const { token, filePath } = req.query;
+    const { token, filePath, intent } = req.query;
     try {
         const share = await getShare(token);
         const err = checkShareActive(share);
@@ -434,10 +434,17 @@ router.get('/stream', async (req, res) => {
         }
 
         await logAccess(share.id, req, 'stream_get');
-        res.download(fullPath);
+
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        if (intent === 'stream') {
+            res.type(path.extname(fullPath) || 'application/octet-stream');
+            return res.sendFile(fullPath);
+        }
+
+        return res.download(fullPath, path.basename(fullPath));
     } catch (e) {
         logger.error('[Share GET Stream Error]', e);
-        res.status(500).json({ error: 'Stream failed' });
+        if (!res.headersSent) res.status(500).json({ error: 'Stream failed' });
     }
 });
 
@@ -462,11 +469,18 @@ router.post('/stream', async (req, res) => {
             return res.status(403).json({ error: 'Path traversal not allowed' });
         }
 
+        if (!fs.existsSync(fullPath)) {
+            return res.status(404).json({ error: 'File not found' });
+        }
+
         await logAccess(share.id, req, 'download');
 
         const stat = fs.statSync(fullPath);
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+
         if (stat.isDirectory()) {
-            res.setHeader('Content-Disposition', `attachment; filename="${path.basename(fullPath)}.zip"`);
+            const safeZipName = (path.basename(fullPath) || 'archive').replace(/[^\w\s\.-]/gi, '_');
+            res.setHeader('Content-Disposition', `attachment; filename="${safeZipName}.zip"`);
             res.setHeader('Content-Type', 'application/zip');
             const archive = archiver('zip', { zlib: { level: 6 } });
             archive.on('error', (err) => {
@@ -474,12 +488,10 @@ router.post('/stream', async (req, res) => {
                 if (!res.headersSent) res.status(500).end();
             });
             archive.pipe(res);
-            archive.directory(fullPath, path.basename(fullPath));
+            archive.directory(fullPath, safeZipName);
             await archive.finalize();
         } else {
-            res.setHeader('Content-Disposition', `attachment; filename="${path.basename(fullPath)}"`);
-            res.setHeader('Content-Length', stat.size);
-            fs.createReadStream(fullPath).pipe(res);
+            return res.download(fullPath, path.basename(fullPath));
         }
     } catch (e) {
         logger.error('[Share Stream Error]', e);
