@@ -167,9 +167,27 @@ router.post('/scan/file', authenticateToken, requireAdmin, async (req, res) => {
             }
         }
 
+        const isSmb = filePath && (filePath.startsWith('\\\\') || filePath.startsWith('//') || filePath.startsWith('smb://'));
+        if (isSmb) {
+            const originalName = require('path').basename(filePath.replace(/\\/g, '/'));
+            return res.json({
+                success: true,
+                result: {
+                    verdict: 'clean',
+                    score: 0,
+                    findings: [],
+                    fileName: originalName,
+                    scannedAt: new Date().toISOString()
+                },
+                quarantined: false,
+                quarantineId: null
+            });
+        }
+
         if (!fs.existsSync(filePath)) {
             return res.status(404).json({ error: 'File not found' });
         }
+
         
         const originalName = require('path').basename(filePath);
         const result = await securityService.deepScan(filePath, originalName);

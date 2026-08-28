@@ -545,6 +545,22 @@ router.get('/metadata', async (req, res) => {
     const { path: targetPath, agentId } = req.query;
     if (!targetPath) return res.status(400).json({ error: 'Path is required' });
 
+    const isSmb = targetPath.startsWith('\\\\') || targetPath.startsWith('//') || targetPath.startsWith('smb://');
+    if (isSmb) {
+        const fileName = path.basename(targetPath.replace(/\\/g, '/'));
+        return res.json({
+            name: fileName,
+            path: targetPath,
+            size: 0,
+            isDirectory: false,
+            modified: new Date(),
+            isVault: false,
+            isLocked: false,
+            lockerId: null,
+            isSmb: true
+        });
+    }
+
     if (agentId && clusterService.agents[agentId]) {
         const agent = clusterService.agents[agentId];
         if (agent.status !== 'approved') return res.status(403).json({ error: 'Agent not approved' });
@@ -580,6 +596,7 @@ router.get('/metadata', async (req, res) => {
         }
     }
 });
+
 
 // ── POST /api/v1/files/mkdir (or /create/folder) ──────────────────────────────
 router.post(['/mkdir', '/create/folder'], requireRole(['Admin', 'Operator', 'Power User', 'User']), async (req, res) => {
@@ -1330,6 +1347,54 @@ router.get('/download', async (req, res) => {
         const dummyContent = Buffer.from(`-- NexaDisk Global Storage Mesh Remote File Export --\nSite Resource: ${filePath}\nExport Date: ${new Date().toISOString()}\nData Integrity Signature: ${crypto.createHash('sha256').update(filePath).digest('hex')}\n`);
         return res.send(dummyContent);
     }
+
+    const isSmb = filePath.startsWith('\\\\') || filePath.startsWith('//') || filePath.startsWith('smb://');
+    if (isSmb) {
+        try {
+            const sharesRes = await db.query('SELECT * FROM network_shares');
+            let clean = filePath.trim().replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
+            const parts = clean.split('/');
+            const host = parts[0];
+            const shareName = parts[1] || '';
+            const uncShare = `//${host}/${shareName}`;
+            const internalFile = parts.slice(2).join('/');
+
+            const matchedShare = sharesRes.rows.find(row => {
+                let cleanRow = (row.path || '').replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
+                const rowParts = cleanRow.split('/');
+                return rowParts[0]?.toLowerCase() === host.toLowerCase() && 
+                       (rowParts[1] || '').toLowerCase() === shareName.toLowerCase();
+            });
+
+            const user = matchedShare?.username || '';
+            let pass = '';
+            if (matchedShare?.password) {
+                try { pass = cryptoHelper.decrypt(matchedShare.password); } catch (e) { pass = matchedShare.password; }
+            }
+
+            const fileName = path.basename(filePath.replace(/\\/g, '/'));
+            res.setHeader('Content-Disposition', req.query.intent === 'stream' ? 'inline' : `attachment; filename="${fileName}"`);
+            res.setHeader('Content-Type', 'application/octet-stream');
+
+            const env = { ...process.env, PASSWD: pass || '' };
+            const safeUser = (user || '').replace(/[;&|`$<>\\"']/g, '');
+            const safeShare = uncShare.replace(/[;&|`$<>\\"']/g, '');
+            const smbCmd = `get "${internalFile.replace(/"/g, '')}" -`;
+
+            const spawn = require('child_process').spawn;
+            const args = safeUser
+                ? ['-U', safeUser, safeShare, '-t', '20', '-c', smbCmd]
+                : ['-N', safeShare, '-t', '20', '-c', smbCmd];
+
+            const proc = spawn('smbclient', args, { env });
+            proc.stdout.pipe(res);
+            proc.stderr.on('data', (d) => logger.warn(`[SMB Download] ${d.toString()}`));
+            return;
+        } catch (smbErr) {
+            return res.status(500).json({ error: `SMB download error: ${smbErr.message}` });
+        }
+    }
+
 
     if (agentId && clusterService.agents[agentId]) {
         const agent = clusterService.agents[agentId];
