@@ -336,6 +336,7 @@ app.use('/api/v1/auth', authRouter);
 app.use('/api/auth', authRouter);            // Legacy fallback
 app.use('/api', authRouter);                 // Legacy fallback for /api/users
 app.use('/api/v1/files', filesRouter);
+app.use('/api/files', filesRouter);          // Legacy fallback
 app.use('/api/v1/agents', clusterRouter.agents);
 app.use('/api/v1/storage', clusterRouter.storage);
 app.use('/api/v1/network', clusterRouter.network);
