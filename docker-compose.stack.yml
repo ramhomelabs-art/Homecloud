@@ -3,7 +3,7 @@ version: '3.8'
 services:
   # NexaDisk Master Storage Server & Web UI (Prebuilt Image Mode)
   nexadisk-master:
-    image: nexadisk-master:latest
+    image: ghcr.io/ramhomelabs-art/homecloud:latest
     container_name: nexadisk-master
     restart: always
     ports:
