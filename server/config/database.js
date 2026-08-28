@@ -520,13 +520,19 @@ async function initDatabase() {
                 target_path VARCHAR(500) NOT NULL,
                 sync_mode VARCHAR(50) DEFAULT 'mirror',
                 schedule_cron VARCHAR(50) DEFAULT '0 */6 * * *',
+                status VARCHAR(50) DEFAULT 'idle',
                 last_sync_status VARCHAR(50) DEFAULT 'idle',
                 last_sync_time TIMESTAMP WITH TIME ZONE,
+                last_run_at TIMESTAMP WITH TIME ZONE,
                 bytes_transferred BIGINT DEFAULT 0,
+                last_transferred_bytes BIGINT DEFAULT 0,
                 enabled BOOLEAN DEFAULT true,
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             )
         `);
+        await client.query('ALTER TABLE cross_site_sync_jobs ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT \'idle\'');
+        await client.query('ALTER TABLE cross_site_sync_jobs ADD COLUMN IF NOT EXISTS last_run_at TIMESTAMP WITH TIME ZONE');
+        await client.query('ALTER TABLE cross_site_sync_jobs ADD COLUMN IF NOT EXISTS last_transferred_bytes BIGINT DEFAULT 0');
         const settingsCheck = await client.query("SELECT * FROM app_settings WHERE key = 'appName'");
         if (settingsCheck.rows.length === 0) {
             await client.query("INSERT INTO app_settings (key, value) VALUES ('appName', 'NexaDisk')");

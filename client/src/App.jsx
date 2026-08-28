@@ -1003,7 +1003,9 @@ function App() {
     const fetchUsers = async () => {
         if (localStorage.getItem('userRole') !== 'Admin') return;
         try {
-            const res = await axios.get(`${API_BASE}/v1/auth/users`);
+            const tokenVal = localStorage.getItem('token');
+            const headers = tokenVal ? { Authorization: `Bearer ${tokenVal}` } : {};
+            const res = await axios.get(`${API_BASE}/v1/auth/users`, { headers });
             setUsers(res.data);
         } catch (e) {
             console.error('Failed to fetch users', e);
@@ -1012,7 +1014,9 @@ function App() {
 
     const handleCreateUser = async (userData) => {
         try {
-            await axios.post(`${API_BASE}/v1/auth/users/create`, userData);
+            const tokenVal = localStorage.getItem('token');
+            const headers = tokenVal ? { Authorization: `Bearer ${tokenVal}` } : {};
+            await axios.post(`${API_BASE}/v1/auth/users/create`, userData, { headers });
             showToast('User created successfully', 'success');
             fetchUsers();
             setShowUserModal(null);
@@ -1023,7 +1027,9 @@ function App() {
 
     const handleUpdateUser = async (userData) => {
         try {
-            await axios.post(`${API_BASE}/v1/auth/users/update`, userData);
+            const tokenVal = localStorage.getItem('token');
+            const headers = tokenVal ? { Authorization: `Bearer ${tokenVal}` } : {};
+            await axios.post(`${API_BASE}/v1/auth/users/update`, userData, { headers });
             showToast('User updated successfully', 'success');
             fetchUsers();
             setShowUserModal(null);
@@ -1034,7 +1040,9 @@ function App() {
 
     const handleResetPassword = async (userData) => {
         try {
-            await axios.post(`${API_BASE}/v1/auth/users/reset-password`, userData);
+            const tokenVal = localStorage.getItem('token');
+            const headers = tokenVal ? { Authorization: `Bearer ${tokenVal}` } : {};
+            await axios.post(`${API_BASE}/v1/auth/users/reset-password`, userData, { headers });
             showToast('Password reset successfully', 'success');
             setShowUserModal(null);
         } catch (e) {
@@ -1050,7 +1058,9 @@ function App() {
             type: 'danger',
             onConfirm: async () => {
                 try {
-                    await axios.post(`${API_BASE}/v1/auth/users/delete`, { id });
+                    const tokenVal = localStorage.getItem('token');
+                    const headers = tokenVal ? { Authorization: `Bearer ${tokenVal}` } : {};
+                    await axios.post(`${API_BASE}/v1/auth/users/delete`, { id }, { headers });
                     showToast('User deleted successfully', 'success');
                     fetchUsers();
                 } catch (e) {
