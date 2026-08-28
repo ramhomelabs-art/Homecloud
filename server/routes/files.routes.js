@@ -243,6 +243,50 @@ const getWindowsDrives = () => {
     });
 };
 
+const getRootListing = async (req) => {
+    if (process.platform === 'win32') {
+        const drives = await getWindowsDrives();
+        return drives.map(d => ({
+            name: d + '\\',
+            isDirectory: true,
+            size: 0,
+            modified: new Date(),
+            path: d + '\\'
+        }));
+    } else {
+        const rootItems = [];
+        
+        // 1. Local Storage base path
+        rootItems.push({
+            name: 'Local Storage',
+            isDirectory: true,
+            size: 0,
+            modified: new Date(),
+            path: storageProvider.localBase
+        });
+
+        // 2. Query Mounted Network Shares
+        try {
+            const sharesRes = await db.query('SELECT label, path FROM network_shares');
+            sharesRes.rows.forEach(row => {
+                if (fs.existsSync(row.path)) {
+                    rootItems.push({
+                        name: `[Share] ${row.label}`,
+                        isDirectory: true,
+                        size: 0,
+                        modified: new Date(),
+                        path: row.path
+                    });
+                }
+            });
+        } catch (dbErr) {
+            logger.error(`[Files Routes] Failed to fetch network shares for root listing: ${dbErr.message}`);
+        }
+
+        return rootItems;
+    }
+};
+
 // ── GET /api/v1/files/list ───────────────────────────────────────────────────
 router.get('/list', async (req, res) => {
     const { path: targetPath, agentId } = req.query;
@@ -291,50 +335,11 @@ router.get('/list', async (req, res) => {
 
     if (isRoot) {
         try {
-            if (process.platform === 'win32') {
-                const drives = await getWindowsDrives();
-                return res.json(drives.map(d => ({
-                    name: d + '\\',
-                    isDirectory: true,
-                    size: 0,
-                    modified: new Date(),
-                    path: d + '\\'
-                })));
-            } else {
-                // Return a clean list of root options: Local Storage and Mounted Network Shares
-                const rootItems = [];
-                
-                // 1. Local Storage
-                rootItems.push({
-                    name: 'Local Storage',
-                    isDirectory: true,
-                    size: 0,
-                    modified: new Date(),
-                    path: storageProvider.localBase
-                });
-
-                // 2. Query Mounted Network Shares
-                try {
-                    const sharesRes = await db.query('SELECT label, path FROM network_shares');
-                    sharesRes.rows.forEach(row => {
-                        if (fs.existsSync(row.path)) {
-                            rootItems.push({
-                                name: `[Share] ${row.label}`,
-                                isDirectory: true,
-                                size: 0,
-                                modified: new Date(),
-                                path: row.path
-                            });
-                        }
-                    });
-                } catch (dbErr) {
-                    logger.error(`[Files Routes] Failed to fetch network shares for root listing: ${dbErr.message}`);
-                }
-
-                return res.json(rootItems);
-            }
+            const rootItems = await getRootListing(req);
+            return res.json(rootItems);
         } catch (rootErr) {
             logger.error(`[Files Routes] Root listing failed: ${rootErr.message}`);
+            return res.status(500).json({ error: rootErr.message });
         }
     }
 
@@ -354,7 +359,17 @@ router.get('/list', async (req, res) => {
             // Decrypted directory listing
             const keys = vaultService.getKeys(locker.id);
             const physicalPath = await vaultService.resolveVaultPath(req, targetPath || '');
-            const files = await storageProvider.readdir(physicalPath);
+            let files;
+            try {
+                files = await storageProvider.readdir(physicalPath);
+            } catch (readErr) {
+                if (readErr.code === 'ENOENT') {
+                    logger.warn(`[Files Routes] Decrypted directory not found: ${physicalPath}. Falling back to root.`);
+                    const rootItems = await getRootListing(req);
+                    return res.json(rootItems);
+                }
+                throw readErr;
+            }
             
             const decryptedFiles = files.map(f => {
                 const decName = vaultService.decryptFilename(f.name, keys.filenameKey);
@@ -376,7 +391,18 @@ router.get('/list', async (req, res) => {
         const userLockersRes = await db.query('SELECT id, vault_path FROM lockers WHERE user_id = $1', [req.user.id]);
         const userLockers = userLockersRes.rows;
 
-        const files = await storageProvider.readdir(targetPath || '');
+        let files;
+        try {
+            files = await storageProvider.readdir(targetPath || '');
+        } catch (readErr) {
+            if (readErr.code === 'ENOENT') {
+                logger.warn(`[Files Routes] Standard directory not found: ${targetPath}. Falling back to root.`);
+                const rootItems = await getRootListing(req);
+                return res.json(rootItems);
+            }
+            throw readErr;
+        }
+
         const mappedFiles = files.map(f => {
             const fVirtualPath = path.join(targetPath || '', f.name);
             let resolvedF = '';
