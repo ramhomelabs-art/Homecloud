@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useLayoutEffect, useState, useRef } from 'react';
 import {
     FolderOpen, Eye, Download, Copy, Scissors, Trash2, Box, Edit, Share2, Info, Plus, RefreshCw, Star, FileCode, Upload, History, PieChart, FolderSync, MessageSquare
 } from 'lucide-react';
@@ -12,24 +12,47 @@ const ContextMenu = ({ data, onAction, onPaste, hasClipboard, onCreateFolder, on
     const canFullAccess = !isGuest || guestPermissions === 'Full Access';
 
     const menuRef = useRef(null);
+    const [pos, setPos] = useState({ top: data.y, left: data.x });
 
-    // Calculate smart position to avoid viewport overflow
-    const MENU_WIDTH = 200;
-    const ESTIMATED_MENU_HEIGHT = 320; // conservative estimate
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
+    useLayoutEffect(() => {
+        if (!menuRef.current) return;
+        const rect = menuRef.current.getBoundingClientRect();
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
 
-    const left = data.x + MENU_WIDTH > vw ? Math.max(0, data.x - MENU_WIDTH) : data.x;
-    const top  = data.y + ESTIMATED_MENU_HEIGHT > vh ? Math.max(0, data.y - ESTIMATED_MENU_HEIGHT) : data.y;
+        let newLeft = data.x;
+        let newTop = data.y;
+
+        // Shift left if overflowing right edge
+        if (data.x + rect.width > vw - 10) {
+            newLeft = Math.max(10, data.x - rect.width);
+        }
+
+        // Shift up if overflowing bottom edge
+        if (data.y + rect.height > vh - 10) {
+            newTop = Math.max(10, vh - rect.height - 10);
+        }
+
+        setPos({ top: newTop, left: newLeft });
+    }, [data.x, data.y, data.file]);
 
     return (
-        <div ref={menuRef} className="context-menu glass" style={{
-            position: 'fixed',
-            top,
-            left,
-            zIndex: 2000,
-            width: `${MENU_WIDTH}px`
-        }}>
+        <div 
+            ref={menuRef} 
+            className="context-menu glass custom-scrollbar" 
+            style={{
+                position: 'fixed',
+                top: `${pos.top}px`,
+                left: `${pos.left}px`,
+                zIndex: 2000,
+                width: '220px',
+                maxHeight: 'calc(100vh - 24px)',
+                overflowY: 'auto',
+                boxShadow: '0 10px 30px rgba(0,0,0,0.4)',
+                borderRadius: '8px'
+            }}
+        >
+
             {data.file ? (
                 <>
                     {data.file.isDirectory ? (
