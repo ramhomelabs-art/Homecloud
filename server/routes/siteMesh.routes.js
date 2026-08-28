@@ -139,6 +139,30 @@ router.delete('/sync-jobs/:id', authenticateToken, requireRole(['Admin']), async
     }
 });
 
+// Secondary Server: Connect this server to a Primary Hub
+router.post('/join-hub', authenticateToken, requireRole(['Admin']), async (req, res) => {
+    try {
+        const { hubUrl, pairingToken, siteName, location } = req.body;
+        const result = await siteMeshService.joinHub({ hubUrl, pairingToken, siteName, location });
+        res.json(result);
+    } catch (err) {
+        logger.error(`[SiteMesh Routes] Failed to join hub: ${err.message}`);
+        res.status(500).json({ error: err.response?.data?.error || err.message });
+    }
+});
+
+// Browse Remote Secondary Site Files & Storage Pools
+router.get('/sites/:id/files', authenticateToken, async (req, res) => {
+    try {
+        const targetPath = req.query.path || '/';
+        const filesData = await siteMeshService.getRemoteSiteFiles(req.params.id, targetPath);
+        res.json(filesData);
+    } catch (err) {
+        logger.error(`[SiteMesh Routes] Failed to fetch remote files: ${err.message}`);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // Generate Join Script
 router.get('/join-script', authenticateToken, requireRole(['Admin']), (req, res) => {
     try {

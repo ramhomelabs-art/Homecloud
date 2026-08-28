@@ -4,7 +4,8 @@ import {
     Globe, Network, Plus, Trash2, Play, RefreshCw, X, Shield, Activity,
     HardDrive, CheckCircle2, ArrowRight, Radio, Server, Copy, Check, Info, 
     Cpu, Layers, Database, Gauge, Zap, ExternalLink, ChevronDown, ChevronUp,
-    Sparkles, Lock, ArrowUpRight, Clock, FolderSync
+    Sparkles, Lock, ArrowUpRight, Clock, FolderSync, Folder, File, ChevronRight,
+    Link, ArrowLeftRight, Terminal, Laptop
 } from 'lucide-react';
 
 import ConfirmModal from './ConfirmModal';
@@ -28,14 +29,25 @@ const SiteMeshModal = ({ show, onClose, showToast }) => {
     const [viewTab, setViewTab] = useState('sites'); // 'sites', 'sync', 'pair'
     const [siteToUnpair, setSiteToUnpair] = useState(null);
     const [selectedSiteInspector, setSelectedSiteInspector] = useState(null);
+    const [remoteExplorer, setRemoteExplorer] = useState(null); // { siteId, siteName, path, items, loading }
     const [expandedSites, setExpandedSites] = useState({});
 
-    // Pairing form state
+    // Pairing Mode: 'primary' (Server 1 generates token) vs 'secondary' (Server 2 connects to Server 1)
+    const [pairingRole, setPairingRole] = useState('primary'); 
+
+    // Primary Mode state
     const [newSiteName, setNewSiteName] = useState('');
     const [newSiteLocation, setNewSiteLocation] = useState('');
     const [generatedToken, setGeneratedToken] = useState(null);
     const [joinCommand, setJoinCommand] = useState('');
     const [copied, setCopied] = useState(false);
+
+    // Secondary Join Mode state (Connecting Server 2 to Server 1)
+    const [hubUrl, setHubUrl] = useState('');
+    const [joinToken, setJoinToken] = useState('');
+    const [secondarySiteName, setSecondarySiteName] = useState('');
+    const [secondaryLocation, setSecondaryLocation] = useState('');
+    const [joiningHub, setJoiningHub] = useState(false);
 
     // Sync Job form state
     const [showNewJobModal, setShowNewJobModal] = useState(false);
@@ -90,7 +102,6 @@ const SiteMeshModal = ({ show, onClose, showToast }) => {
             if (showToast) showToast('Proxmox VE Cluster-02 secondary site connected to mesh!', 'success');
             await fetchData();
             setViewTab('sites');
-            // Auto expand the newly added site
             if (res.data?.site?.id) {
                 setExpandedSites(prev => ({ ...prev, [res.data.site.id]: true }));
             }
@@ -103,7 +114,7 @@ const SiteMeshModal = ({ show, onClose, showToast }) => {
 
     const handleGeneratePairingToken = async () => {
         if (!newSiteName) {
-            if (showToast) showToast('Please enter a site name', 'error');
+            if (showToast) showToast('Please enter a secondary site name', 'error');
             return;
         }
         const token = localStorage.getItem('token') || '';
@@ -114,12 +125,60 @@ const SiteMeshModal = ({ show, onClose, showToast }) => {
             }, { headers: { Authorization: `Bearer ${token}` } });
 
             setGeneratedToken(res.data);
-            const cmd = `curl -fsSL ${window.location.origin}/api/v1/sitemesh/join-script?token=${res.data.pairingToken}&siteName=${encodeURIComponent(newSiteName)} | sudo bash`;
+            const hostUrl = window.location.origin;
+            const cmd = `curl -fsSL ${hostUrl}/api/v1/sitemesh/join-script?token=${res.data.pairingToken}&siteName=${encodeURIComponent(newSiteName)} | sudo bash`;
             setJoinCommand(cmd);
-            if (showToast) showToast('Site pairing token generated!', 'success');
+            if (showToast) showToast('Cluster join key generated!', 'success');
             fetchData();
         } catch (e) {
             if (showToast) showToast('Failed to generate token: ' + (e.response?.data?.error || e.message), 'error');
+        }
+    };
+
+    const handleJoinPrimaryHub = async (e) => {
+        e?.preventDefault();
+        if (!hubUrl || !joinToken) {
+            if (showToast) showToast('Please enter Primary Hub URL and Pairing Token', 'error');
+            return;
+        }
+        setJoiningHub(true);
+        const token = localStorage.getItem('token') || '';
+        try {
+            const res = await axios.post(`${API_BASE}/v1/sitemesh/join-hub`, {
+                hubUrl,
+                pairingToken: joinToken,
+                siteName: secondarySiteName,
+                location: secondaryLocation
+            }, { headers: { Authorization: `Bearer ${token}` } });
+
+            if (showToast) showToast(res.data.message || 'Successfully joined Primary Cluster Hub!', 'success');
+            await fetchData();
+            setViewTab('sites');
+        } catch (e) {
+            if (showToast) showToast('Failed to join Primary Hub: ' + (e.response?.data?.error || e.message), 'error');
+        } finally {
+            setJoiningHub(false);
+        }
+    };
+
+    const handleOpenRemoteExplorer = async (siteId, siteName, targetPath = '/') => {
+        setRemoteExplorer({ siteId, siteName, path: targetPath, items: [], loading: true });
+        const token = localStorage.getItem('token') || '';
+        try {
+            const res = await axios.get(`${API_BASE}/v1/sitemesh/sites/${siteId}/files?path=${encodeURIComponent(targetPath)}`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            setRemoteExplorer({
+                siteId,
+                siteName,
+                path: res.data.currentPath || targetPath,
+                items: res.data.items || [],
+                storagePools: res.data.storagePools || [],
+                loading: false
+            });
+        } catch (err) {
+            if (showToast) showToast('Failed to load remote site files: ' + (err.response?.data?.error || err.message), 'error');
+            setRemoteExplorer(null);
         }
     };
 
@@ -285,7 +344,7 @@ const SiteMeshModal = ({ show, onClose, showToast }) => {
                         {[
                             { id: 'sites', label: `Connected Sites (${sites.length + 1})`, icon: Server },
                             { id: 'sync', label: `Replication Pipelines (${syncJobs.length})`, icon: Network },
-                            { id: 'pair', label: 'Pair New Secondary Site', icon: Plus },
+                            { id: 'pair', label: 'Pair / Connect Sites', icon: Plus },
                         ].map(t => {
                             const Icon = t.icon;
                             const active = viewTab === t.id;
@@ -352,6 +411,7 @@ const SiteMeshModal = ({ show, onClose, showToast }) => {
                                 isExpanded={expandedSites['master-local'] ?? true}
                                 onToggleExpand={() => toggleSiteExpand('master-local')}
                                 onInspect={() => setSelectedSiteInspector(masterInfo)}
+                                onBrowseStorage={() => handleOpenRemoteExplorer('master-local', masterInfo?.name || 'Primary Hub', '/')}
                             />
 
                             {/* Secondary Remote Sites Section */}
@@ -368,7 +428,7 @@ const SiteMeshModal = ({ show, onClose, showToast }) => {
                                         onClick={() => setViewTab('pair')}
                                         style={{ padding: '6px 12px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
                                     >
-                                        <Plus size={14} /> Add Another Site
+                                        <Plus size={14} /> Pair / Connect Site
                                     </button>
                                 )}
                             </div>
@@ -383,7 +443,7 @@ const SiteMeshModal = ({ show, onClose, showToast }) => {
                                             No Secondary Datacenter Sites Connected Yet
                                         </h4>
                                         <p style={{ margin: '6px 0 0', fontSize: '13px', color: 'var(--text-secondary)', maxWidth: '560px', lineHeight: '1.6' }}>
-                                            NexaDisk Site Mesh allows you to cluster multiple servers across different physical locations, Proxmox VE nodes, and branch offices into a unified multi-site global storage namespace.
+                                            NexaDisk Site Mesh allows you to cluster multiple servers across different physical PCs, Proxmox VE nodes, and branch offices into a unified multi-site global storage namespace.
                                         </p>
                                     </div>
 
@@ -411,7 +471,7 @@ const SiteMeshModal = ({ show, onClose, showToast }) => {
                                             onClick={() => setViewTab('pair')}
                                             style={{ padding: '11px 20px', fontSize: '13.5px', fontWeight: '800' }}
                                         >
-                                            Pair Custom Server Manually
+                                            Pair / Connect Physical Server
                                         </button>
                                     </div>
                                 </div>
@@ -425,6 +485,7 @@ const SiteMeshModal = ({ show, onClose, showToast }) => {
                                             isExpanded={expandedSites[site.id] ?? true}
                                             onToggleExpand={() => toggleSiteExpand(site.id)}
                                             onInspect={() => setSelectedSiteInspector(site)}
+                                            onBrowseStorage={() => handleOpenRemoteExplorer(site.id, site.name, '/')}
                                             onUnpair={() => setSiteToUnpair(site.id)}
                                         />
                                     ))}
@@ -453,7 +514,6 @@ const SiteMeshModal = ({ show, onClose, showToast }) => {
                                 </button>
                             </div>
 
-                            {/* Sync Jobs Table or Empty State */}
                             {syncJobs.length === 0 ? (
                                 <div style={{ padding: '40px 24px', background: 'var(--bg-surface-1)', borderRadius: '16px', border: '1px dashed var(--border-subtle)', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '13px' }}>
                                     No cross-site replication jobs configured yet. Click "New Replication Job" to create an automated snapshot pipeline.
@@ -502,96 +562,249 @@ const SiteMeshModal = ({ show, onClose, showToast }) => {
                     )}
 
                     {viewTab === 'pair' && (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', maxWidth: '720px', margin: '0 auto', width: '100%' }}>
-                            {/* Quick Demo Proxmox Card */}
-                            <div style={{ background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.12), rgba(14, 165, 233, 0.08))', border: '1px solid rgba(99, 102, 241, 0.3)', borderRadius: '18px', padding: '24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                    <Sparkles size={20} color="var(--primary)" />
-                                    <h4 style={{ margin: 0, fontSize: '16px', fontWeight: '900', color: 'var(--text-primary)' }}>
-                                        Instant Demo: Provision Proxmox VE Cluster-02
-                                    </h4>
-                                </div>
-                                <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
-                                    Instantly connect a simulated secondary Proxmox VE site located in Frankfurt (Equinix FR5) with 3 ZFS/Ceph/NFS storage pools (37 TB), 2 live agent worker nodes, and live replication telemetry.
-                                </p>
-                                <div>
-                                    <button
-                                        className="btn-primary"
-                                        onClick={handleProvisionDemoSite}
-                                        disabled={provisioningDemo}
-                                        style={{
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: '8px',
-                                            padding: '10px 20px',
-                                            fontSize: '13px',
-                                            fontWeight: '800',
-                                            background: 'linear-gradient(135deg, #6366f1, #0ea5e9)',
-                                            boxShadow: '0 4px 16px rgba(99, 102, 241, 0.35)'
-                                        }}
-                                    >
-                                        <Sparkles size={15} className={provisioningDemo ? 'animate-spin' : ''} />
-                                        {provisioningDemo ? 'Provisioning Demo Proxmox Site...' : '✨ Provision Demo Proxmox VE Cluster'}
-                                    </button>
-                                </div>
-                            </div>
-
-                            {/* Manual Pairing Form */}
-                            <div style={{ background: 'var(--bg-surface-1)', padding: '26px', borderRadius: '18px', border: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', gap: '18px' }}>
-                                <div>
-                                    <h4 style={{ margin: 0, fontSize: '16px', fontWeight: '900', color: 'var(--text-primary)' }}>
-                                        Pair a Physical Server or Proxmox Host
-                                    </h4>
-                                    <p style={{ margin: '4px 0 0', fontSize: '12.5px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
-                                        Generate a cryptographically signed one-time token and run the automated join script on the remote server to establish a reverse mTLS tunnel.
-                                    </p>
-                                </div>
-
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                                    <label style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)' }}>REMOTE SITE NAME</label>
-                                    <input
-                                        type="text"
-                                        className="form-control"
-                                        placeholder="e.g. Site-US-Dallas (Proxmox Cluster 03)"
-                                        value={newSiteName}
-                                        onChange={(e) => setNewSiteName(e.target.value)}
-                                        style={{ padding: '11px 14px', borderRadius: '10px', fontSize: '13px', background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
-                                    />
-                                </div>
-
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                                    <label style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)' }}>PHYSICAL / CLOUD LOCATION</label>
-                                    <input
-                                        type="text"
-                                        className="form-control"
-                                        placeholder="e.g. Dallas, TX (Equinix DA1) / AWS us-east-1"
-                                        value={newSiteLocation}
-                                        onChange={(e) => setNewSiteLocation(e.target.value)}
-                                        style={{ padding: '11px 14px', borderRadius: '10px', fontSize: '13px', background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
-                                    />
-                                </div>
-
-                                <button className="btn-primary" onClick={handleGeneratePairingToken} style={{ padding: '11px 18px', fontSize: '13px', fontWeight: '800', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-                                    <Plus size={16} /> Generate Pairing Token & Onboarding Script
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '780px', margin: '0 auto', width: '100%' }}>
+                            {/* Role Switcher Pill */}
+                            <div style={{ background: 'var(--bg-surface-2)', padding: '6px', borderRadius: '14px', display: 'flex', gap: '6px', border: '1px solid var(--border-subtle)' }}>
+                                <button
+                                    onClick={() => setPairingRole('primary')}
+                                    style={{
+                                        flex: 1,
+                                        padding: '10px 16px',
+                                        borderRadius: '10px',
+                                        border: 'none',
+                                        background: pairingRole === 'primary' ? 'var(--primary)' : 'transparent',
+                                        color: pairingRole === 'primary' ? '#fff' : 'var(--text-secondary)',
+                                        fontSize: '13px',
+                                        fontWeight: '800',
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: '8px',
+                                        transition: 'all 0.15s ease'
+                                    }}
+                                >
+                                    <Shield size={16} /> 1. This is the Primary Master Hub (Generate Join Key)
                                 </button>
 
-                                {joinCommand && (
-                                    <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                        <label style={{ fontSize: '12px', fontWeight: '800', color: 'var(--accent-cyan)' }}>RUN THIS COMMAND ON REMOTE LINUX / PROXMOX SHELL:</label>
-                                        <div style={{ display: 'flex', gap: '8px' }}>
-                                            <input
-                                                type="text"
-                                                readOnly
-                                                value={joinCommand}
-                                                style={{ flex: 1, padding: '11px 14px', borderRadius: '10px', fontSize: '12px', fontFamily: 'var(--font-mono)', background: '#0a0f1d', border: '1px solid var(--border-subtle)', color: '#38bdf8' }}
-                                            />
-                                            <button className="btn-outline" onClick={copyCmd} style={{ padding: '11px 16px', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12.5px', fontWeight: '800' }}>
-                                                {copied ? <Check size={14} color="#10b981" /> : <Copy size={14} />} {copied ? 'Copied' : 'Copy'}
+                                <button
+                                    onClick={() => setPairingRole('secondary')}
+                                    style={{
+                                        flex: 1,
+                                        padding: '10px 16px',
+                                        borderRadius: '10px',
+                                        border: 'none',
+                                        background: pairingRole === 'secondary' ? 'var(--accent-cyan)' : 'transparent',
+                                        color: pairingRole === 'secondary' ? '#fff' : 'var(--text-secondary)',
+                                        fontSize: '13px',
+                                        fontWeight: '800',
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: '8px',
+                                        transition: 'all 0.15s ease'
+                                    }}
+                                >
+                                    <Link size={16} /> 2. Join as a Secondary Server (Connect to Hub)
+                                </button>
+                            </div>
+
+                            {/* ROLE 1: PRIMARY MASTER HUB (GENERATES KEYS) */}
+                            {pairingRole === 'primary' && (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                                    {/* Quick Demo Proxmox Card */}
+                                    <div style={{ background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.12), rgba(14, 165, 233, 0.08))', border: '1px solid rgba(99, 102, 241, 0.3)', borderRadius: '18px', padding: '24px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                            <Sparkles size={20} color="var(--primary)" />
+                                            <h4 style={{ margin: 0, fontSize: '16px', fontWeight: '900', color: 'var(--text-primary)' }}>
+                                                Instant Demo: Provision Proxmox VE Cluster-02
+                                            </h4>
+                                        </div>
+                                        <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
+                                            Instantly simulate a secondary Proxmox VE server in Frankfurt with 3 storage pools (37 TB), 2 worker agents, and live delta replication.
+                                        </p>
+                                        <div>
+                                            <button
+                                                className="btn-primary"
+                                                onClick={handleProvisionDemoSite}
+                                                disabled={provisioningDemo}
+                                                style={{
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '8px',
+                                                    padding: '10px 20px',
+                                                    fontSize: '13px',
+                                                    fontWeight: '800',
+                                                    background: 'linear-gradient(135deg, #6366f1, #0ea5e9)',
+                                                    boxShadow: '0 4px 16px rgba(99, 102, 241, 0.35)'
+                                                }}
+                                            >
+                                                <Sparkles size={15} className={provisioningDemo ? 'animate-spin' : ''} />
+                                                {provisioningDemo ? 'Provisioning Demo Proxmox Site...' : '✨ Provision Demo Proxmox VE Cluster'}
                                             </button>
                                         </div>
                                     </div>
-                                )}
-                            </div>
+
+                                    {/* Real Physical Server Join Key Generator */}
+                                    <div style={{ background: 'var(--bg-surface-1)', padding: '24px', borderRadius: '18px', border: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                                        <div>
+                                            <h4 style={{ margin: 0, fontSize: '16px', fontWeight: '900', color: 'var(--text-primary)' }}>
+                                                Generate Cluster Join Key for Secondary Server
+                                            </h4>
+                                            <p style={{ margin: '4px 0 0', fontSize: '12.5px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
+                                                Generate a cryptographically signed one-time token. You can either paste this token on your secondary server's NexaDisk UI or run the automated bash script on Linux/Proxmox.
+                                            </p>
+                                        </div>
+
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                            <label style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)' }}>SECONDARY SITE NAME</label>
+                                            <input
+                                                type="text"
+                                                className="form-control"
+                                                placeholder="e.g. PC2-Office-Server, Proxmox-Node-02"
+                                                value={newSiteName}
+                                                onChange={(e) => setNewSiteName(e.target.value)}
+                                                style={{ padding: '11px 14px', borderRadius: '10px', fontSize: '13px', background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
+                                            />
+                                        </div>
+
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                            <label style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)' }}>PHYSICAL / CLOUD LOCATION</label>
+                                            <input
+                                                type="text"
+                                                className="form-control"
+                                                placeholder="e.g. Living Room Lab, Dallas DC-1"
+                                                value={newSiteLocation}
+                                                onChange={(e) => setNewSiteLocation(e.target.value)}
+                                                style={{ padding: '11px 14px', borderRadius: '10px', fontSize: '13px', background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
+                                            />
+                                        </div>
+
+                                        <button className="btn-primary" onClick={handleGeneratePairingToken} style={{ padding: '11px 18px', fontSize: '13px', fontWeight: '800', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                                            <Plus size={16} /> Generate Pairing Key & Join Command
+                                        </button>
+
+                                        {generatedToken && (
+                                            <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '12px', padding: '16px', background: 'var(--bg-surface-0)', borderRadius: '14px', border: '1px solid var(--border-subtle)' }}>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                    <span style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)' }}>PRIMARY HUB URL:</span>
+                                                    <span style={{ fontSize: '13px', fontWeight: '800', color: 'var(--accent-cyan)', fontFamily: 'var(--font-mono)' }}>{window.location.origin}</span>
+                                                </div>
+
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                    <span style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)' }}>JOIN TOKEN:</span>
+                                                    <span style={{ fontSize: '13px', fontWeight: '800', color: '#10b981', fontFamily: 'var(--font-mono)' }}>{generatedToken.pairingToken}</span>
+                                                </div>
+
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '6px' }}>
+                                                    <label style={{ fontSize: '11.5px', fontWeight: '800', color: 'var(--text-muted)' }}>OR EXECUTE 1-LINE BASH ON SECONDARY LINUX / PROXMOX SHELL:</label>
+                                                    <div style={{ display: 'flex', gap: '8px' }}>
+                                                        <input
+                                                            type="text"
+                                                            readOnly
+                                                            value={joinCommand}
+                                                            style={{ flex: 1, padding: '10px 14px', borderRadius: '10px', fontSize: '12px', fontFamily: 'var(--font-mono)', background: '#0a0f1d', border: '1px solid var(--border-subtle)', color: '#38bdf8' }}
+                                                        />
+                                                        <button className="btn-outline" onClick={copyCmd} style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: '800' }}>
+                                                            {copied ? <Check size={14} color="#10b981" /> : <Copy size={14} />} {copied ? 'Copied' : 'Copy'}
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* ROLE 2: SECONDARY SERVER (CONNECTS TO PRIMARY HUB) */}
+                            {pairingRole === 'secondary' && (
+                                <div style={{ background: 'var(--bg-surface-1)', padding: '24px', borderRadius: '18px', border: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                                    <div>
+                                        <h4 style={{ margin: 0, fontSize: '16px', fontWeight: '900', color: 'var(--text-primary)' }}>
+                                            Connect this Server to a Primary Cluster Hub
+                                        </h4>
+                                        <p style={{ margin: '4px 0 0', fontSize: '12.5px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
+                                            Enter the Primary Hub URL and Cluster Join Token from Server 1 to link this secondary server into the multi-site cluster mesh.
+                                        </p>
+                                    </div>
+
+                                    <form onSubmit={handleJoinPrimaryHub} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                            <label style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)' }}>PRIMARY HUB URL</label>
+                                            <input
+                                                type="text"
+                                                required
+                                                className="form-control"
+                                                placeholder="e.g. http://192.168.1.100:5000 or https://master.nexadisk.internal"
+                                                value={hubUrl}
+                                                onChange={(e) => setHubUrl(e.target.value)}
+                                                style={{ padding: '11px 14px', borderRadius: '10px', fontSize: '13px', background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
+                                            />
+                                        </div>
+
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                            <label style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)' }}>CLUSTER PAIRING TOKEN</label>
+                                            <input
+                                                type="text"
+                                                required
+                                                className="form-control"
+                                                placeholder="nms_..."
+                                                value={joinToken}
+                                                onChange={(e) => setJoinToken(e.target.value)}
+                                                style={{ padding: '11px 14px', borderRadius: '10px', fontSize: '13px', background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}
+                                            />
+                                        </div>
+
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                                <label style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)' }}>THIS SERVER NAME</label>
+                                                <input
+                                                    type="text"
+                                                    className="form-control"
+                                                    placeholder="e.g. PC2-Office"
+                                                    value={secondarySiteName}
+                                                    onChange={(e) => setSecondarySiteName(e.target.value)}
+                                                    style={{ padding: '11px 14px', borderRadius: '10px', fontSize: '13px', background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
+                                                />
+                                            </div>
+
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                                <label style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)' }}>PHYSICAL LOCATION</label>
+                                                <input
+                                                    type="text"
+                                                    className="form-control"
+                                                    placeholder="e.g. Office PC / Lab"
+                                                    value={secondaryLocation}
+                                                    onChange={(e) => setSecondaryLocation(e.target.value)}
+                                                    style={{ padding: '11px 14px', borderRadius: '10px', fontSize: '13px', background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
+                                                />
+                                            </div>
+                                        </div>
+
+                                        <button
+                                            type="submit"
+                                            className="btn-primary"
+                                            disabled={joiningHub}
+                                            style={{
+                                                padding: '12px 20px',
+                                                fontSize: '13.5px',
+                                                fontWeight: '900',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                gap: '8px',
+                                                background: 'linear-gradient(135deg, #0ea5e9, #6366f1)',
+                                                boxShadow: '0 4px 16px rgba(14, 165, 233, 0.35)',
+                                                marginTop: '6px'
+                                            }}
+                                        >
+                                            <Link size={16} />
+                                            {joiningHub ? 'Handshaking with Primary Hub...' : '🔗 Join Primary Cluster Hub'}
+                                        </button>
+                                    </form>
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>
@@ -599,7 +812,7 @@ const SiteMeshModal = ({ show, onClose, showToast }) => {
                 {/* Footer */}
                 <div style={{ padding: '16px 28px', background: 'var(--bg-surface-1)', borderTop: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                        NexaDisk Global Mesh v2.4.0 • mTLS Reverse Tunnel Mesh Active
+                        NexaDisk Global Mesh v2.4.0 • Zero-Port-Forwarding mTLS Tunnels
                     </span>
                     <button className="btn-outline" onClick={onClose} style={{ padding: '8px 20px', fontSize: '13px', fontWeight: '700' }}>
                         Close
@@ -612,6 +825,15 @@ const SiteMeshModal = ({ show, onClose, showToast }) => {
                 <DatacenterInspectorModal
                     site={selectedSiteInspector}
                     onClose={() => setSelectedSiteInspector(null)}
+                />
+            )}
+
+            {/* Remote Site File & Storage Explorer Modal */}
+            {remoteExplorer && (
+                <RemoteStorageExplorerModal
+                    explorer={remoteExplorer}
+                    onNavigate={(newPath) => handleOpenRemoteExplorer(remoteExplorer.siteId, remoteExplorer.siteName, newPath)}
+                    onClose={() => setRemoteExplorer(null)}
                 />
             )}
 
@@ -718,7 +940,7 @@ const SiteMeshModal = ({ show, onClose, showToast }) => {
 };
 
 // ── PROXMOX-STYLE SITE CARD COMPONENT ──────────────────────────────────────────────
-const SiteCard = ({ site, isMaster, isExpanded, onToggleExpand, onInspect, onUnpair }) => {
+const SiteCard = ({ site, isMaster, isExpanded, onToggleExpand, onInspect, onBrowseStorage, onUnpair }) => {
     if (!site) return null;
 
     const details = site.details || {};
@@ -838,6 +1060,15 @@ const SiteCard = ({ site, isMaster, isExpanded, onToggleExpand, onInspect, onUnp
 
                     {/* Buttons */}
                     <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        <button
+                            className="btn-primary"
+                            onClick={onBrowseStorage}
+                            style={{ padding: '7px 12px', fontSize: '12px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '5px', background: 'var(--primary-gradient)' }}
+                            title="Browse Storage & Files on this Site"
+                        >
+                            <Folder size={13} /> Browse Storage
+                        </button>
+
                         <button
                             className="btn-outline"
                             onClick={onInspect}
@@ -965,13 +1196,144 @@ const SiteCard = ({ site, isMaster, isExpanded, onToggleExpand, onInspect, onUnp
     );
 };
 
+// ── REMOTE STORAGE EXPLORER MODAL (EXPLORES SECONDARY SERVER FILES) ─────────────────
+const RemoteStorageExplorerModal = ({ explorer, onNavigate, onClose }) => {
+    if (!explorer) return null;
+
+    const { siteName, path, items, loading, storagePools } = explorer;
+    const pathParts = path.split('/').filter(Boolean);
+
+    return (
+        <div className="modal-overlay" style={{ zIndex: 100000 }} onClick={onClose}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ width: '860px', maxWidth: '94vw', maxHeight: '88vh', background: 'var(--bg-surface-0)', borderRadius: '20px', overflow: 'hidden', display: 'flex', flexDirection: 'column', border: '1px solid var(--border-subtle)', boxShadow: '0 32px 80px rgba(0,0,0,0.75)' }}>
+                {/* Explorer Header */}
+                <div style={{ padding: '18px 24px', background: 'var(--bg-surface-1)', borderBottom: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'rgba(14, 165, 233, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-cyan)' }}>
+                            <Folder size={22} />
+                        </div>
+                        <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '900', color: 'var(--text-primary)' }}>
+                                    Remote Storage Explorer: {siteName}
+                                </h3>
+                                <span style={{ fontSize: '10.5px', fontWeight: '800', background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', padding: '2px 8px', borderRadius: '6px' }}>
+                                    mTLS ENCRYPTED BRIDGE
+                                </span>
+                            </div>
+                            {/* Breadcrumbs */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                                <span onClick={() => onNavigate('/')} style={{ cursor: 'pointer', color: 'var(--accent-cyan)', fontWeight: '700' }}>
+                                    {siteName} (Root)
+                                </span>
+                                {pathParts.map((part, idx) => {
+                                    const subPath = '/' + pathParts.slice(0, idx + 1).join('/');
+                                    return (
+                                        <React.Fragment key={idx}>
+                                            <ChevronRight size={12} color="var(--text-muted)" />
+                                            <span onClick={() => onNavigate(subPath)} style={{ cursor: 'pointer', color: idx === pathParts.length - 1 ? 'var(--text-primary)' : 'var(--accent-cyan)', fontWeight: '700' }}>
+                                                {part}
+                                            </span>
+                                        </React.Fragment>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    </div>
+                    <button className="btn-icon" onClick={onClose}><X size={18} /></button>
+                </div>
+
+                {/* Explorer Body */}
+                <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                    {loading ? (
+                        <div style={{ padding: '60px 0', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                            <RefreshCw size={28} className="animate-spin" style={{ margin: '0 auto 12px' }} color="var(--accent-cyan)" />
+                            <div style={{ fontSize: '14px', fontWeight: '700' }}>Streaming remote filesystem over mTLS...</div>
+                        </div>
+                    ) : items.length === 0 ? (
+                        <div style={{ padding: '50px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
+                            Empty directory on remote server.
+                        </div>
+                    ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                            {items.map((item, idx) => {
+                                const isDir = item.type === 'directory';
+                                const itemPath = path === '/' ? `/${item.name}` : `${path}/${item.name}`;
+                                return (
+                                    <div
+                                        key={idx}
+                                        onClick={() => isDir && onNavigate(itemPath)}
+                                        style={{
+                                            padding: '12px 16px',
+                                            borderRadius: '12px',
+                                            background: 'var(--bg-surface-1)',
+                                            border: '1px solid var(--border-subtle)',
+                                            display: 'flex',
+                                            justifyContent: 'space-between',
+                                            alignItems: 'center',
+                                            cursor: isDir ? 'pointer' : 'default',
+                                            transition: 'all 0.15s ease'
+                                        }}
+                                        className={isDir ? 'hover-row' : ''}
+                                    >
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                            {item.isPool ? (
+                                                <HardDrive size={18} color="var(--primary)" />
+                                            ) : isDir ? (
+                                                <Folder size={18} color="var(--accent-cyan)" />
+                                            ) : (
+                                                <File size={18} color="var(--text-secondary)" />
+                                            )}
+                                            <div>
+                                                <div style={{ fontSize: '13.5px', fontWeight: '800', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                    {item.name}
+                                                    {item.fsType && (
+                                                        <span style={{ fontSize: '10px', background: 'var(--bg-surface-2)', padding: '1px 6px', borderRadius: '4px', color: 'var(--text-muted)' }}>
+                                                            {item.fsType}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                                                    {item.modified ? new Date(item.modified).toLocaleString() : 'Live'}
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                                            <span style={{ fontSize: '12.5px', fontWeight: '800', color: 'var(--text-secondary)' }}>
+                                                {formatBytes(item.size)}
+                                            </span>
+                                            {isDir && (
+                                                <ChevronRight size={16} color="var(--text-muted)" />
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+
+                {/* Footer */}
+                <div style={{ padding: '14px 24px', background: 'var(--bg-surface-1)', borderTop: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                        Connected to {siteName} via NexaDisk Secure Tunnel
+                    </span>
+                    <button className="btn-outline" onClick={onClose} style={{ padding: '7px 18px', fontSize: '12.5px' }}>
+                        Close Explorer
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 // ── DATACENTER INSPECTOR DRAWER COMPONENT ──────────────────────────────────────────
 const DatacenterInspectorModal = ({ site, onClose }) => {
     if (!site) return null;
     const details = site.details || {};
     const storagePools = details.storagePools || [];
     const agents = details.agents || [];
-    const rep = details.replicationSummary || {};
 
     return (
         <div className="modal-overlay" style={{ zIndex: 100000 }} onClick={onClose}>
@@ -1084,4 +1446,3 @@ const DatacenterInspectorModal = ({ site, onClose }) => {
 };
 
 export default SiteMeshModal;
-
