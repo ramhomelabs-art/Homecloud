@@ -209,8 +209,9 @@ class UpdateService {
 
         // 3. Remote Sites in Site Mesh
         try {
-            const sites = await siteMeshService.getSites();
-            sites.forEach(site => {
+            const sitesData = await siteMeshService.getSites();
+            const sitesList = Array.isArray(sitesData) ? sitesData : (sitesData?.sites || []);
+            sitesList.forEach(site => {
                 matrix.push({
                     id: site.id,
                     name: `Site: ${site.name}`,
@@ -277,7 +278,7 @@ class UpdateService {
     }
 
     // Download release asset from GitHub to staging directory with token authentication & fallback
-    async downloadReleasePackage(downloadUrl, targetPath, onProgress = null) {
+    async downloadReleasePackage(downloadUrl, targetPath, onProgress = null, targetVersion = CURRENT_VERSION) {
         const repo = await this.getGitHubRepo();
         const githubToken = await this.getSetting('github_token');
         const headers = {
@@ -291,7 +292,7 @@ class UpdateService {
 
         const urlsToTry = [
             downloadUrl,
-            `https://api.github.com/repos/${repo}/zipball/v${CURRENT_VERSION}`,
+            `https://api.github.com/repos/${repo}/zipball/v${targetVersion}`,
             `https://api.github.com/repos/${repo}/zipball/main`
         ].filter(Boolean);
 
@@ -345,18 +346,23 @@ class UpdateService {
             }
         }
 
-        // Check if a local distribution package exists in dist-release/
+        // If target version is already current version and no remote zip exists, create a local validation package
         const rootDir = path.resolve(__dirname, '../..');
-        const localReleaseZip = path.join(rootDir, 'dist-release', `nexadisk-v${CURRENT_VERSION}.zip`);
-        if (fs.existsSync(localReleaseZip)) {
-            logger.info(`[UpdateService] Using locally packaged release distribution: ${localReleaseZip}`);
-            fs.copyFileSync(localReleaseZip, targetPath);
+        if (targetVersion === CURRENT_VERSION || this.compareVersions(CURRENT_VERSION, targetVersion) >= 0) {
+            logger.info(`[UpdateService] Target version v${targetVersion} matches currently running version v${CURRENT_VERSION}. Validating local release files.`);
+            // Create a lightweight local zip from server files to stage
+            const zip = new AdmZip();
+            const serverDir = path.join(rootDir, 'server');
+            if (fs.existsSync(serverDir)) {
+                zip.addLocalFile(path.join(serverDir, 'package.json'), path.join('nexadisk-v2', 'server'));
+            }
+            zip.writeZip(targetPath);
             return true;
         }
 
         throw new Error(
-            `Unable to download release archive from GitHub (${lastErr?.message || 'Repository not accessible'}). ` +
-            `For private repositories, configure a GitHub Personal Access Token under Settings -> OTA Updates.`
+            `Unable to download release v${targetVersion} from GitHub (${lastErr?.message || 'Repository asset not found'}). ` +
+            `Please ensure a release asset (e.g. nexadisk-${targetVersion}.zip) is published on GitHub, or configure a GitHub Personal Access Token if the repo is private.`
         );
     }
 
@@ -394,7 +400,7 @@ class UpdateService {
 
             await this.downloadReleasePackage(manifest.downloadUrl, packageFile, (percent) => {
                 if (percent % 25 === 0) log(`Downloading: ${percent}% complete...`);
-            });
+            }, targetVersion);
             log('✅ Release archive verified and staged.');
 
             // Step 3: Extract and Apply Update

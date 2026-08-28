@@ -110,12 +110,17 @@ const ClusterUpdateModal = ({ show, onClose, showToast }) => {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                         <div>
                             <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '700' }}>CURRENT RUNNING VERSION</div>
-                            <div style={{ fontSize: '16px', fontWeight: '800', color: 'var(--text-primary)', marginTop: '2px' }}>v{manifest?.currentVersion || '2.3.4'}</div>
+                            <div style={{ fontSize: '16px', fontWeight: '800', color: 'var(--text-primary)', marginTop: '2px' }}>v{manifest?.currentVersion || '2.4.0'}</div>
                         </div>
                         <div style={{ width: '1px', height: '32px', background: 'var(--border-subtle)' }} />
                         <div>
                             <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '700' }}>LATEST AVAILABLE RELEASE</div>
-                            <div style={{ fontSize: '16px', fontWeight: '800', color: '#10b981', marginTop: '2px' }}>v{manifest?.latestVersion || '2.4.0'} ({channel.toUpperCase()})</div>
+                            <div style={{ fontSize: '16px', fontWeight: '800', color: manifest?.updateAvailable ? '#38bdf8' : '#10b981', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                v{manifest?.latestVersion || '2.4.0'} ({channel.toUpperCase()})
+                                <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: manifest?.updateAvailable ? 'rgba(56, 189, 248, 0.15)' : 'rgba(16, 185, 129, 0.15)', color: manifest?.updateAvailable ? '#38bdf8' : '#10b981' }}>
+                                    {manifest?.updateAvailable ? 'UPDATE AVAILABLE' : 'UP TO DATE'}
+                                </span>
+                            </div>
                         </div>
                     </div>
 
@@ -223,7 +228,7 @@ const ClusterUpdateModal = ({ show, onClose, showToast }) => {
                         </button>
                         <button className="btn-primary" onClick={handleDeployUpdate} disabled={updating} style={{ padding: '8px 20px', fontSize: '12px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '6px' }}>
                             {updating ? <RefreshCw size={14} className="animate-spin" /> : <Sparkles size={14} />}
-                            {updating ? 'Deploying...' : `Deploy v${manifest?.latestVersion || '2.4.0'} to Cluster`}
+                            {updating ? 'Deploying...' : (manifest?.updateAvailable ? `Deploy v${manifest?.latestVersion} to Cluster` : `Validate & Re-Deploy (v${manifest?.latestVersion || '2.4.0'})`)}
                         </button>
                     </div>
                 </div>

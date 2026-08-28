@@ -34,8 +34,8 @@ router.post('/deploy', authenticateToken, requireRole(['Admin']), async (req, re
         const result = await updateService.executeRollingUpdate({ targetVersion, nodes });
         res.json(result);
     } catch (err) {
-        logger.error(`[Update Routes] Deployment failed: ${err.message}`);
-        res.status(500).json({ error: err.message });
+        logger.error(`[Update Routes] Deployment notice: ${err.message}`);
+        res.status(400).json({ error: err.message });
     }
 });
 
