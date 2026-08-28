@@ -75,7 +75,6 @@ router.post('/setup/complete', async (req, res) => {
 
     try {
         const hashedPassword = await bcrypt.hash(adminPassword, 10);
-        const userId = 'user_admin_' + Date.now();
 
         // 1. Insert or update the admin account
         const existing = await db.query('SELECT * FROM users WHERE username = $1', [adminUsername]);
@@ -90,10 +89,10 @@ router.post('/setup/complete', async (req, res) => {
             user = updateRes.rows[0];
         } else {
             const insertRes = await db.query(`
-                INSERT INTO users (id, username, password_hash, role, display_name, email)
-                VALUES ($1, $2, $3, 'Admin', $4, $5)
+                INSERT INTO users (username, password_hash, role, display_name, email)
+                VALUES ($1, $2, 'Admin', $3, $4)
                 RETURNING id, username, role, display_name, email
-            `, [userId, adminUsername, hashedPassword, adminDisplayName, adminEmail]);
+            `, [adminUsername, hashedPassword, adminDisplayName, adminEmail]);
             user = insertRes.rows[0];
         }
 
