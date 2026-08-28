@@ -33,7 +33,7 @@ const getPasswordStrength = (pass) => {
     return { score, label: 'Strong', color: '#3fb950' };
 };
 
-const ProfileSettings = ({ onProfileUpdate }) => {
+const ProfileSettings = ({ onProfileUpdate, embedded = false }) => {
     const [user, setUser] = useState(null);
     const [formData, setFormData] = useState({});
     const [loading, setLoading] = useState(true);
@@ -100,147 +100,156 @@ const ProfileSettings = ({ onProfileUpdate }) => {
         };
     }, []);
 
-    const fetchProfile = async () => {
+    // Fetch user details
+    const fetchUserProfile = async () => {
+        setLoading(true);
         try {
-            const res = await axios.get('/api/v1/profile');
-            setUser(res.data);
-            setFormData(res.data);
-            setMfaEnabled(!!res.data.mfa_enabled);
+            const token = localStorage.getItem('token');
+            const headers = token ? { Authorization: `Bearer ${token}` } : {};
+            const res = await axios.get('/api/v1/profile', { headers });
+            if (res.data) {
+                setUser(res.data);
+                setFormData(res.data);
+                setMfaEnabled(Boolean(res.data.mfa_enabled));
+            }
+        } catch (err) {
+            // Fallback: load basic user info from verify endpoint if profile record is pending
+            try {
+                const verifyRes = await axios.get('/api/v1/auth/verify');
+                if (verifyRes.data) {
+                    const fallbackUser = {
+                        username: verifyRes.data.username || 'Admin',
+                        role: verifyRes.data.role || 'Admin',
+                        display_name: verifyRes.data.username || 'Admin'
+                    };
+                    setUser(fallbackUser);
+                    setFormData(fallbackUser);
+                }
+            } catch (_) {}
+            console.error('Failed to load profile details:', err);
+        } finally {
             setLoading(false);
-        } catch (e) {
-            console.error('Failed to fetch profile', e);
         }
     };
 
+    // Fetch Active Sessions
+    const fetchSessions = async () => {
+        setLoadingSessions(true);
+        try {
+            const res = await axios.get('/api/v1/auth/sessions');
+            setSessions(res.data || []);
+        } catch (err) {
+            console.error('Failed to load sessions', err);
+        } finally {
+            setLoadingSessions(false);
+        }
+    };
+
+    // Fetch Storage Telemetry
     const fetchStorageStats = async () => {
         setLoadingStorage(true);
         try {
-            const [diskRes, agentsRes] = await Promise.all([
-                axios.get('/api/v1/storage/local'),
-                axios.get('/api/v1/storage/agents').catch(() => ({ data: [] }))
+            const token = localStorage.getItem('token');
+            const headers = token ? { Authorization: `Bearer ${token}` } : {};
+            const [localRes, clusterRes] = await Promise.all([
+                axios.get('/api/v1/storage/local', { headers }).catch(() => ({ data: null })),
+                axios.get('/api/v1/storage/agents', { headers }).catch(() => ({ data: [] }))
             ]);
-            setDiskStats(diskRes.data);
-            setAgentsStats(agentsRes.data);
             
-            const raw = diskRes.data.categories || { media: 0, images: 0, documents: 0, archives: 0, other: 0 };
-            const isEstimated = !!raw._estimated;
+            if (localRes.data) {
+                setDiskStats(localRes.data);
+                const raw = localRes.data.categories || { media: 0, images: 0, documents: 0, archives: 0, other: 0 };
+                const isEstimated = Boolean(raw._estimated);
 
-            // Filter out the internal flag before computing totals
-            const categoriesData = {
-                media: raw.media || 0,
-                images: raw.images || 0,
-                documents: raw.documents || 0,
-                archives: raw.archives || 0,
-                other: raw.other || 0
-            };
-            const totalCategoriesSize = Object.values(categoriesData).reduce((a, b) => a + b, 0);
+                const categoriesData = {
+                    media: raw.media || 0,
+                    images: raw.images || 0,
+                    documents: raw.documents || 0,
+                    archives: raw.archives || 0,
+                    other: raw.other || 0
+                };
+                const totalCategoriesSize = Object.values(categoriesData).reduce((a, b) => a + b, 0);
 
-            const getPercentage = (val) => {
-                if (totalCategoriesSize === 0) return 0;
-                return Math.round((val / totalCategoriesSize) * 100);
-            };
+                const getPercentage = (val) => {
+                    if (totalCategoriesSize === 0) return 0;
+                    return Math.round((val / totalCategoriesSize) * 100);
+                };
 
-            setFileCategories([
-                { name: 'Media Files (Videos & Audio)', size: categoriesData.media, percentage: getPercentage(categoriesData.media), color: '#ffb703', estimated: isEstimated },
-                { name: 'Image Avatars & Photos', size: categoriesData.images, percentage: getPercentage(categoriesData.images), color: '#219ebc', estimated: isEstimated },
-                { name: 'Document Files (PDF, TXT, MD)', size: categoriesData.documents, percentage: getPercentage(categoriesData.documents), color: '#3fb950', estimated: isEstimated },
-                { name: 'System Backups & Archives', size: categoriesData.archives, percentage: getPercentage(categoriesData.archives), color: '#1f6feb', estimated: isEstimated },
-                { name: 'Other Items', size: categoriesData.other, percentage: getPercentage(categoriesData.other), color: 'var(--text-secondary)', estimated: isEstimated }
-            ]);
-        } catch (e) {
-            console.error('Failed to fetch storage metrics', e);
+                setFileCategories([
+                    { name: 'Media Files (Videos & Audio)', size: categoriesData.media, percentage: getPercentage(categoriesData.media), color: '#ffb703', estimated: isEstimated },
+                    { name: 'Image Avatars & Photos', size: categoriesData.images, percentage: getPercentage(categoriesData.images), color: '#219ebc', estimated: isEstimated },
+                    { name: 'Document Files (PDF, TXT, MD)', size: categoriesData.documents, percentage: getPercentage(categoriesData.documents), color: '#3fb950', estimated: isEstimated },
+                    { name: 'System Backups & Archives', size: categoriesData.archives, percentage: getPercentage(categoriesData.archives), color: '#1f6feb', estimated: isEstimated },
+                    { name: 'Other Items', size: categoriesData.other, percentage: getPercentage(categoriesData.other), color: 'var(--text-secondary)', estimated: isEstimated }
+                ]);
+            }
+            
+            setAgentsStats(Array.isArray(clusterRes.data) ? clusterRes.data : []);
+        } catch (err) {
+            console.error('Failed to load storage telemetry', err);
         } finally {
             setLoadingStorage(false);
         }
     };
 
     useEffect(() => {
-        fetchProfile();
+        fetchUserProfile();
     }, []);
 
     useEffect(() => {
-        if (activeTab === 'storage') {
-            fetchStorageStats();
-        }
         if (activeTab === 'security') {
             fetchSessions();
+        } else if (activeTab === 'storage') {
+            fetchStorageStats();
         }
-    }, [activeTab, purgeOffset]);
+    }, [activeTab]);
 
+    // Handle standard inputs
     const handleInputChange = (e) => {
         const { name, value } = e.target;
         setFormData(prev => ({ ...prev, [name]: value }));
     };
 
+    // Save Profile Information
     const handleSaveProfile = async () => {
         try {
-            const res = await axios.put('/api/v1/profile', formData);
-            setUser(res.data.profile);
-            if (onProfileUpdate) onProfileUpdate(res.data.profile);
+            const token = localStorage.getItem('token');
+            const headers = token ? { Authorization: `Bearer ${token}` } : {};
+            const res = await axios.put('/api/v1/profile', formData, { headers });
+            const savedProfile = res.data?.profile || res.data;
+            if (savedProfile) {
+                setUser(savedProfile);
+                if (onProfileUpdate) onProfileUpdate(savedProfile);
+            }
             showToast('Profile updated successfully', 'success');
-        } catch (e) {
-            showToast('Failed to update profile', 'error');
+        } catch (err) {
+            showToast(err.response?.data?.error || 'Failed to update profile', 'error');
         }
     };
 
-    const handleAvatarSuccess = (data) => {
-        setShowAvatarDialog(false);
-        const updated = { 
-            ...user, 
-            avatar_path: data.avatar_path, 
-            avatar_thumbnail_path: data.avatar_thumbnail_path,
-            avatar_updated_at: new Date().toISOString()
-        };
-        setUser(updated);
-        if (onProfileUpdate) onProfileUpdate(updated);
-        showToast('Profile photo updated', 'success');
+    // Remove Avatar
+    const handleRemoveAvatar = async () => {
+        try {
+            await axios.delete('/api/v1/profile/avatar');
+            setUser(prev => ({ ...prev, avatar_path: null }));
+            showToast('Profile photo removed', 'success');
+            if (onProfileUpdate) onProfileUpdate({ ...user, avatar_path: null });
+        } catch (err) {
+            showToast('Failed to remove photo', 'error');
+        }
     };
 
-    // In-UI Confirmation Modal State
     const [confirmAction, setConfirmAction] = useState(null);
 
-    const handleRemoveAvatar = () => {
-        setConfirmAction({
-            title: 'Remove Profile Photo',
-            message: 'Are you sure you want to remove your profile photo and reset to default initials?',
-            confirmText: 'Remove Photo',
-            type: 'warning',
-            onConfirm: async () => {
-                try {
-                    await axios.delete('/api/v1/profile/avatar');
-                    const updated = { ...user, avatar_path: null, avatar_thumbnail_path: null };
-                    setUser(updated);
-                    if (onProfileUpdate) onProfileUpdate(updated);
-                    showToast('Profile photo removed', 'success');
-                } catch (e) {
-                    showToast('Failed to remove avatar', 'error');
-                }
-            }
-        });
-    };
-
-    const fetchSessions = async () => {
-        setLoadingSessions(true);
-        try {
-            const res = await axios.get('/api/v1/auth/sessions');
-            setSessions(res.data || []);
-        } catch (e) {
-            console.error('Failed to fetch sessions', e);
-        } finally {
-            setLoadingSessions(false);
-        }
-    };
-
     const handleRevokeSession = (sessionId) => {
-        if (!sessionId) return;
         setConfirmAction({
             title: 'Revoke Device Session',
-            message: 'Are you sure you want to revoke this session? That device will be disconnected immediately.',
+            message: 'Are you sure you want to terminate this device login session? The user will be logged out immediately.',
             confirmText: 'Revoke Session',
             type: 'danger',
             onConfirm: async () => {
                 try {
-                    await axios.delete(`/api/v1/auth/sessions/${sessionId}`);
+                    await axios.post('/api/v1/auth/sessions/revoke', { sessionId });
                     showToast('Session revoked successfully', 'success');
                     fetchSessions();
                 } catch (e) {
@@ -373,29 +382,71 @@ const ProfileSettings = ({ onProfileUpdate }) => {
     };
 
     const styles = {
-        container: { padding: '32px', color: 'var(--text-secondary)', background: 'var(--bg-surface-0)', minHeight: '100vh', fontFamily: "'Inter', sans-serif", display: 'flex', gap: '32px' },
-        sidebar: { width: '250px', display: 'flex', flexDirection: 'column', gap: '8px' },
-        tabBtn: (active) => ({ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px', background: active ? 'linear-gradient(135deg, var(--primary-light), var(--primary))' : 'transparent', color: active ? '#ffffff' : 'var(--text-secondary)', border: 'none', borderRadius: '8px', cursor: 'pointer', textAlign: 'left', fontWeight: active ? 600 : 400, fontSize: '14px', transition: 'all 0.2s', outline: 'none' }),
-        main: { flex: 1, background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)', borderRadius: '12px', padding: '32px', position: 'relative' },
-        header: { display: 'flex', gap: '24px', alignItems: 'flex-start', marginBottom: '40px', paddingBottom: '32px', borderBottom: '1px solid var(--border-subtle)' },
-        formGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' },
+        container: { 
+            padding: embedded ? '0' : '20px 0', 
+            color: 'var(--text-secondary)', 
+            background: 'transparent', 
+            minHeight: embedded ? 'auto' : 'calc(100vh - 120px)', 
+            fontFamily: "var(--font-sans)", 
+            display: 'flex', 
+            flexDirection: embedded ? 'column' : 'row',
+            gap: embedded ? '20px' : '28px' 
+        },
+        sidebar: { 
+            width: embedded ? '100%' : '230px', 
+            minWidth: embedded ? '100%' : '230px', 
+            display: 'flex', 
+            flexDirection: embedded ? 'row' : 'column', 
+            gap: '8px',
+            flexWrap: 'wrap',
+            paddingBottom: embedded ? '16px' : '0',
+            borderBottom: embedded ? '1px solid var(--border-subtle)' : 'none'
+        },
+        tabBtn: (active) => ({ 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '10px', 
+            padding: embedded ? '10px 18px' : '12px 16px', 
+            background: active ? 'linear-gradient(135deg, var(--primary-light), var(--primary))' : (embedded ? 'var(--bg-surface-1)' : 'transparent'), 
+            color: active ? '#ffffff' : 'var(--text-secondary)', 
+            border: `1px solid ${active ? 'transparent' : 'var(--border-subtle)'}`, 
+            borderRadius: '10px', 
+            cursor: 'pointer', 
+            textAlign: 'left', 
+            fontWeight: active ? 700 : 600, 
+            fontSize: '13px', 
+            transition: 'all 0.2s', 
+            outline: 'none',
+            boxShadow: active ? 'var(--shadow-sm)' : 'none'
+        }),
+        main: { 
+            flex: 1, 
+            width: '100%',
+            background: embedded ? 'transparent' : 'var(--bg-surface-0)', 
+            border: embedded ? 'none' : '1px solid var(--border-subtle)', 
+            borderRadius: '18px', 
+            padding: embedded ? '0' : '28px', 
+            position: 'relative' 
+        },
+        header: { display: 'flex', gap: '24px', alignItems: 'flex-start', marginBottom: '32px', paddingBottom: '24px', borderBottom: '1px solid var(--border-subtle)' },
+        formGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '20px' },
         formGroup: { display: 'flex', flexDirection: 'column', gap: '8px' },
-        label: { fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' },
-        input: { background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)', color: 'var(--text-secondary)', padding: '10px 12px', borderRadius: '6px', fontSize: '14px', outline: 'none', transition: 'border-color 0.2s' },
-        select: { background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)', color: 'var(--text-secondary)', padding: '10px 12px', borderRadius: '6px', fontSize: '14px', outline: 'none', cursor: 'pointer' },
-        textarea: { background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)', color: 'var(--text-secondary)', padding: '10px 12px', borderRadius: '6px', fontSize: '14px', minHeight: '100px', resize: 'vertical', outline: 'none' },
-        btnSave: { background: '#238636', border: 'none', color: 'var(--text-primary)', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, marginTop: '24px', transition: 'background-color 0.2s' },
-        btnRemove: { background: 'transparent', border: '1px solid #f85149', color: '#f85149', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', transition: 'background-color 0.2s' },
+        label: { fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.04em' },
+        input: { background: 'var(--bg-surface-1)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', padding: '10px 14px', borderRadius: '10px', fontSize: '13.5px', outline: 'none', transition: 'border-color 0.2s' },
+        select: { background: 'var(--bg-surface-1)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', padding: '10px 14px', borderRadius: '10px', fontSize: '13.5px', outline: 'none', cursor: 'pointer' },
+        textarea: { background: 'var(--bg-surface-1)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', padding: '10px 14px', borderRadius: '10px', fontSize: '13.5px', minHeight: '100px', resize: 'vertical', outline: 'none' },
+        btnSave: { background: 'var(--primary)', border: 'none', color: '#ffffff', padding: '11px 22px', borderRadius: '10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700, marginTop: '24px', transition: 'background-color 0.2s', boxShadow: 'var(--shadow-sm)' },
+        btnRemove: { background: 'transparent', border: '1px solid #f85149', color: '#f85149', padding: '6px 12px', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', transition: 'background-color 0.2s' },
         
         // Premium components
-        card: { background: 'var(--bg-surface-2)', border: '1px solid var(--border-subtle)', borderRadius: '10px', padding: '24px', marginBottom: '24px' },
-        cardTitle: { display: 'flex', alignItems: 'center', gap: '10px', margin: '0 0 8px 0', fontSize: '16px', color: 'var(--text-primary)', fontWeight: 600 },
-        cardDesc: { color: 'var(--text-secondary)', fontSize: '13px', marginBottom: '20px', lineHeight: '1.5' },
-        grid2: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' },
-        badge: (color) => ({ background: color + '15', border: '1px solid ' + color, color: color, padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600, display: 'inline-block' }),
+        card: { background: 'var(--bg-surface-1)', border: '1px solid var(--border-subtle)', borderRadius: '14px', padding: '22px', marginBottom: '20px', boxShadow: 'var(--shadow-sm)' },
+        cardTitle: { display: 'flex', alignItems: 'center', gap: '10px', margin: '0 0 8px 0', fontSize: '16px', color: 'var(--text-primary)', fontWeight: 700 },
+        cardDesc: { color: 'var(--text-secondary)', fontSize: '13px', marginBottom: '18px', lineHeight: '1.5' },
+        grid2: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' },
+        badge: (color) => ({ background: color + '15', border: '1px solid ' + color, color: color, padding: '3px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: 700, display: 'inline-block' }),
         
         // Progress bar
-        progressBg: { background: 'var(--bg-surface-1)', borderRadius: '8px', height: '10px', width: '100%', overflow: 'hidden', display: 'flex', margin: '8px 0' },
+        progressBg: { background: 'var(--bg-surface-2)', borderRadius: '8px', height: '10px', width: '100%', overflow: 'hidden', display: 'flex', margin: '8px 0' },
         progressFill: (color, width) => ({ background: color, height: '100%', width: width, transition: 'width 0.4s ease' }),
         
         // Cleanup list
@@ -404,13 +455,13 @@ const ProfileSettings = ({ onProfileUpdate }) => {
         // Custom Toast style
         toastFloating: (type) => ({
             position: 'absolute',
-            top: '24px',
-            right: '32px',
+            top: '16px',
+            right: '20px',
             background: type === 'error' ? 'rgba(248, 81, 73, 0.95)' : 'rgba(46, 160, 67, 0.95)',
-            color: 'var(--text-primary)',
+            color: '#ffffff',
             padding: '10px 20px',
-            borderRadius: '6px',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+            borderRadius: '8px',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
             zIndex: 10,
             display: 'flex',
             alignItems: 'center',
@@ -422,11 +473,11 @@ const ProfileSettings = ({ onProfileUpdate }) => {
 
     const passwordStrength = getPasswordStrength(newPass);
 
-    if (loading) return <div style={styles.container}>Loading profile settings...</div>;
+    if (loading) return <div style={{ padding: '32px', color: 'var(--text-secondary)' }}>Loading profile settings...</div>;
 
     return (
         <div style={styles.container}>
-            {/* Sidebar Tabs */}
+            {/* Navigation Tabs */}
             <div style={styles.sidebar}>
                 <button style={styles.tabBtn(activeTab === 'profile')} onClick={() => setActiveTab('profile')}><User size={18} /> Profile Information</button>
                 <button style={styles.tabBtn(activeTab === 'security')} onClick={() => setActiveTab('security')}><Shield size={18} /> Security Settings</button>
@@ -457,11 +508,13 @@ const ProfileSettings = ({ onProfileUpdate }) => {
                             </div>
                             <div>
                                 <h2 style={{ margin: '0 0 8px 0', color: 'var(--text-primary)', fontSize: '24px' }}>
-                                    {user.display_name || (user.first_name ? `${user.first_name} ${user.last_name || ''}` : user.username)}
+                                    {user?.display_name || (user?.first_name ? `${user.first_name} ${user?.last_name || ''}` : user?.username || 'User')}
                                 </h2>
-                                <div style={{ color: 'var(--text-secondary)', marginBottom: '16px' }}>{user.job_title || 'No Job Title'} • {user.department || 'No Department'}</div>
+                                <div style={{ color: 'var(--text-secondary)', marginBottom: '16px' }}>
+                                    {user?.job_title || 'No Job Title'} • {user?.department || 'No Department'}
+                                </div>
                                 <div style={{ background: 'rgba(56,139,253,0.15)', border: '1px solid #58a6ff', color: '#58a6ff', padding: '4px 12px', borderRadius: '20px', fontSize: '12px', display: 'inline-block', fontWeight: 'bold' }}>
-                                    {user.role}
+                                    {user?.role || 'Operator'}
                                 </div>
                             </div>
                         </div>

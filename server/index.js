@@ -56,6 +56,7 @@ fs.promises.rename = async (src, dest) => {
 const { initDatabase } = require('./config/database');
 const logger = require('./utils/logger');
 const { errorHandler, notFound } = require('./middleware/errorHandler');
+const { firewallMiddleware } = require('./middleware/firewall');
 
 const axios = require('axios');
 const clusterService = require('./services/clusterService');
@@ -172,6 +173,9 @@ app.use(cors((req, callback) => {
 }));
 app.use(bodyParser.json());
 
+// --- ENTERPRISE FIREWALL & WAF DEEP INSPECTION ---
+app.use(firewallMiddleware);
+
 // --- SANITIZE INTERNAL ERRORS TO PREVENT LEAKS ---
 app.use((req, res, next) => {
     const originalJson = res.json;
@@ -246,21 +250,34 @@ app.use((req, res, next) => {
     next();
 });
 
-// --- RATE LIMITING ---
+// General API limiter — balanced for dashboard polling while blocking DoS
 const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 10000,
-    message: 'Too many requests from this IP, please try again later.',
+    max: 2500,                 // Supports multi-device dashboard polling and telemetry
+    message: { error: 'Too many requests from this IP, please try again later.' },
     standardHeaders: true,
     legacyHeaders: false,
+    skip: (req) => req.ip === '127.0.0.1' || req.ip === '::1' || req.ip === '::ffff:127.0.0.1'
 });
 app.use('/api/', apiLimiter);
+
+// Sensitive-operations limiter — for share creation, user management, admin ops
+const sensitiveOpsLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 100,
+    message: { error: 'Too many sensitive operations from this IP. Please slow down.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: (req) => req.ip === '127.0.0.1' || req.ip === '::1' || req.ip === '::ffff:127.0.0.1'
+});
+app.use('/api/v1/shares', sensitiveOpsLimiter);
+app.use('/api/v1/users', sensitiveOpsLimiter);
 
 // Strict rate limit for login and OTP endpoints to prevent brute-force
 const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
     max: 10,
-    message: 'Too many authentication attempts. Please try again in 15 minutes.',
+    message: { error: 'Too many authentication attempts. Please try again in 15 minutes.' },
     standardHeaders: true,
     legacyHeaders: false,
     skipSuccessfulRequests: true, // Only count failed attempts

@@ -14,7 +14,7 @@
     "migrate:down": "node-pg-migrate down"
   },
   "dependencies": {
-    "adm-zip": "^0.5.16",
+    "adm-zip": "^0.6.0",
     "archiver": "^8.0.0",
     "aws-sdk": "^2.1550.0",
     "axios": "^1.7.9",
@@ -37,7 +37,7 @@
     "pg": "^8.13.1",
     "qrcode": "^1.5.4",
     "redis": "^4.7.0",
-    "sharp": "^0.33.5",
+    "sharp": "^0.35.4",
     "ssh2": "^1.17.0",
     "winston": "^3.19.0"
   }

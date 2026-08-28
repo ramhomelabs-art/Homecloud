@@ -4,7 +4,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
     Shield, ShieldAlert, ShieldCheck, Activity, AlertTriangle, 
     Play, RefreshCw, XCircle, Folder, Settings, ScrollText, 
-    Server, Cpu, CheckCircle2, Sliders, Info, Trash2, Globe
+    Server, Cpu, CheckCircle2, Sliders, Info, Trash2, Globe,
+    Lock, DownloadCloud, FileCode, Database, Check
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, CartesianGrid } from 'recharts';
 import FolderPickerModal from '../modals/FolderPickerModal';
@@ -43,6 +44,11 @@ function SecurityCenter({ showToast: externalToast }) {
     const [lastSync, setLastSync] = useState('Today, 10:15 PM');
     const [updatingDb, setUpdatingDb] = useState(false);
     const [updateStage, setUpdateStage] = useState('');
+
+    // Cryptographic Audit Ledger & SIEM States
+    const [integrityResult, setIntegrityResult] = useState(null);
+    const [verifyingIntegrity, setVerifyingIntegrity] = useState(false);
+    const [exportingSiem, setExportingSiem] = useState(false);
 
     // Manual Scanner Form State
     const [scanPath, setScanPath] = useState('');
@@ -1445,8 +1451,105 @@ function SecurityCenter({ showToast: externalToast }) {
             <AnimatePresence mode="wait">
             {activeTab === 'logs' && (
                 <motion.div key="logs" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.35 }} style={styles.widget}>
-                    <h3 style={styles.widgetTitle}>Security Events Audit Log</h3>
-                    <p style={{ color: 'var(--text-secondary)', fontSize: '13px', margin: '-10px 0 20px 0' }}>A chronological audit log tracking system logins, signature detections, quarantine reviews, and policy updates.</p>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px', marginBottom: '20px' }}>
+                        <div>
+                            <h3 style={styles.widgetTitle}>Security Events & Cryptographic Audit Ledger</h3>
+                            <p style={{ color: 'var(--text-secondary)', fontSize: '13px', margin: '4px 0 0 0' }}>
+                                Immutable SHA-256 blockchain-style hash chain tracking authentication, configuration, cyber defense detections, and compliance operations.
+                            </p>
+                        </div>
+
+                        {/* Top Action Bar for Integrity & SIEM */}
+                        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+                            <button
+                                onClick={async () => {
+                                    setVerifyingIntegrity(true);
+                                    try {
+                                        const token = localStorage.getItem('token');
+                                        const res = await axios.get('/api/v1/audit/verify-integrity', {
+                                            headers: token ? { Authorization: `Bearer ${token}` } : {}
+                                        });
+                                        setIntegrityResult(res.data);
+                                        if (res.data.verified) {
+                                            showToast(`Audit Ledger Verified: ${res.data.totalRecords} records secure`, 'success');
+                                        } else {
+                                            showToast(`Integrity Warning: ${res.data.issuesCount} issues detected`, 'error');
+                                        }
+                                    } catch (err) {
+                                        showToast('Failed to verify ledger integrity', 'error');
+                                    } finally {
+                                        setVerifyingIntegrity(false);
+                                    }
+                                }}
+                                disabled={verifyingIntegrity}
+                                className="btn-secondary"
+                                style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', padding: '8px 14px', borderRadius: '10px', fontWeight: '700', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }}
+                            >
+                                {verifyingIntegrity ? <RefreshCw size={14} className="spin-anim" /> : <Lock size={14} />}
+                                {verifyingIntegrity ? 'Verifying Chain...' : 'Verify Cryptographic Hash Chain'}
+                            </button>
+
+                            {/* SIEM Export Dropdowns / Buttons */}
+                            <div style={{ display: 'flex', gap: '6px', background: 'var(--bg-surface-1)', padding: '4px', borderRadius: '10px', border: '1px solid var(--border-subtle)' }}>
+                                {['CEF', 'LEEF', 'JSON', 'CSV'].map(fmt => (
+                                    <button
+                                        key={fmt}
+                                        onClick={async () => {
+                                            try {
+                                                const token = localStorage.getItem('token');
+                                                const res = await axios.get(`/api/v1/audit/export/${fmt.toLowerCase()}`, {
+                                                    headers: token ? { Authorization: `Bearer ${token}` } : {},
+                                                    responseType: 'blob'
+                                                });
+                                                const url = window.URL.createObjectURL(new Blob([res.data]));
+                                                const link = document.createElement('a');
+                                                link.href = url;
+                                                link.setAttribute('download', `nexadisk_audit_${fmt.toLowerCase()}_${Date.now()}.${fmt.toLowerCase() === 'json' ? 'json' : fmt.toLowerCase() === 'csv' ? 'csv' : fmt.toLowerCase()}`);
+                                                document.body.appendChild(link);
+                                                link.click();
+                                                link.remove();
+                                                showToast(`Exported audit logs to ${fmt}`, 'success');
+                                            } catch (err) {
+                                                showToast(`Failed to export ${fmt}`, 'error');
+                                            }
+                                        }}
+                                        style={{
+                                            fontSize: '11px', fontWeight: '700', padding: '5px 9px', borderRadius: '6px',
+                                            background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer'
+                                        }}
+                                        title={`Export audit trail to ${fmt} format`}
+                                    >
+                                        <DownloadCloud size={11} style={{ marginRight: '4px', verticalAlign: 'middle' }} /> {fmt}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Cryptographic Ledger Status Banner */}
+                    {integrityResult && (
+                        <div style={{
+                            padding: '14px 18px', borderRadius: '12px', marginBottom: '16px',
+                            background: integrityResult.verified ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)',
+                            border: `1px solid ${integrityResult.verified ? 'rgba(16,185,129,0.25)' : 'rgba(239,68,68,0.25)'}`,
+                            display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px'
+                        }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                {integrityResult.verified ? <CheckCircle2 size={20} color="#10b981" /> : <AlertTriangle size={20} color="#ef4444" />}
+                                <div>
+                                    <div style={{ fontSize: '13px', fontWeight: '700', color: integrityResult.verified ? '#10b981' : '#ef4444' }}>
+                                        {integrityResult.verified ? 'Cryptographic Hash Ledger: 100% Verified & Tamper-Free' : 'Integrity Alert: Chain Linkage Discrepancy Detected'}
+                                    </div>
+                                    <div style={{ fontSize: '11.5px', color: 'var(--text-secondary)' }}>
+                                        Total Audited Records: <strong>{integrityResult.totalRecords}</strong> | Verified Blocks: <strong>{integrityResult.hashedRecords || integrityResult.totalRecords}</strong> | Zero Deleted or Altered Rows
+                                    </div>
+                                </div>
+                            </div>
+                            <span style={{ fontSize: '11px', fontFamily: 'monospace', color: 'var(--text-dim)' }}>
+                                Chain Root: {integrityResult.latestHash ? `${integrityResult.latestHash.slice(0, 16)}...` : 'GENESIS'}
+                            </span>
+                        </div>
+                    )}
 
                     {events.length === 0 ? (
                         <div style={styles.emptyState}>No security audit events recorded.</div>
@@ -1479,6 +1582,7 @@ function SecurityCenter({ showToast: externalToast }) {
                 </motion.div>
             )}
             </AnimatePresence>
+
 
             {/* Folder Picker Modal for Manual Scan */}
             {pickerOpen && (

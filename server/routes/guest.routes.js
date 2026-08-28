@@ -6,7 +6,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const db = require('../config/database');
-const { authenticateGuest, SECRET_KEY } = require('../middleware/auth');
+const { authenticateGuest } = require('../middleware/auth');
 const fileService = require('../services/fileService');
 const emailService = require('../services/emailService');
 const logger = require('../utils/logger');
@@ -113,7 +113,7 @@ router.post('/verify', async (req, res) => {
         // Generate Guest Token
         const guestToken = jwt.sign(
             { type: 'GUEST_TOKEN', shareId: id, email: email || 'anonymous', path: share.path },
-            SECRET_KEY,
+            process.env.JWT_SECRET,
             { expiresIn: '4h' }
         );
 

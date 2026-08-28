@@ -63,6 +63,19 @@ router.get('/version', authenticateToken, async (req, res) => {
     }
 });
 
+// ── GET /api/v1/system/settings ─────────────────────────────────────────────
+router.get('/settings', authenticateToken, async (req, res) => {
+    const db = require('../config/database');
+    try {
+        const result = await db.query('SELECT key, value FROM app_settings');
+        const settings = {};
+        result.rows.forEach(r => { settings[r.key] = r.value; });
+        res.json(settings);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // ── POST /api/v1/system/update ──────────────────────────────────────────────
 router.post('/update', authenticateToken, requireRole(['Admin']), (req, res) => {
     res.json({ message: 'Update process started in the background. NexaDisk will restart shortly.' });

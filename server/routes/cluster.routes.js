@@ -312,6 +312,16 @@ storageRouter.get('/local', authenticateToken, async (req, res) => {
     }
 });
 
+// Dedicated categories endpoint
+storageRouter.get('/categories', authenticateToken, async (req, res) => {
+    try {
+        const categories = calculateCategorySizes(storageProvider.localBase, 0);
+        res.json({ categories });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Analyze workspace storage
 storageRouter.get('/analyze', authenticateToken, async (req, res) => {
     try {

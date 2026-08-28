@@ -1,5 +1,14 @@
 const crypto = require('crypto');
 const logger = require('../utils/logger');
+const db = require('../config/database');
+
+// Anomaly detection thresholds
+const ANOMALY = {
+    MAX_REQ_PER_MIN_PER_IP: 50,   // >50 req/min from one IP = suspicious
+    MAX_401_RATE_PCT: 30,          // >30% 401s from one IP = brute-force attempt
+    MAX_REQ_PER_MIN_PER_ENDPOINT: 100, // >100 req/min to same endpoint = scraping/scan
+    SNAPSHOT_INTERVAL_MS: 60 * 60 * 1000 // Persist traffic snapshot every 1 hour
+};
 
 class TrafficService {
     constructor() {
@@ -16,6 +25,13 @@ class TrafficService {
             '5xx': 0
         };
         this.historyTimeline = []; // Per-second / minute bandwidth history
+
+        // Per-IP sliding window for anomaly detection (last 60 seconds)
+        this.ipWindows = new Map(); // ip -> [{ timestamp, statusCode, path }]
+        this.alertedIps = new Set(); // IPs already alerted this window — avoid spam
+
+        // Start snapshot scheduler
+        this._startSnapshotScheduler();
     }
 
     /**
@@ -135,6 +151,127 @@ class TrafficService {
                 this.activeSessions.delete(k);
             }
         }
+
+        // 🔍 Run anomaly detection (skip internal/private IPs)
+        if (cleanIp !== '127.0.0.1' && !cleanIp.startsWith('192.168.') && !cleanIp.startsWith('10.')) {
+            this._checkAnomalies(cleanIp, statusCode, path);
+        }
+    }
+
+    /**
+     * 🔍 Behavioral Anomaly Detection Engine
+     * Runs per request — lightweight sliding-window analysis over the last 60 seconds
+     */
+    _checkAnomalies(ip, statusCode, path) {
+        const now = Date.now();
+        const windowMs = 60 * 1000; // 1-minute window
+
+        // Initialize per-IP window
+        if (!this.ipWindows.has(ip)) {
+            this.ipWindows.set(ip, []);
+        }
+        const window = this.ipWindows.get(ip);
+        window.push({ timestamp: now, statusCode, path });
+
+        // Evict entries older than 1 minute
+        const fresh = window.filter(e => now - e.timestamp < windowMs);
+        this.ipWindows.set(ip, fresh);
+
+        // --- Rule 1: High request rate per IP (>50 req/min) ---
+        if (fresh.length > ANOMALY.MAX_REQ_PER_MIN_PER_IP && !this.alertedIps.has(`rate_${ip}`)) {
+            this.alertedIps.add(`rate_${ip}`);
+            setTimeout(() => this.alertedIps.delete(`rate_${ip}`), windowMs);
+            this._fireAnomalyAlert('high_request_rate', ip, {
+                count: fresh.length,
+                threshold: ANOMALY.MAX_REQ_PER_MIN_PER_IP,
+                rule: 'High Request Rate — Possible DoS / Scraping'
+            });
+        }
+
+        // --- Rule 2: High 401 rate (>30% of req/min = brute-force) ---
+        const errors401 = fresh.filter(e => e.statusCode === 401).length;
+        const errorRate = fresh.length > 5 ? Math.round((errors401 / fresh.length) * 100) : 0;
+        if (errorRate > ANOMALY.MAX_401_RATE_PCT && !this.alertedIps.has(`auth_${ip}`)) {
+            this.alertedIps.add(`auth_${ip}`);
+            setTimeout(() => this.alertedIps.delete(`auth_${ip}`), windowMs);
+            this._fireAnomalyAlert('brute_force_attempt', ip, {
+                authFailureRate: `${errorRate}%`,
+                failedAttempts: errors401,
+                totalRequests: fresh.length,
+                rule: 'Credential Brute-Force Detected — High 401 Rate'
+            });
+        }
+
+        // --- Rule 3: Single-endpoint hammering (>100 req/min to same path) ---
+        const pathCounts = {};
+        for (const e of fresh) {
+            const stripped = e.path.split('?')[0]; // ignore query params
+            pathCounts[stripped] = (pathCounts[stripped] || 0) + 1;
+        }
+        for (const [p, count] of Object.entries(pathCounts)) {
+            const alertKey = `endpoint_${ip}_${p}`;
+            if (count > ANOMALY.MAX_REQ_PER_MIN_PER_ENDPOINT && !this.alertedIps.has(alertKey)) {
+                this.alertedIps.add(alertKey);
+                setTimeout(() => this.alertedIps.delete(alertKey), windowMs);
+                this._fireAnomalyAlert('endpoint_scan', ip, {
+                    endpoint: p,
+                    count,
+                    threshold: ANOMALY.MAX_REQ_PER_MIN_PER_ENDPOINT,
+                    rule: 'Endpoint Hammering — Possible API Scan / Enumeration'
+                });
+            }
+        }
+    }
+
+    /**
+     * Fire an anomaly alert via notificationService (lazy loaded)
+     */
+    async _fireAnomalyAlert(eventKey, ip, details) {
+        logger.warn(`[TrafficService IDS] Anomaly detected from ${ip}: ${details.rule}`);
+        try {
+            const ns = require('./notificationService');
+            const title = `🔴 Network Anomaly: ${details.rule}`;
+            const body = [
+                `Source IP: ${ip}`,
+                ...Object.entries(details)
+                    .filter(([k]) => k !== 'rule')
+                    .map(([k, v]) => `${k}: ${v}`)
+            ].join('\n');
+            await ns.dispatchAlert(eventKey, title, body, 'error');
+        } catch (e) {
+            logger.error(`[TrafficService IDS] Failed to dispatch anomaly alert: ${e.message}`);
+        }
+    }
+
+    /**
+     * Persist an hourly traffic snapshot to the database for forensics
+     */
+    async _persistSnapshot() {
+        try {
+            const snapshot = {
+                total_requests: this.totalRequests,
+                bytes_in: this.bytesIn,
+                bytes_out: this.bytesOut,
+                status_counts: this.statusCounts,
+                top_ips: this.getTopIps(),
+                active_sessions: this.activeSessions.size,
+                captured_at: new Date().toISOString()
+            };
+            await db.query(
+                `INSERT INTO app_settings (key, value) VALUES ($1, $2)
+                 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+                [`traffic_snapshot_${Date.now()}`, JSON.stringify(snapshot)]
+            );
+            logger.info('[TrafficService] Hourly traffic snapshot persisted to DB.');
+        } catch (e) {
+            logger.error(`[TrafficService] Snapshot persistence failed: ${e.message}`);
+        }
+    }
+
+    _startSnapshotScheduler() {
+        setInterval(() => {
+            this._persistSnapshot();
+        }, ANOMALY.SNAPSHOT_INTERVAL_MS);
     }
 
     /**
@@ -193,3 +330,5 @@ class TrafficService {
 }
 
 module.exports = new TrafficService();
+
+

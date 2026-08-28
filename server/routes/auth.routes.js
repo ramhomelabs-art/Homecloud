@@ -5,7 +5,7 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const QRCode = require('qrcode');
 const db = require('../config/database');
-const { authenticateToken, requireRole, SECRET_KEY } = require('../middleware/auth');
+const { authenticateToken, requireRole } = require('../middleware/auth');
 const eventBus = require('../utils/eventBus');
 const logger = require('../utils/logger');
 const auditService = require('../services/auditService');
@@ -65,8 +65,14 @@ router.post('/setup/complete', async (req, res) => {
         consentAgreed 
     } = req.body;
 
-    if (!adminPassword || adminPassword.length < 6) {
-        return res.status(400).json({ error: 'Admin password must be at least 6 characters long' });
+    // Enterprise password policy: minimum 12 chars with complexity
+    const pwdErrors = [];
+    if (!adminPassword || adminPassword.length < 12) pwdErrors.push('at least 12 characters');
+    if (!/[A-Z]/.test(adminPassword)) pwdErrors.push('one uppercase letter');
+    if (!/[0-9]/.test(adminPassword)) pwdErrors.push('one number');
+    if (!/[^A-Za-z0-9]/.test(adminPassword)) pwdErrors.push('one special character (!@#$%^&* etc.)');
+    if (pwdErrors.length > 0) {
+        return res.status(400).json({ error: `Admin password must contain: ${pwdErrors.join(', ')}` });
     }
 
     if (!consentAgreed) {
@@ -130,7 +136,7 @@ router.post('/setup/complete', async (req, res) => {
         // 3. Generate JWT Token
         const token = jwt.sign(
             { id: user.id, username: user.username, role: user.role },
-            SECRET_KEY,
+            process.env.JWT_SECRET,
             { expiresIn: '24h' }
         );
 
@@ -183,7 +189,7 @@ router.post('/login', async (req, res) => {
         // Generate JWT token
         const token = jwt.sign(
             { id: user.id, username: user.username, role: user.role },
-            SECRET_KEY,
+            process.env.JWT_SECRET,
             { expiresIn: '24h' }
         );
 
@@ -228,6 +234,9 @@ router.post('/users/create', authenticateToken, requireRole(['Admin']), async (r
 
     if (!username || !password) {
         return res.status(400).json({ error: 'Username and password are required' });
+    }
+    if (password.length < 8) {
+        return res.status(400).json({ error: 'Password must be at least 8 characters long' });
     }
 
     try {
@@ -483,6 +492,36 @@ router.post('/settings/security-question', authenticateToken, async (req, res) =
 router.get('/verify', authenticateToken, (req, res) => {
     res.json({ valid: true, username: req.user.username, role: req.user.role });
 });
+
+// 📥 POST /api/v1/auth/download-token
+// Issues a short-lived (60s), single-use JWT scoped to a specific file path.
+// Used by the frontend for browser-based streaming/download where a Bearer
+// header cannot be set (e.g. <video src=...>, <a href=...> browser downloads).
+// The /api/v1/files/stream and /api/v1/files/download routes must validate this token type.
+router.post('/download-token', authenticateToken, (req, res) => {
+    const { path: filePath } = req.body;
+    if (!filePath) {
+        return res.status(400).json({ error: 'File path is required' });
+    }
+    try {
+        const downloadToken = jwt.sign(
+            {
+                type: 'DOWNLOAD_TOKEN',
+                id: req.user.id,
+                username: req.user.username,
+                role: req.user.role,
+                path: filePath
+            },
+            process.env.JWT_SECRET,
+            { expiresIn: '60s' }  // Single-use, expires in 60 seconds
+        );
+        res.json({ token: downloadToken, expiresIn: 60 });
+    } catch (err) {
+        logger.error(`[Download Token Error]: ${err.message}`, err);
+        res.status(500).json({ error: 'Failed to issue download token' });
+    }
+});
+
 
 // 🔒 POST /api/v1/auth/mfa/setup (Generate unique base32 secret + offline QR code)
 router.post('/mfa/setup', authenticateToken, async (req, res) => {

@@ -9,7 +9,7 @@ const multer = require('multer');
 const bcrypt = require('bcrypt');
 
 const db = require('../config/database');
-const { authenticateUpload, SECRET_KEY } = require('../middleware/auth');
+const { authenticateUpload } = require('../middleware/auth');
 const securityService = require('../services/securityService');
 const logger = require('../utils/logger');
 
@@ -57,7 +57,7 @@ router.post('/verify', async (req, res) => {
         // Generate UPLOAD_TOKEN
         const uploadToken = jwt.sign(
             { type: 'UPLOAD_TOKEN', shareId: id, path: share.path },
-            SECRET_KEY,
+            process.env.JWT_SECRET,
             { expiresIn: '2h' }
         );
 

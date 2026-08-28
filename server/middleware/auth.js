@@ -8,9 +8,13 @@ if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'nexadisk-default-secr
 const SECRET_KEY = process.env.JWT_SECRET;
 
 // 🔑 Token Verification Middleware
+// NOTE: Only accepts Authorization: Bearer <token> header.
+// URL query ?token= is NOT supported to prevent token leakage in access logs,
+// browser history, and Referer headers. Use /api/v1/auth/download-token for
+// short-lived single-use tokens for browser streaming/download scenarios.
 const authenticateToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
-    const token = (authHeader && authHeader.split(' ')[1]) || req.query.token;
+    const token = authHeader && authHeader.split(' ')[1];
 
     if (!token) return res.status(401).json({ error: 'Access token required' });
 
@@ -67,7 +71,7 @@ const validateShareAccess = (requiredPermission) => {
 
             // Determine if the guest holds a valid active session token
             const authHeader = req.headers['authorization'];
-            const token = (authHeader && authHeader.split(' ')[1]) || req.query.token;
+            const token = authHeader && authHeader.split(' ')[1];
             let hasActiveSession = false;
 
             if (token) {
@@ -124,7 +128,7 @@ const validateShareAccess = (requiredPermission) => {
             next();
         } catch (err) {
             logger.error(`[Share Verification Error] Failed to validate: ${err.message}`, err);
-            res.status(500).json({ error: `Server error verifying share: ${err.message}` });
+            res.status(500).json({ error: 'Server error verifying share access' });
         }
     };
 };
@@ -188,6 +192,6 @@ module.exports = {
     requireRole,
     validateShareAccess,
     authenticateGuest,
-    authenticateUpload,
-    SECRET_KEY
+    authenticateUpload
+    // NOTE: SECRET_KEY is intentionally NOT exported — use process.env.JWT_SECRET directly
 };

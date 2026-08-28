@@ -307,7 +307,7 @@ const SystemSettingsView = ({
     ];
 
     return (
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '24px', padding: '10px 0' }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '24px', paddingTop: '6px', paddingBottom: '32px' }}>
             {/* Header */}
             <div>
                 <h2 style={{ fontSize: '26px', fontWeight: '800', margin: 0, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -573,7 +573,7 @@ const SystemSettingsView = ({
                         {/* TAB 3: PERSONAL OPERATOR PROFILE & 2FA / MFA */}
                         {activeTab === 'account' && (
                             <motion.div key="account" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} transition={{ duration: 0.2 }}>
-                                <ProfileSettings />
+                                <ProfileSettings embedded={true} />
                             </motion.div>
                         )}
 

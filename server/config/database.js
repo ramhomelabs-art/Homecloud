@@ -395,7 +395,7 @@ async function initDatabase() {
         `);
         await client.query('CREATE INDEX IF NOT EXISTS idx_file_versions_path ON file_versions(original_path)');
 
-        // 21. Create AUDIT_LOGS table
+        // 21. Create AUDIT_LOGS table (Cryptographically Tamper-Evident Hash Chain)
         await client.query(`
             CREATE TABLE IF NOT EXISTS audit_logs (
                 id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -405,11 +405,16 @@ async function initDatabase() {
                 details TEXT,
                 ip_address VARCHAR(50),
                 user_agent TEXT,
-                timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                prev_hash VARCHAR(64) DEFAULT '0000000000000000000000000000000000000000000000000000000000000000',
+                entry_hash VARCHAR(64)
             )
         `);
+        await client.query('ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS prev_hash VARCHAR(64) DEFAULT \'0000000000000000000000000000000000000000000000000000000000000000\'');
+        await client.query('ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS entry_hash VARCHAR(64)');
         await client.query('CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp DESC)');
         await client.query('CREATE INDEX IF NOT EXISTS idx_audit_logs_username ON audit_logs(username)');
+        await client.query('CREATE INDEX IF NOT EXISTS idx_audit_logs_entry_hash ON audit_logs(entry_hash)');
 
         // 22. Create LOCKERS table
         await client.query(`
