@@ -2793,7 +2793,38 @@ router.get('/activities', async (req, res) => {
         const result = await db.query('SELECT * FROM system_alerts ORDER BY timestamp DESC LIMIT 150');
         res.json(result.rows);
     } catch (err) {
-        res.json(notificationService.activities);
+        res.json(notificationService.activities || []);
+    }
+});
+
+// ── POST /api/v1/files/activities/clear ───────────────────────────────────────
+router.post('/activities/clear', async (req, res) => {
+    try {
+        await db.query('DELETE FROM system_alerts');
+        if (notificationService && notificationService.activities) {
+            notificationService.activities.length = 0;
+        }
+        res.json({ success: true, message: 'All system alerts and activities cleared successfully' });
+    } catch (err) {
+        if (notificationService && notificationService.activities) {
+            notificationService.activities.length = 0;
+        }
+        res.json({ success: true, message: 'In-memory activities cleared' });
+    }
+});
+
+// ── DELETE /api/v1/files/activities/:id ──────────────────────────────────────
+router.delete('/activities/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        await db.query('DELETE FROM system_alerts WHERE id = $1', [id]);
+        if (notificationService && notificationService.activities) {
+            const idx = notificationService.activities.findIndex(a => String(a.id) === String(id));
+            if (idx !== -1) notificationService.activities.splice(idx, 1);
+        }
+        res.json({ success: true, message: 'Alert removed' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
 });
 
