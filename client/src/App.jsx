@@ -41,8 +41,9 @@ import GuestPortal from './components/portals/GuestPortal';
 import PublicPortal from './components/portals/PublicPortal';
 import UploadPortal from './components/portals/UploadPortal';
 import VaultsView from './components/views/VaultsView';
-import TransferQueueDrawer from './components/transfers/TransferQueueDrawer';
+import ClusterMonitorView from './components/views/ClusterMonitorView';
 import NetworkTrafficView from './components/network/NetworkTrafficView';
+
 import CloudMountHubView from './components/network/CloudMountHubView';
 import SystemSettingsView from './components/settings/SystemSettingsView';
 import StorageTieringView from './components/tiering/StorageTieringView';
@@ -3018,262 +3019,64 @@ function App() {
                         )}
 
                         {view === 'monitor' && (
-                            <motion.div key="mn" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '14px' }}>
-                                    <div>
-                                        <h2 style={{ fontSize: '24px', fontWeight: '900', color: 'var(--text-primary)', margin: 0, letterSpacing: '-0.5px' }}>
-                                            Cluster Resource & Telemetry Cockpit
-                                        </h2>
-                                        <p style={{ color: 'var(--text-secondary)', fontSize: '13px', margin: '4px 0 0 0' }}>
-                                            Real-time node telemetry, resource allocation history, and hardware health diagnostics.
-                                        </p>
-                                    </div>
+                            <>
+                                <ClusterMonitorView
+                                    selectedMonitorNode={selectedMonitorNode}
+                                    setSelectedMonitorNode={setSelectedMonitorNode}
+                                    localStorageInfo={localStorageInfo}
+                                    metrics={metrics}
+                                    nodeLogs={nodeLogs}
+                                    setShowTerminalModal={setShowTerminalModal}
+                                    onOpenComplianceAudit={() => setView('security')}
+                                />
 
-                                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-                                        {/* Node Selection Pills */}
-                                        <div style={{ display: 'flex', gap: '6px', background: 'var(--bg-surface-2)', padding: '3px', borderRadius: '10px', border: '1px solid var(--border-subtle)' }}>
-                                            <button 
-                                                onClick={() => setSelectedMonitorNode('local')}
-                                                style={{ 
-                                                    height: '32px', 
-                                                    padding: '0 12px', 
-                                                    borderRadius: '7px', 
-                                                    background: selectedMonitorNode === 'local' ? 'var(--primary-gradient)' : 'transparent',
-                                                    color: selectedMonitorNode === 'local' ? '#ffffff' : 'var(--text-secondary)',
-                                                    fontWeight: '800',
-                                                    fontSize: '12px',
-                                                    border: 'none',
-                                                    cursor: 'pointer',
-                                                    boxShadow: selectedMonitorNode === 'local' ? '0 4px 14px rgba(79, 70, 229, 0.35)' : 'none',
-                                                    transition: 'all 0.15s ease',
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    gap: '6px'
-                                                }}
+                                {/* Slide-Out Cyber Console Terminal Drawer Modal */}
+                                <AnimatePresence>
+                                    {showTerminalModal && (
+                                        <div className="command-center-overlay">
+                                            <motion.div 
+                                                className="command-center-backdrop"
+                                                initial={{ opacity: 0 }}
+                                                animate={{ opacity: 1 }}
+                                                exit={{ opacity: 0 }}
+                                                onClick={() => setShowTerminalModal(false)}
+                                            />
+                                            <motion.div 
+                                                className="command-center-drawer"
+                                                initial={{ x: '100%' }}
+                                                animate={{ x: 0 }}
+                                                exit={{ x: '100%' }}
+                                                transition={{ type: 'spring', damping: 28, stiffness: 300 }}
+                                                style={{ width: 'min(680px, 100vw)' }}
                                             >
-                                                🖥️ Master Server
-                                            </button>
-                                            {metrics.agents?.filter(a => a.status === 'approved').map(agent => {
-                                                const isSelected = selectedMonitorNode === agent.id;
-                                                return (
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', background: 'var(--bg-surface-0)', borderBottom: '1px solid var(--border-subtle)' }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                                        <span style={{ fontSize: '18px' }}>📟</span>
+                                                        <div>
+                                                            <h3 style={{ fontSize: '16px', fontWeight: '900', color: 'var(--text-primary)', margin: 0 }}>Cluster Live Console</h3>
+                                                            <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Real-time streaming log output for {selectedMonitorNode}</span>
+                                                        </div>
+                                                    </div>
                                                     <button
-                                                        key={agent.id}
-                                                        onClick={() => setSelectedMonitorNode(agent.id)}
-                                                        style={{ 
-                                                            height: '32px', 
-                                                            padding: '0 12px', 
-                                                            borderRadius: '7px', 
-                                                            background: isSelected ? 'var(--primary-gradient)' : 'transparent',
-                                                            color: isSelected ? '#ffffff' : 'var(--text-secondary)',
-                                                            fontWeight: '800',
-                                                            fontSize: '12px',
-                                                            border: 'none',
-                                                            cursor: 'pointer',
-                                                            boxShadow: isSelected ? '0 4px 14px rgba(79, 70, 229, 0.35)' : 'none',
-                                                            transition: 'all 0.15s ease',
-                                                            display: 'flex',
-                                                            alignItems: 'center',
-                                                            gap: '6px'
-                                                        }}
+                                                        onClick={() => setShowTerminalModal(false)}
+                                                        className="cc-close-btn"
+                                                        title="Close Console"
                                                     >
-                                                        <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: agent.online !== false ? '#10b981' : '#f43f5e', boxShadow: agent.online !== false ? '0 0 6px #10b981' : 'none' }} />
-                                                        {agent.hostname}
+                                                        <X size={18} />
                                                     </button>
-                                                );
-                                            })}
+                                                </div>
+                                                <div style={{ flex: 1, padding: '16px', background: '#060911', overflow: 'hidden' }}>
+                                                    <TerminalLogs 
+                                                        logs={nodeLogs} 
+                                                        onRefresh={() => fetchNodeLogs(selectedMonitorNode)} 
+                                                        loading={loadingLogs} 
+                                                    />
+                                                </div>
+                                            </motion.div>
                                         </div>
-
-                                        {/* Trigger Terminal Drawer Button */}
-                                        <button
-                                            onClick={() => setShowTerminalModal(true)}
-                                            style={{
-                                                height: '38px',
-                                                padding: '0 16px',
-                                                borderRadius: '10px',
-                                                background: '#0f172a',
-                                                border: '1px solid rgba(99, 102, 241, 0.4)',
-                                                color: '#ffffff',
-                                                fontWeight: '800',
-                                                fontSize: '12.5px',
-                                                cursor: 'pointer',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                gap: '8px',
-                                                boxShadow: '0 4px 16px rgba(0, 0, 0, 0.25)',
-                                                transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)'
-                                            }}
-                                        >
-                                            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10b981', display: 'inline-block', boxShadow: '0 0 8px #10b981' }} />
-                                            Live Console Logs
-                                            <span style={{ fontSize: '10px', background: 'rgba(99, 102, 241, 0.35)', color: '#a5b4fc', padding: '1px 6px', borderRadius: '8px', fontWeight: '800' }}>
-                                                {(nodeLogs || []).length}
-                                            </span>
-                                        </button>
-                                    </div>
-                                </div>
-
-                                {(() => {
-                                    const isLocal = selectedMonitorNode === 'local';
-                                    const activeNodeInfo = isLocal
-                                        ? (localStorageInfo || { hostname: 'Master Server', platform: 'win32', disks: [], online: true })
-                                        : (metrics.agents?.find(a => a.id === selectedMonitorNode) || { hostname: 'Unknown', platform: 'unknown', disks: [], online: false });
-
-                                    const history = metrics.metricsHistory?.[selectedMonitorNode] || [];
-                                    const currentMetrics = history[history.length - 1] || { cpu: 0, memory: 0, latency: 0 };
-
-                                    return (
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                                            {/* Row 1: 4 Key Telemetry Cards */}
-                                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '16px' }}>
-                                                {/* Node Info */}
-                                                <div className="st-card" style={{ padding: '20px', background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)', borderRadius: '16px', boxShadow: 'var(--shadow-sm)' }}>
-                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                                                        <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.8px' }}>Active Node</span>
-                                                        <span style={{ fontSize: '10px', fontWeight: '800', padding: '2px 8px', borderRadius: '999px', background: activeNodeInfo.online !== false ? 'rgba(16, 185, 129, 0.12)' : 'rgba(244, 63, 94, 0.12)', color: activeNodeInfo.online !== false ? '#10b981' : '#f43f5e' }}>
-                                                            {activeNodeInfo.online !== false ? 'ONLINE' : 'OFFLINE'}
-                                                        </span>
-                                                    </div>
-                                                    <h3 style={{ fontSize: '18px', fontWeight: '900', color: 'var(--text-primary)', margin: '0 0 4px 0' }}>{activeNodeInfo.hostname}</h3>
-                                                    <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: 0, fontFamily: 'var(--font-mono)' }}>
-                                                        OS: {activeNodeInfo.platform} {!isLocal && activeNodeInfo.online !== false && `· ${currentMetrics.latency}ms latency`}
-                                                    </p>
-                                                </div>
-
-                                                {/* CPU Gauge */}
-                                                <div className="st-card" style={{ padding: '20px', background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)', borderRadius: '16px', boxShadow: 'var(--shadow-sm)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                                    <div>
-                                                        <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.8px' }}>CPU Core Load</span>
-                                                        <h3 style={{ fontSize: '26px', fontWeight: '900', color: 'var(--text-primary)', margin: '4px 0 0 0', fontFamily: 'var(--font-mono)' }}>
-                                                            {currentMetrics.cpu || 0}%
-                                                        </h3>
-                                                        <span style={{ fontSize: '11.5px', color: (currentMetrics.cpu || 0) > 80 ? '#f43f5e' : '#10b981', fontWeight: '700' }}>
-                                                            {(currentMetrics.cpu || 0) > 80 ? 'Heavy Load' : 'Normal Operation'}
-                                                        </span>
-                                                    </div>
-                                                    <RadialGauge value={currentMetrics.cpu || 0} label="" color="var(--primary)" />
-                                                </div>
-
-                                                {/* RAM Gauge */}
-                                                <div className="st-card" style={{ padding: '20px', background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)', borderRadius: '16px', boxShadow: 'var(--shadow-sm)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                                    <div>
-                                                        <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.8px' }}>RAM Allocation</span>
-                                                        <h3 style={{ fontSize: '26px', fontWeight: '900', color: 'var(--text-primary)', margin: '4px 0 0 0', fontFamily: 'var(--font-mono)' }}>
-                                                            {currentMetrics.memory || 0}%
-                                                        </h3>
-                                                        <span style={{ fontSize: '11.5px', color: (currentMetrics.memory || 0) > 85 ? '#f43f5e' : '#0ea5e9', fontWeight: '700' }}>
-                                                            {(currentMetrics.memory || 0) > 85 ? 'High Usage' : 'Optimal Footprint'}
-                                                        </span>
-                                                    </div>
-                                                    <RadialGauge value={currentMetrics.memory || 0} label="" color="#0ea5e9" />
-                                                </div>
-
-                                                {/* Health Diagnostic */}
-                                                <div className="st-card" style={{ padding: '20px', background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)', borderRadius: '16px', boxShadow: 'var(--shadow-sm)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                                        <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.8px' }}>Health Diagnostics</span>
-                                                        <span style={{ fontSize: '10px', fontWeight: '800', padding: '2px 8px', borderRadius: '999px', background: 'rgba(16, 185, 129, 0.15)', color: '#10b981' }}>
-                                                            HEALTHY
-                                                        </span>
-                                                    </div>
-                                                    <div style={{ margin: '8px 0 0' }}>
-                                                        <div style={{ fontSize: '13.5px', fontWeight: '800', color: 'var(--text-primary)' }}>S.M.A.R.T. Array Passing</div>
-                                                        <div style={{ fontSize: '11.5px', color: 'var(--text-secondary)', marginTop: '2px' }}>All cluster storage pools & disks nominal.</div>
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            {/* Row 2: Real-time Sparkline Trends (Past 5m) */}
-                                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '20px' }}>
-                                                <SparklineChart data={history} dataKey="cpu" label="CPU Utilization" color="var(--primary)" />
-                                                <SparklineChart data={history} dataKey="memory" label="RAM Allocation" color="#0ea5e9" />
-                                            </div>
-
-                                            {/* Row 3: Disks Partitions & Live Network IO */}
-                                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '20px' }}>
-                                                {/* Partition Map */}
-                                                <div className="st-card" style={{ padding: '22px', background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)', borderRadius: '16px', boxShadow: 'var(--shadow-sm)' }}>
-                                                    <h4 style={{ margin: '0 0 16px', fontSize: '13px', fontWeight: '800', letterSpacing: '0.8px', textTransform: 'uppercase', color: 'var(--text-primary)' }}>
-                                                        Disk Volumes & Storage Partitions
-                                                    </h4>
-                                                    {activeNodeInfo.disks && activeNodeInfo.disks.length > 0 ? (
-                                                        activeNodeInfo.disks.map((disk, idx) => (
-                                                            <div key={idx} style={{ marginBottom: '16px' }}>
-                                                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '6px' }}>
-                                                                    <span style={{ fontWeight: '700', color: 'var(--text-primary)' }}>{disk.mount} ({formatGB(disk.used / 1e9)} / {formatGB(disk.size / 1e9)})</span>
-                                                                    <span style={{ color: disk.percentage > 85 ? '#f43f5e' : 'var(--primary)', fontWeight: '800', fontFamily: 'var(--font-mono)' }}>{disk.percentage}%</span>
-                                                                </div>
-                                                                <div className="st-progress-rail" style={{ height: '8px', borderRadius: '4px', overflow: 'hidden', background: 'var(--bg-surface-2)' }}>
-                                                                    <div 
-                                                                        className="st-progress-fill" 
-                                                                        style={{ 
-                                                                            width: `${disk.percentage}%`, 
-                                                                            height: '100%', 
-                                                                            background: disk.percentage > 85 ? '#f43f5e' : 'var(--cyber-gradient)', 
-                                                                            transition: 'width 0.5s ease-out' 
-                                                                        }} 
-                                                                    />
-                                                                </div>
-                                                            </div>
-                                                        ))
-                                                    ) : (
-                                                        <div style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '12px' }}>No disk space information reported...</div>
-                                                    )}
-                                                </div>
-
-                                                {/* Network IO chart */}
-                                                <NetworkThroughputChart data={history} />
-                                            </div>
-
-                                            {/* Slide-Out Cyber Console Terminal Drawer Modal */}
-                                            <AnimatePresence>
-                                                {showTerminalModal && (
-                                                    <div className="command-center-overlay">
-                                                        <motion.div 
-                                                            className="command-center-backdrop"
-                                                            initial={{ opacity: 0 }}
-                                                            animate={{ opacity: 1 }}
-                                                            exit={{ opacity: 0 }}
-                                                            onClick={() => setShowTerminalModal(false)}
-                                                        />
-                                                        <motion.div 
-                                                            className="command-center-drawer"
-                                                            initial={{ x: '100%' }}
-                                                            animate={{ x: 0 }}
-                                                            exit={{ x: '100%' }}
-                                                            transition={{ type: 'spring', damping: 28, stiffness: 300 }}
-                                                            style={{ width: 'min(680px, 100vw)' }}
-                                                        >
-                                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', background: 'var(--bg-surface-0)', borderBottom: '1px solid var(--border-subtle)' }}>
-                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                                                    <span style={{ fontSize: '18px' }}>📟</span>
-                                                                    <div>
-                                                                        <h3 style={{ fontSize: '16px', fontWeight: '900', color: 'var(--text-primary)', margin: 0 }}>Cluster Live Console</h3>
-                                                                        <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Real-time streaming log output for {activeNodeInfo.hostname}</span>
-                                                                    </div>
-                                                                </div>
-                                                                <button
-                                                                    onClick={() => setShowTerminalModal(false)}
-                                                                    className="cc-close-btn"
-                                                                    title="Close Console"
-                                                                >
-                                                                    <X size={18} />
-                                                                </button>
-                                                            </div>
-                                                            <div style={{ flex: 1, padding: '16px', background: '#060911', overflow: 'hidden' }}>
-                                                                <TerminalLogs 
-                                                                    logs={nodeLogs} 
-                                                                    onRefresh={() => fetchNodeLogs(selectedMonitorNode)} 
-                                                                    loading={loadingLogs} 
-                                                                />
-                                                            </div>
-                                                        </motion.div>
-                                                    </div>
-                                                )}
-                                            </AnimatePresence>
-                                        </div>
-                                    );
-                                })()}
-                            </motion.div>
+                                    )}
+                                </AnimatePresence>
+                            </>
                         )}
 
                         {view === 'browse' && (
