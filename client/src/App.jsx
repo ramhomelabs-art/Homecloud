@@ -2477,44 +2477,70 @@ function App() {
 
                                     return (
                                         <div className="selection-toolbar">
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginRight: '12px', borderRight: '1px solid rgba(255,255,255,0.1)', paddingRight: '16px', whiteSpace: 'nowrap' }}>
-                                                <span className="selection-toolbar-count">{selectedPaths.size} SELECTED</span>
+                                            <div className="selection-toolbar-left">
+                                                <span className="selection-toolbar-count">
+                                                    <CheckCircle2 size={13} /> {selectedPaths.size} Selected
+                                                </span>
                                             </div>
                                             
-                                            <button className="selection-toolbar-action" onClick={() => handleAction('download')}><Download size={16} /> Download</button>
-                                            {selectedPaths.size === 1 && isFile && (
-                                                <button className="selection-toolbar-action" onClick={() => handleFileClick(selectedItem)}><Eye size={16} /> View</button>
-                                            )}
+                                            <div className="selection-toolbar-actions">
+                                                <button className="selection-toolbar-action" onClick={() => handleAction('download')}>
+                                                    <Download size={15} color="var(--accent-cyan)" /> Download
+                                                </button>
+                                                {selectedPaths.size === 1 && isFile && (
+                                                    <button className="selection-toolbar-action" onClick={() => handleFileClick(selectedItem)}>
+                                                        <Eye size={15} /> View
+                                                    </button>
+                                                )}
 
-                                            <button className="selection-toolbar-action" onClick={() => handleAction('copy')}><Copy size={16} /> Copy</button>
-                                            {canEdit && (
-                                                <button className="selection-toolbar-action" onClick={() => handleAction('cut')}><Scissors size={16} /> Cut</button>
-                                            )}
+                                                <button className="selection-toolbar-action" onClick={() => handleAction('copy')}>
+                                                    <Copy size={15} /> Copy
+                                                </button>
+                                                {canEdit && (
+                                                    <button className="selection-toolbar-action" onClick={() => handleAction('cut')}>
+                                                        <Scissors size={15} /> Cut
+                                                    </button>
+                                                )}
 
-                                            {selectedPaths.size === 1 && canEdit && (
-                                                <button className="selection-toolbar-action" onClick={() => handleAction('rename')}><Edit size={16} /> Rename</button>
-                                            )}
+                                                {selectedPaths.size === 1 && canEdit && (
+                                                    <button className="selection-toolbar-action" onClick={() => handleAction('rename')}>
+                                                        <Edit size={15} /> Rename
+                                                    </button>
+                                                )}
 
-                                            {selectedPaths.size === 1 && !guestToken && (
-                                                <button className="selection-toolbar-action" onClick={() => handleAction('share')}><Share2 size={16} /> Share</button>
-                                            )}
+                                                {selectedPaths.size === 1 && !guestToken && (
+                                                    <button className="selection-toolbar-action primary" onClick={() => handleAction('share')}>
+                                                        <Share2 size={15} /> Share
+                                                    </button>
+                                                )}
 
-                                            {canEdit && (
-                                                <button className="selection-toolbar-action danger" onClick={() => handleAction('delete')}><Trash2 size={16} /> Delete</button>
-                                            )}
-
-                                            {!guestToken && (
-                                                <>
-                                                    <button className="selection-toolbar-action" onClick={() => handleAction('compress')}><Box size={16} /> Archive</button>
-                                                    {selectedPaths.size === 1 && selectedItem && !selectedItem.isDirectory && /\.(zip|tar|tar\.gz|tgz|gz|rar|7z)$/i.test(selectedItem.name) && (
-                                                        <button className="selection-toolbar-action" onClick={() => handleAction('extract', selectedItem)}>
-                                                            <FolderOpen size={16} /> Extract
+                                                {!guestToken && (
+                                                    <>
+                                                        <button className="selection-toolbar-action" onClick={() => handleAction('compress')}>
+                                                            <Box size={15} /> Archive
                                                         </button>
-                                                    )}
-                                                </>
-                                            )}
+                                                        {selectedPaths.size === 1 && selectedItem && !selectedItem.isDirectory && /\.(zip|tar|tar\.gz|tgz|gz|rar|7z)$/i.test(selectedItem.name) && (
+                                                            <button className="selection-toolbar-action" onClick={() => handleAction('extract', selectedItem)}>
+                                                                <FolderOpen size={15} /> Extract
+                                                            </button>
+                                                        )}
+                                                    </>
+                                                )}
 
-                                            <button className="selection-toolbar-action" style={{ background: 'var(--bg-surface-2)', borderRadius: '50%', padding: '8px', width: '36px', height: '36px', minWidth: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setSelectedPaths(new Set())}><X size={16} /></button>
+                                                {canEdit && (
+                                                    <button className="selection-toolbar-action danger" onClick={() => handleAction('delete')}>
+                                                        <Trash2 size={15} /> Delete
+                                                    </button>
+                                                )}
+
+                                                <button
+                                                    className="selection-toolbar-close"
+                                                    onClick={() => setSelectedPaths(new Set())}
+                                                    title="Clear Selection (Esc)"
+                                                >
+                                                    <X size={16} />
+                                                </button>
+                                            </div>
                                         </div>
                                     );
                                 })()}

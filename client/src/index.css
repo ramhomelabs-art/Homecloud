@@ -1328,6 +1328,122 @@ select.m-input option {
     gap: 16px;
 }
 
+/* Multi-Selection Batch Floating Toolbar */
+.selection-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 10px 16px;
+    margin-bottom: 14px;
+    background: var(--bg-surface-0);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15), var(--shadow-sm);
+    animation: slideDown 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    z-index: 10;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.selection-toolbar-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.selection-toolbar-count {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 8px;
+    background: var(--primary);
+    color: #ffffff;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    font-family: var(--font-mono, monospace);
+}
+
+.selection-toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.selection-toolbar-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: var(--radius-md);
+    background: var(--bg-surface-2);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    user-select: none;
+}
+
+.selection-toolbar-action:hover {
+    background: var(--bg-surface-3) !important;
+    border-color: var(--border-bright) !important;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.selection-toolbar-action.primary {
+    background: rgba(99, 102, 241, 0.15);
+    border-color: rgba(99, 102, 241, 0.3);
+    color: var(--primary);
+}
+
+.selection-toolbar-action.danger {
+    color: #f43f5e !important;
+    background: rgba(244, 63, 94, 0.08) !important;
+    border-color: rgba(244, 63, 94, 0.25) !important;
+}
+
+.selection-toolbar-action.danger:hover {
+    background: #f43f5e !important;
+    color: #ffffff !important;
+}
+
+.selection-toolbar-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: var(--bg-surface-2);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.selection-toolbar-close:hover {
+    background: var(--bg-surface-3);
+    color: var(--text-primary);
+    border-color: var(--border-bright);
+}
+
 .file-card {
     background: var(--bg-surface-0);
     border: 1px solid var(--border-subtle);
