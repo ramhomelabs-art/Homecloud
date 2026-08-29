@@ -51,6 +51,7 @@ router.get('/script/windows', flexibleAuth, (req, res) => {
     const pScript = path.join(templateDir, 'install.ps1');
     const masterUrl = `${req.protocol}://${req.get('host')}`;
     const agentKey = process.env.AGENT_KEY;
+    const userToken = req.query.token || (req.headers['authorization'] || '').split(' ')[1] || '';
     if (!agentKey) return res.status(500).send('# Error: Server misconfiguration: AGENT_KEY not set.');
 
     if (!fs.existsSync(pScript)) {
@@ -60,6 +61,7 @@ router.get('/script/windows', flexibleAuth, (req, res) => {
     let content = fs.readFileSync(pScript, 'utf8');
     content = content.replace(/__MASTER_URL__/g, masterUrl);
     content = content.replace(/__AGENT_KEY__/g, agentKey);
+    content = content.replace(/__USER_TOKEN__/g, userToken);
 
     res.set({
         'Content-Type': 'text/plain; charset=utf-8',
@@ -74,6 +76,7 @@ router.get('/script/linux', flexibleAuth, (req, res) => {
     const sScript = path.join(templateDir, 'install.sh');
     const masterUrl = `${req.protocol}://${req.get('host')}`;
     const agentKey = process.env.AGENT_KEY;
+    const userToken = req.query.token || (req.headers['authorization'] || '').split(' ')[1] || '';
     if (!agentKey) return res.status(500).send('# Error: Server misconfiguration: AGENT_KEY not set.');
 
     if (!fs.existsSync(sScript)) {
@@ -83,6 +86,7 @@ router.get('/script/linux', flexibleAuth, (req, res) => {
     let content = fs.readFileSync(sScript, 'utf8');
     content = content.replace(/__MASTER_URL__/g, masterUrl);
     content = content.replace(/__AGENT_KEY__/g, agentKey);
+    content = content.replace(/__USER_TOKEN__/g, userToken);
 
     res.set({
         'Content-Type': 'text/plain; charset=utf-8',
@@ -90,6 +94,7 @@ router.get('/script/linux', flexibleAuth, (req, res) => {
     });
     res.send(content);
 });
+
 
 // ── GET /api/v1/provision/download/:os (Offline Standalone ZIP package) ───────
 router.get('/download/:os', flexibleAuth, (req, res) => {

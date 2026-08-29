@@ -53,7 +53,7 @@ elif [ -f "index.js" ]; then
   cp -r * "$AGENT_INSTALL_DIR"/ 2>/dev/null || true
 else
   echo "[*] Downloading agent package from master server..."
-  curl -fsSL "__MASTER_URL__/api/v1/provision/download/linux" -o /tmp/nexadisk-agent-linux.zip
+  curl -fsSL "__MASTER_URL__/api/v1/provision/download/linux?token=__USER_TOKEN__" -o /tmp/nexadisk-agent-linux.zip
   unzip -q -o /tmp/nexadisk-agent-linux.zip -d /tmp/nexadisk-agent-extract
   if [ -d "/tmp/nexadisk-agent-extract/agent" ]; then
     cp -r /tmp/nexadisk-agent-extract/agent/* "$AGENT_INSTALL_DIR"/
@@ -61,6 +61,7 @@ else
     cp -r /tmp/nexadisk-agent-extract/* "$AGENT_INSTALL_DIR"/ 2>/dev/null || true
   fi
   rm -rf /tmp/nexadisk-agent-linux.zip /tmp/nexadisk-agent-extract
+
 fi
 
 chmod -R 755 "$AGENT_INSTALL_DIR"

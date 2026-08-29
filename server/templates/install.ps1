@@ -70,7 +70,7 @@ if (Test-Path .\agent\index.js) {
 } else {
     Write-Host "[*] Fetching latest NexaDisk Agent package from Master Server..." -ForegroundColor Cyan
     $zipPath = Join-Path $env:TEMP "nexadisk-agent-windows.zip"
-    $pkgUrl = "__MASTER_URL__/api/v1/provision/download/windows"
+    $pkgUrl = "__MASTER_URL__/api/v1/provision/download/windows?token=__USER_TOKEN__"
     try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
         Invoke-WebRequest -Uri $pkgUrl -OutFile $zipPath -UseBasicParsing
@@ -82,6 +82,7 @@ if (Test-Path .\agent\index.js) {
     } catch {
         Write-Warning "Direct package fetch failed: $($_.Exception.Message). Ensuring base agent setup."
     }
+
 }
 
 # 5. Install Dependencies if needed
