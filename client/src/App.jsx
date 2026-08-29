@@ -245,12 +245,11 @@ function App() {
     const [selectedMonitorNode, setSelectedMonitorNode] = useState('local');
     const [nodeLogs, setNodeLogs] = useState([]);
     const [loadingLogs, setLoadingLogs] = useState(false);
-    const [explorerMode, setExplorerMode] = useState(localStorage.getItem('expMode') || 'devices');
+    const [explorerMode, setExplorerMode] = useState(() => localStorage.getItem('expMode') || 'devices');
     const [path, setPath] = useState(() => {
-        const savedPath = localStorage.getItem('expPath') || '/';
-        // Sanitize: reject Windows-style paths (e.g. C:\, C:/) on a Linux server
-        const isWindowsPath = /^[a-zA-Z]:[/\\]/.test(savedPath) || savedPath.includes('\\');
-        return isWindowsPath ? '/' : savedPath;
+        const savedPath = localStorage.getItem('expPath');
+        if (savedPath && savedPath.trim()) return savedPath;
+        return '/';
     });
     const [files, setFiles] = useState([]);
     const [fileTypeFilter, setFileTypeFilter] = useState('all');

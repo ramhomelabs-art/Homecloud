@@ -34,8 +34,11 @@ export default function Sidebar({
     setMobileOpen
 }) {
     const handleExplorerClick = () => {
-        setView('browse');
-        if (setExplorerMode) setExplorerMode('devices');
+        if (view === 'browse') {
+            if (setExplorerMode) setExplorerMode('devices');
+        } else {
+            setView('browse');
+        }
         if (setMobileOpen) setMobileOpen(false);
     };
 
