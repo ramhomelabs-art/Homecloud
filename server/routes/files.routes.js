@@ -652,16 +652,60 @@ const getRootListing = async (req) => {
     } else {
         const rootItems = [];
         
-        // 1. Local Storage base path
+        // 1. Primary Debian System Root Partition
         rootItems.push({
-            name: 'Local Storage',
+            name: 'System Root (/)',
+            isDirectory: true,
+            size: 0,
+            modified: new Date(),
+            path: '/'
+        });
+
+        // 2. Common Linux storage pools & mount points if they exist on Debian
+        const linuxMountCandidates = ['/home', '/mnt', '/media', '/data', '/srv', '/var/data', '/opt'];
+        for (const candidate of linuxMountCandidates) {
+            try {
+                if (fs.existsSync(candidate)) {
+                    rootItems.push({
+                        name: `${candidate} (Storage Pool)`,
+                        isDirectory: true,
+                        size: 0,
+                        modified: new Date(),
+                        path: candidate
+                    });
+
+                    // Sub-mounts inside /mnt or /media (e.g. /mnt/storage, /media/hdd1)
+                    if (candidate === '/mnt' || candidate === '/media') {
+                        try {
+                            const subEntries = fs.readdirSync(candidate, { withFileTypes: true });
+                            for (const sub of subEntries) {
+                                if (sub.isDirectory()) {
+                                    const subPath = path.join(candidate, sub.name);
+                                    rootItems.push({
+                                        name: `${subPath} (Volume)`,
+                                        isDirectory: true,
+                                        size: 0,
+                                        modified: new Date(),
+                                        path: subPath
+                                    });
+                                }
+                            }
+                        } catch (_) {}
+                    }
+                }
+            } catch (_) {}
+        }
+
+        // 3. Dedicated NexaDisk Uploads / Local Storage Pool
+        rootItems.push({
+            name: 'Local Storage (/uploads)',
             isDirectory: true,
             size: 0,
             modified: new Date(),
             path: storageProvider.localBase
         });
 
-        // 2. Query all Mounted & Cloud Network Shares
+        // 4. Query all Mounted & Cloud Network Shares
         try {
             const sharesRes = await db.query('SELECT label, path, type FROM network_shares');
             sharesRes.rows.forEach(row => {

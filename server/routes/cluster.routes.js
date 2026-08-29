@@ -514,13 +514,24 @@ storageRouter.get('/devices', authenticateToken, async (req, res) => {
                     for (const d of devices) {
                         if (d.children && d.children.length > 0) {
                             result = result.concat(listDevices(d.children));
-                        } else {
+                        } else if (d.mountpoint) {
+                            let size = parseInt(d.size, 10) || 0;
+                            let free = 0;
+                            try {
+                                if (fs.statfsSync) {
+                                    const stats = fs.statfsSync(d.mountpoint);
+                                    size = stats.bsize * stats.blocks;
+                                    free = stats.bsize * stats.bfree;
+                                }
+                            } catch (_) {}
                             result.push({
                                 name: d.name,
-                                label: d.mountpoint || d.name,
-                                size: parseInt(d.size, 10) || 0,
+                                label: d.mountpoint === '/' ? 'System Root (/)' : (d.mountpoint || d.name),
+                                size,
+                                free,
+                                used: Math.max(0, size - free),
                                 mountpoint: d.mountpoint,
-                                fstype: d.fstype,
+                                fstype: d.fstype || 'ext4',
                                 type: 'disk'
                             });
                         }
@@ -531,7 +542,32 @@ storageRouter.get('/devices', authenticateToken, async (req, res) => {
                 drives = listDevices(data.blockdevices || []);
             } catch (e) {
                 // fallback if lsblk fails
-                drives = [{ name: 'sda1', label: '/', size: 100 * 1024 * 1024 * 1024, type: 'disk' }];
+            }
+
+            // Always ensure primary Linux mountpoints (/, /home, /mnt, /media, /data, /srv) are detected with real statfs
+            const linuxPaths = ['/', '/home', '/mnt', '/media', '/data', '/srv'];
+            for (const p of linuxPaths) {
+                if (fs.existsSync(p) && !drives.some(d => d.mountpoint === p)) {
+                    try {
+                        let size = 100 * 1024 * 1024 * 1024;
+                        let free = 50 * 1024 * 1024 * 1024;
+                        if (fs.statfsSync) {
+                            const stats = fs.statfsSync(p);
+                            size = stats.bsize * stats.blocks;
+                            free = stats.bsize * stats.bfree;
+                        }
+                        drives.push({
+                            name: p === '/' ? 'root' : p.replace(/^\//, ''),
+                            label: p === '/' ? 'System Root (/)' : `${p} (Storage Pool)`,
+                            size,
+                            free,
+                            used: Math.max(0, size - free),
+                            mountpoint: p,
+                            fstype: 'ext4/btrfs',
+                            type: 'disk'
+                        });
+                    } catch (_) {}
+                }
             }
         } else if (platform === 'win32') {
             try {
