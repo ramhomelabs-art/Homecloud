@@ -11,7 +11,7 @@ import {
 // ── Helpers (keep all existing helpers) ──────────────────────────────────────
 
 const getMIMEInfo = (fileName, isDir) => {
-    if (isDir) return { label: 'System Folder', color: '#f2c94c', bg: 'rgba(242, 201, 76, 0.1)' };
+    if (isDir) return { label: 'Folder', color: '#d97706', bg: 'rgba(217, 119, 6, 0.12)' };
     const ext = fileName.includes('.') ? fileName.split('.').pop().toLowerCase() : '';
     const map = {
         js: { label: 'Code Script', color: '#56ccf2', bg: 'rgba(86,204,242,0.1)' },
