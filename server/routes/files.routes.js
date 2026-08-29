@@ -1803,10 +1803,48 @@ router.get('/download', async (req, res) => {
 
             const fileName = path.basename(filePath.replace(/\\/g, '/'));
             const mimeType = getMediaMimeType(fileName);
-            res.setHeader('Content-Disposition', req.query.intent === 'stream' ? 'inline' : `attachment; filename="${fileName}"`);
-            res.setHeader('Content-Type', mimeType);
-            res.setHeader('Accept-Ranges', 'bytes');
+            const isStreaming = req.query.intent === 'stream';
+            
+            // Check if file is already cached locally for instant seeking
+            const os = require('os');
+            const cacheDir = path.join(os.tmpdir(), 'nexadisk_media_cache');
+            if (!fs.existsSync(cacheDir)) {
+                try { fs.mkdirSync(cacheDir, { recursive: true }); } catch (e) {}
+            }
+            const cacheKey = crypto.createHash('md5').update(filePath).digest('hex') + '_' + fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+            const cachePath = path.join(cacheDir, cacheKey);
 
+            if (isStreaming && fs.existsSync(cachePath)) {
+                const stats = fs.statSync(cachePath);
+                if (stats.size > 0) {
+                    const range = req.headers.range;
+                    if (range) {
+                        const rParts = range.replace(/bytes=/, "").split("-");
+                        const start = parseInt(rParts[0], 10);
+                        const end = rParts[1] ? parseInt(rParts[1], 10) : stats.size - 1;
+                        const chunksize = (end - start) + 1;
+                        const fileStream = fs.createReadStream(cachePath, { start, end });
+                        res.writeHead(206, {
+                            'Content-Range': `bytes ${start}-${end}/${stats.size}`,
+                            'Accept-Ranges': 'bytes',
+                            'Content-Length': chunksize,
+                            'Content-Type': mimeType,
+                            'Content-Disposition': 'inline'
+                        });
+                        return fileStream.pipe(res);
+                    }
+
+                    res.writeHead(200, {
+                        'Content-Length': stats.size,
+                        'Accept-Ranges': 'bytes',
+                        'Content-Type': mimeType,
+                        'Content-Disposition': 'inline'
+                    });
+                    return fs.createReadStream(cachePath).pipe(res);
+                }
+            }
+
+            // If not cached yet, stream from SMB and cache in background
             const env = { ...process.env, PASSWD: pass || '' };
             const safeUser = (user || '').replace(/[;&|`$<>\\"']/g, '');
             const safeShare = uncShare.replace(/[;&|`$<>\\"']/g, '');
@@ -1814,17 +1852,103 @@ router.get('/download', async (req, res) => {
 
             const spawn = require('child_process').spawn;
             const args = safeUser
-                ? ['-U', safeUser, safeShare, '-t', '20', '-c', smbCmd]
-                : ['-N', safeShare, '-t', '20', '-c', smbCmd];
+                ? ['-U', safeUser, safeShare, '-t', '30', '-c', smbCmd]
+                : ['-N', safeShare, '-t', '30', '-c', smbCmd];
 
+            let fileSize = parseInt(req.query.size, 10) || 0;
+            if (!fileSize) {
+                // Quick size discovery
+                const sizeCmd = safeUser
+                    ? `smbclient "${safeShare}" -U "${safeUser}" -t 10 -c 'allinfo "${internalFile.replace(/"/g, '')}"'`
+                    : `smbclient "${safeShare}" -N -t 10 -c 'allinfo "${internalFile.replace(/"/g, '')}"'`;
+                try {
+                    const sizeOut = await new Promise((resolve) => {
+                        require('child_process').exec(sizeCmd, { env, timeout: 8000 }, (err, stdout) => {
+                            resolve(stdout || '');
+                        });
+                    });
+                    const match = sizeOut.match(/size:\s+(\d+)/i) || sizeOut.match(/allocation_size:\s+(\d+)/i);
+                    if (match) fileSize = parseInt(match[1], 10);
+                } catch (e) {}
+            }
+
+            const range = req.headers.range;
             const proc = spawn('smbclient', args, { env });
+
+            if (isStreaming && !fs.existsSync(cachePath)) {
+                // Background cache stream
+                try {
+                    const cacheWriter = fs.createWriteStream(cachePath);
+                    proc.stdout.pipe(cacheWriter);
+                } catch (cErr) {}
+            }
+
+            if (range && fileSize > 0) {
+                const rParts = range.replace(/bytes=/, "").split("-");
+                const start = parseInt(rParts[0], 10);
+                const end = rParts[1] ? parseInt(rParts[1], 10) : fileSize - 1;
+                const chunksize = (end - start) + 1;
+
+                res.writeHead(206, {
+                    'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+                    'Accept-Ranges': 'bytes',
+                    'Content-Length': chunksize,
+                    'Content-Type': mimeType,
+                    'Content-Disposition': isStreaming ? 'inline' : `attachment; filename="${fileName}"`
+                });
+
+                let bytesRead = 0;
+                let bytesSent = 0;
+
+                proc.stdout.on('data', (chunk) => {
+                    const chunkStart = bytesRead;
+                    const chunkEnd = bytesRead + chunk.length;
+                    bytesRead += chunk.length;
+
+                    if (chunkEnd <= start) return;
+                    if (chunkStart > end) {
+                        proc.kill();
+                        if (!res.writableEnded) res.end();
+                        return;
+                    }
+
+                    const sliceStart = Math.max(0, start - chunkStart);
+                    const sliceEnd = Math.min(chunk.length, (end + 1) - chunkStart);
+                    const sliced = chunk.slice(sliceStart, sliceEnd);
+                    bytesSent += sliced.length;
+                    if (!res.writableEnded) res.write(sliced);
+
+                    if (bytesSent >= chunksize) {
+                        proc.kill();
+                        if (!res.writableEnded) res.end();
+                    }
+                });
+
+                proc.stdout.on('end', () => {
+                    if (!res.writableEnded) res.end();
+                });
+
+                req.on('close', () => {
+                    proc.kill();
+                });
+                return;
+            }
+
+            // Normal full stream
+            res.setHeader('Content-Disposition', isStreaming ? 'inline' : `attachment; filename="${fileName}"`);
+            res.setHeader('Content-Type', mimeType);
+            res.setHeader('Accept-Ranges', 'bytes');
+            if (fileSize > 0) res.setHeader('Content-Length', fileSize);
+
             proc.stdout.pipe(res);
             proc.stderr.on('data', (d) => logger.warn(`[SMB Download] ${d.toString()}`));
+            req.on('close', () => proc.kill());
             return;
         } catch (smbErr) {
             return res.status(500).json({ error: `SMB download error: ${smbErr.message}` });
         }
     }
+
 
 
     if (agentId && clusterService.agents[agentId]) {

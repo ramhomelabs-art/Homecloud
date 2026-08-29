@@ -70,13 +70,15 @@ const MediaPreviewModal = ({ media, onClose, onDownload, onNext, onPrev, showToa
     }, [zoom]);
     let mediaUrl = '';
     if (media) {
+        const sizeParam = media.size ? `&size=${media.size}` : '';
         if (shareId) {
-            mediaUrl = `${API_BASE}/share/stream?filePath=${encodeURIComponent(media.path)}&token=${shareId}&intent=stream`;
+            mediaUrl = `${API_BASE}/share/stream?filePath=${encodeURIComponent(media.path)}&token=${shareId}&intent=stream${sizeParam}`;
         } else {
-            mediaUrl = `${API_BASE}/files/download?path=${encodeURIComponent(media.path)}&token=${tok}&intent=stream`;
+            mediaUrl = `${API_BASE}/files/download?path=${encodeURIComponent(media.path)}&token=${tok}&intent=stream${sizeParam}`;
             if (media.agentId) mediaUrl += `&agentId=${media.agentId}`;
         }
     }
+
 
     const isPdf = media?.type === 'pdf' || (media?.name && media.name.toLowerCase().endsWith('.pdf'));
 
