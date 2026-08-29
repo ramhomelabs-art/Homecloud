@@ -69,15 +69,31 @@ const isWithinRoot = (rootDir, targetDir) => {
 
 // Get share + security in one shot
 const getShare = async (token) => {
-    const r = await db.query(`
-        SELECT sl.*, 
-               ss.password_hash, ss.email_verification, 
-               ss.max_views, ss.max_downloads, ss.allowed_extensions, ss.max_file_size
-        FROM share_links sl
-        LEFT JOIN share_security ss ON ss.share_id = sl.id
-        WHERE sl.token = $1
-    `, [token]);
-    return r.rows[0] || null;
+    if (!token) return null;
+    try {
+        const r = await db.query(`
+            SELECT sl.*, 
+                   ss.password_hash, ss.email_verification, 
+                   ss.max_views, ss.max_downloads, ss.allowed_extensions, ss.max_file_size
+            FROM share_links sl
+            LEFT JOIN share_security ss ON ss.share_id = sl.id
+            WHERE UPPER(sl.token) = UPPER($1) OR sl.id::text = $1
+        `, [token]);
+        if (r.rows[0]) return r.rows[0];
+
+        // Fallback to legacy shares table
+        const legacy = await db.query(`
+            SELECT id as token, id, path, name as title, '' as description, 
+                   password_hash, email as email_verification, expiry as expires_at,
+                   max_views, -1 as max_downloads
+            FROM shares
+            WHERE UPPER(id) = UPPER($1)
+        `, [token]);
+        return legacy.rows[0] || null;
+    } catch (e) {
+        logger.error('[getShare DB error]', e);
+        return null;
+    }
 };
 
 // Count views for a share
@@ -369,7 +385,18 @@ router.get('/files/:token', async (req, res) => {
             return res.status(403).json({ error: 'Path traversal not allowed' });
         }
 
-        const stat = fs.statSync(resolved);
+        if (!fs.existsSync(resolved)) {
+            return res.status(404).json({ error: 'Shared file or directory not found on disk' });
+        }
+
+        let stat;
+        try {
+            stat = fs.statSync(resolved);
+        } catch (statErr) {
+            logger.warn(`[Share Files] Failed to stat path "${resolved}": ${statErr.message}`);
+            return res.status(404).json({ error: 'Unable to access shared item' });
+        }
+
         if (stat.isFile()) {
             return res.json([{
                 name: path.basename(resolved),
@@ -381,25 +408,31 @@ router.get('/files/:token', async (req, res) => {
             }]);
         }
 
-        const entries = fs.readdirSync(resolved).map(name => {
-            try {
-                const fp = path.join(resolved, name);
-                const s = fs.statSync(fp);
-                return {
-                    name,
-                    path: req.query.path ? path.join(req.query.path, name).replace(/\\/g, '/') : name,
-                    isDirectory: s.isDirectory(),
-                    size: s.isDirectory() ? 0 : s.size,
-                    modified: s.mtime,
-                    extension: s.isDirectory() ? '' : path.extname(name).slice(1).toLowerCase()
-                };
-            } catch { return null; }
-        }).filter(Boolean);
+        let entries = [];
+        try {
+            entries = fs.readdirSync(resolved).map(name => {
+                try {
+                    const fp = path.join(resolved, name);
+                    const s = fs.statSync(fp);
+                    return {
+                        name,
+                        path: req.query.path ? path.join(req.query.path, name).replace(/\\/g, '/') : name,
+                        isDirectory: s.isDirectory(),
+                        size: s.isDirectory() ? 0 : s.size,
+                        modified: s.mtime,
+                        extension: s.isDirectory() ? '' : path.extname(name).slice(1).toLowerCase()
+                    };
+                } catch { return null; }
+            }).filter(Boolean);
+        } catch (dirErr) {
+            logger.warn(`[Share Files] Failed to read directory "${resolved}": ${dirErr.message}`);
+            return res.json([]);
+        }
 
         res.json(entries);
     } catch (e) {
         logger.error('[Share Files Error]', e);
-        res.status(500).json({ error: 'Cannot read directory' });
+        res.status(e.code === 'ENOENT' ? 404 : 500).json({ error: e.message || 'Cannot read directory' });
     }
 });
 
