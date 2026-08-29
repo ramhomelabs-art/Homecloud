@@ -47,28 +47,49 @@ const ClusterUpdateModal = ({ show, onClose, showToast }) => {
         }
     };
 
-    const handleDeployUpdate = async () => {
+    const handleDeployUpdate = async (force = false) => {
         setConfirmDeployShow(false);
         setUpdating(true);
-        setLogs([]);
+        setLogs([`[${new Date().toISOString()}] Initializing cluster update process...`]);
         setUpdateSuccess(false);
 
         const token = localStorage.getItem('token') || '';
+        const headers = { Authorization: `Bearer ${token}` };
+
+        // Poll logs in real time while updating
+        const pollInterval = setInterval(async () => {
+            try {
+                const statusRes = await axios.get(`${API_BASE}/v1/updates/status`, { headers });
+                if (statusRes.data?.logs && statusRes.data.logs.length > 0) {
+                    setLogs(statusRes.data.logs);
+                }
+            } catch (_) {}
+        }, 1000);
+
         try {
             const res = await axios.post(`${API_BASE}/v1/updates/deploy`, {
-                targetVersion: manifest?.latestVersion,
-                nodes: ['all']
-            }, { headers: { Authorization: `Bearer ${token}` } });
+                targetVersion: manifest?.latestVersion || '2.4.0',
+                nodes: ['all'],
+                force
+            }, { headers });
 
+            clearInterval(pollInterval);
             setLogs(res.data.logs || []);
             setUpdateSuccess(true);
             if (showToast) showToast('Cluster rolling update successfully completed!', 'success');
             fetchUpdateData();
         } catch (e) {
+            clearInterval(pollInterval);
             const errMsg = e.response?.data?.error || e.message;
             if (showToast) showToast(`Update notice: ${errMsg}`, 'error');
+            // Fetch final status logs
+            try {
+                const statusRes = await axios.get(`${API_BASE}/v1/updates/status`, { headers });
+                if (statusRes.data?.logs) setLogs(statusRes.data.logs);
+            } catch (_) {}
             fetchUpdateData();
         } finally {
+            clearInterval(pollInterval);
             setUpdating(false);
         }
     };
@@ -88,6 +109,9 @@ const ClusterUpdateModal = ({ show, onClose, showToast }) => {
     };
 
     if (!show) return null;
+
+    const isUpdateAvailable = Boolean(manifest?.updateAvailable);
+    const canDeploy = isUpdateAvailable && !loading && !updating;
 
     return (
         <div className="modal-overlay" onClick={onClose} style={{ zIndex: 99999 }}>
@@ -120,22 +144,22 @@ const ClusterUpdateModal = ({ show, onClose, showToast }) => {
                         <div style={{ width: '1px', height: '32px', background: 'var(--border-subtle)' }} />
                         <div>
                             <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '700' }}>LATEST AVAILABLE RELEASE</div>
-                            <div style={{ fontSize: '16px', fontWeight: '800', color: manifest?.updateAvailable ? '#38bdf8' : '#10b981', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <div style={{ fontSize: '16px', fontWeight: '800', color: isUpdateAvailable ? '#38bdf8' : '#10b981', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                                 v{manifest?.latestVersion || '2.4.0'} ({channel.toUpperCase()})
-                                <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: manifest?.updateAvailable ? 'rgba(56, 189, 248, 0.15)' : 'rgba(16, 185, 129, 0.15)', color: manifest?.updateAvailable ? '#38bdf8' : '#10b981' }}>
-                                    {manifest?.updateAvailable ? 'UPDATE AVAILABLE' : 'UP TO DATE'}
+                                <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: isUpdateAvailable ? 'rgba(56, 189, 248, 0.15)' : 'rgba(16, 185, 129, 0.15)', color: isUpdateAvailable ? '#38bdf8' : '#10b981', fontWeight: '800' }}>
+                                    {loading ? 'CHECKING...' : (isUpdateAvailable ? 'UPDATE AVAILABLE' : 'UP TO DATE')}
                                 </span>
                             </div>
                         </div>
                     </div>
 
                     <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                        <select value={channel} onChange={(e) => setChannel(e.target.value)} style={{ padding: '6px 12px', borderRadius: '8px', background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', fontSize: '12px', fontWeight: '700' }}>
+                        <select value={channel} onChange={(e) => setChannel(e.target.value)} disabled={loading || updating} style={{ padding: '6px 12px', borderRadius: '8px', background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', fontSize: '12px', fontWeight: '700' }}>
                             <option value="stable">Channel: Stable</option>
                             <option value="beta">Channel: Beta / RC</option>
                         </select>
-                        <button className="btn-outline" onClick={fetchUpdateData} style={{ padding: '6px 12px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <RefreshCw size={12} className={loading ? 'animate-spin' : ''} /> Check
+                        <button className="btn-outline" onClick={fetchUpdateData} disabled={loading || updating} style={{ padding: '6px 12px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <RefreshCw size={12} className={loading ? 'animate-spin' : ''} /> {loading ? 'Checking...' : 'Check for Updates'}
                         </button>
                     </div>
                 </div>
@@ -189,11 +213,11 @@ const ClusterUpdateModal = ({ show, onClose, showToast }) => {
                                             <td style={{ padding: '12px 14px', fontWeight: '700', color: 'var(--text-primary)' }}>{node.name}</td>
                                             <td style={{ padding: '12px 14px', textTransform: 'uppercase', fontSize: '11px', color: 'var(--text-secondary)' }}>{node.type}</td>
                                             <td style={{ padding: '12px 14px', fontFamily: 'var(--font-mono)' }}>v{node.installedVersion}</td>
-                                            <td style={{ padding: '12px 14px', fontFamily: 'var(--font-mono)', color: '#10b981' }}>v{node.latestVersion}</td>
+                                            <td style={{ padding: '12px 14px', fontFamily: 'var(--font-mono)', color: isUpdateAvailable ? '#38bdf8' : '#10b981' }}>v{node.latestVersion}</td>
                                             <td style={{ padding: '12px 14px', color: 'var(--text-secondary)', fontSize: '11.5px' }}>{node.os}</td>
                                             <td style={{ padding: '12px 14px' }}>
-                                                <span style={{ fontSize: '11px', fontWeight: '700', color: '#10b981', background: 'rgba(16, 185, 129, 0.12)', padding: '2px 6px', borderRadius: '4px' }}>
-                                                    {node.updateStatus.toUpperCase()}
+                                                <span style={{ fontSize: '11px', fontWeight: '700', color: isUpdateAvailable ? '#38bdf8' : '#10b981', background: isUpdateAvailable ? 'rgba(56, 189, 248, 0.12)' : 'rgba(16, 185, 129, 0.12)', padding: '2px 6px', borderRadius: '4px' }}>
+                                                    {isUpdateAvailable ? 'UPDATE READY' : 'UP TO DATE'}
                                                 </span>
                                             </td>
                                         </tr>
@@ -207,8 +231,8 @@ const ClusterUpdateModal = ({ show, onClose, showToast }) => {
                     {(updating || logs.length > 0) && (
                         <div style={{ background: '#0a0f1d', borderRadius: '14px', border: '1px solid var(--border-subtle)', padding: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span style={{ fontSize: '12.5px', fontWeight: '700', color: updating ? 'var(--accent-gold)' : '#10b981', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                    <Terminal size={14} /> {updating ? 'Deploying Rolling Cluster Update...' : 'Update Execution Log'}
+                                <span style={{ fontSize: '12.5px', fontWeight: '700', color: updating ? 'var(--accent-gold)' : (updateSuccess ? '#10b981' : '#38bdf8'), display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <Terminal size={14} /> {updating ? 'Deploying Rolling Cluster Update...' : (updateSuccess ? 'Update Completed Successfully' : 'Update Execution Log')}
                                 </span>
                                 {updating && <RefreshCw size={14} className="animate-spin" color="var(--accent-gold)" />}
                             </div>
@@ -223,17 +247,60 @@ const ClusterUpdateModal = ({ show, onClose, showToast }) => {
 
                 {/* Footer Controls */}
                 <div style={{ padding: '16px 24px', background: 'var(--bg-surface-1)', borderTop: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <button className="btn-outline" onClick={() => setConfirmRollbackShow(true)} style={{ padding: '8px 16px', fontSize: '12px', color: 'var(--accent-red)', borderColor: 'rgba(244, 63, 94, 0.3)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <RotateCcw size={14} /> Rollback to Snapshot
-                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <button className="btn-outline" onClick={() => setConfirmRollbackShow(true)} disabled={updating} style={{ padding: '8px 16px', fontSize: '12px', color: 'var(--accent-red)', borderColor: 'rgba(244, 63, 94, 0.3)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <RotateCcw size={14} /> Rollback to Snapshot
+                        </button>
+                        {!isUpdateAvailable && !loading && (
+                            <button 
+                                onClick={() => setConfirmDeployShow(true)}
+                                disabled={updating}
+                                style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '11px', textDecoration: 'underline', cursor: updating ? 'not-allowed' : 'pointer', padding: 0 }}
+                            >
+                                Force Re-deploy (v{manifest?.currentVersion || '2.4.0'})
+                            </button>
+                        )}
+                    </div>
 
                     <div style={{ display: 'flex', gap: '10px' }}>
                         <button className="btn-outline" onClick={onClose} style={{ padding: '8px 16px', fontSize: '12px' }}>
                             Close
                         </button>
-                        <button className="btn-primary" onClick={() => setConfirmDeployShow(true)} disabled={updating} style={{ padding: '8px 20px', fontSize: '12px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            {updating ? <RefreshCw size={14} className="animate-spin" /> : <Sparkles size={14} />}
-                            {updating ? 'Deploying...' : (manifest?.updateAvailable ? `Deploy v${manifest?.latestVersion} to Cluster` : `Validate & Re-Deploy (v${manifest?.latestVersion || '2.4.0'})`)}
+                        <button 
+                            className={canDeploy ? "btn-primary" : "btn-secondary"} 
+                            onClick={() => setConfirmDeployShow(true)} 
+                            disabled={!canDeploy} 
+                            style={{ 
+                                padding: '8px 20px', 
+                                fontSize: '12px', 
+                                fontWeight: '800', 
+                                display: 'flex', 
+                                alignItems: 'center', 
+                                gap: '6px',
+                                opacity: canDeploy ? 1 : 0.5,
+                                cursor: canDeploy ? 'pointer' : 'not-allowed',
+                                background: canDeploy ? undefined : 'var(--bg-surface-2)',
+                                color: canDeploy ? undefined : 'var(--text-muted)',
+                                borderColor: canDeploy ? undefined : 'var(--border-subtle)'
+                            }}
+                        >
+                            {updating ? (
+                                <>
+                                    <RefreshCw size={14} className="animate-spin" /> Deploying...
+                                </>
+                            ) : loading ? (
+                                <>
+                                    <RefreshCw size={14} className="animate-spin" /> Checking Updates...
+                                </>
+                            ) : isUpdateAvailable ? (
+                                <>
+                                    <Sparkles size={14} /> Deploy v{manifest?.latestVersion} to Cluster
+                                </>
+                            ) : (
+                                <>
+                                    <CheckCircle2 size={14} color="#10b981" /> System Up to Date (v{manifest?.currentVersion || '2.4.0'})
+                                </>
+                            )}
                         </button>
                     </div>
                 </div>
@@ -242,13 +309,29 @@ const ClusterUpdateModal = ({ show, onClose, showToast }) => {
             {/* In-UI Confirmation: Deploy Cluster Update */}
             <ConfirmModal
                 show={confirmDeployShow}
-                title="Deploy Cluster Update"
-                message={`Are you sure you want to deploy NexaDisk v${manifest?.latestVersion || '2.4.0'} across all master and agent nodes? A pre-flight backup snapshot will be automatically created before extracting files.`}
-                confirmText={manifest?.updateAvailable ? `Deploy v${manifest?.latestVersion}` : `Re-Deploy v${manifest?.latestVersion || '2.4.0'}`}
+                title={isUpdateAvailable ? "Deploy Cluster Update" : "Force Re-Deploy Current Version"}
+                message={
+                    isUpdateAvailable
+                        ? `Are you sure you want to deploy NexaDisk v${manifest?.latestVersion} across all master and agent nodes? A pre-flight backup snapshot will be automatically created before extracting files.`
+                        : `NexaDisk v${manifest?.currentVersion || '2.4.0'} is currently up to date. Do you want to run a forced integrity re-deployment and package synchronization?`
+                }
+                confirmText={isUpdateAvailable ? `Deploy v${manifest?.latestVersion}` : `Re-Deploy v${manifest?.currentVersion || '2.4.0'}`}
                 cancelText="Cancel"
                 type="primary"
-                onConfirm={handleDeployUpdate}
+                onConfirm={() => handleDeployUpdate(!isUpdateAvailable)}
                 onCancel={() => setConfirmDeployShow(false)}
+            />
+
+            {/* In-UI Confirmation: Rollback Update */}
+            <ConfirmModal
+                show={confirmRollbackShow}
+                title="Rollback to Previous Snapshot"
+                message="Are you sure you want to rollback cluster binaries to the previous pre-update backup snapshot? Any modified runtime files will be reverted."
+                confirmText="Restore Snapshot"
+                cancelText="Cancel"
+                type="rollback"
+                onConfirm={handleRollback}
+                onCancel={() => setConfirmRollbackShow(false)}
             />
 
             {/* In-UI Confirmation: Rollback Update */}

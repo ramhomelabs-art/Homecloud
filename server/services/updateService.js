@@ -4,6 +4,7 @@ const path = require('path');
 const axios = require('axios');
 const AdmZip = require('adm-zip');
 const { exec } = require('child_process');
+const { pipeline } = require('stream/promises');
 const db = require('../config/database');
 const logger = require('../utils/logger');
 const clusterService = require('./clusterService');
@@ -299,9 +300,10 @@ class UpdateService {
         let lastErr = null;
 
         for (const url of urlsToTry) {
+            let writer = null;
             try {
                 logger.info(`[UpdateService] Attempting to download package from: ${url}`);
-                const writer = fs.createWriteStream(targetPath);
+                writer = fs.createWriteStream(targetPath);
                 
                 const response = await axios({
                     url,
@@ -309,39 +311,49 @@ class UpdateService {
                     responseType: 'stream',
                     headers,
                     maxRedirects: 10,
-                    timeout: 20000
+                    timeout: 45000,
+                    beforeRedirect: (options) => {
+                        if (options.hostname && (options.hostname.includes('s3') || options.hostname.includes('codeload') || options.hostname.includes('github-production-release-asset'))) {
+                            delete options.headers['Authorization'];
+                            delete options.headers['authorization'];
+                        }
+                    }
                 });
 
                 if (response.status >= 400) {
-                    writer.close();
+                    writer.destroy();
                     continue;
                 }
 
                 const totalLength = parseInt(response.headers['content-length'] || 0, 10);
                 let downloadedLength = 0;
+                let lastLoggedThreshold = 0;
 
                 response.data.on('data', (chunk) => {
                     downloadedLength += chunk.length;
                     if (onProgress && totalLength > 0) {
-                        const percent = Math.round((downloadedLength / totalLength) * 100);
-                        onProgress(percent);
+                        const percent = Math.min(100, Math.round((downloadedLength / totalLength) * 100));
+                        if (percent >= lastLoggedThreshold + 20 || percent >= 100) {
+                            lastLoggedThreshold = Math.floor(percent / 20) * 20;
+                            onProgress(percent);
+                        }
                     }
                 });
 
-                response.data.pipe(writer);
-
-                await new Promise((resolve, reject) => {
-                    writer.on('finish', resolve);
-                    writer.on('error', reject);
-                });
+                await pipeline(response.data, writer);
 
                 // Verify downloaded file is a valid non-empty zip
-                const stat = fs.statSync(targetPath);
-                if (stat.size > 1000) {
-                    return true;
+                if (fs.existsSync(targetPath)) {
+                    const stat = fs.statSync(targetPath);
+                    if (stat.size > 1000) {
+                        return true;
+                    }
                 }
             } catch (err) {
                 lastErr = err;
+                if (writer && !writer.destroyed) {
+                    try { writer.destroy(); } catch (_) {}
+                }
                 logger.warn(`[UpdateService] Download failed for ${url}: ${err.message}`);
             }
         }
