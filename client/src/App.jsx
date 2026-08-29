@@ -2540,35 +2540,36 @@ function App() {
                                                         </div>
                                                     </div>
 
-                                                    <div style={{ position: 'relative', width: '100%', height: '110px', background: 'rgba(0, 0, 0, 0.15)', borderRadius: '10px', overflow: 'hidden', border: '1px solid var(--border-subtle)' }}>
+                                                    <div style={{ position: 'relative', width: '100%', height: '110px', background: 'var(--bg-surface-1)', borderRadius: '10px', overflow: 'hidden', border: '1px solid var(--border-subtle)' }}>
                                                         <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" style={{ width: '100%', height: '100%', display: 'block' }}>
                                                             <defs>
                                                                 <linearGradient id="rxAreaGrad" x1="0" y1="0" x2="0" y2="1">
-                                                                    <stop offset="0%" stopColor="var(--accent-cyan)" stopOpacity="0.2" />
-                                                                    <stop offset="100%" stopColor="var(--accent-cyan)" stopOpacity="0.0" />
+                                                                    <stop offset="0%" stopColor="var(--accent-cyan)" stopOpacity="0.25" />
+                                                                    <stop offset="100%" stopColor="var(--accent-cyan)" stopOpacity="0.02" />
                                                                 </linearGradient>
                                                                 <linearGradient id="txAreaGrad" x1="0" y1="0" x2="0" y2="1">
-                                                                    <stop offset="0%" stopColor="var(--accent-gold)" stopOpacity="0.2" />
-                                                                    <stop offset="100%" stopColor="var(--accent-gold)" stopOpacity="0.0" />
+                                                                    <stop offset="0%" stopColor="var(--accent-gold)" stopOpacity="0.25" />
+                                                                    <stop offset="100%" stopColor="var(--accent-gold)" stopOpacity="0.02" />
                                                                 </linearGradient>
                                                             </defs>
                                                             
-                                                            <line x1="0" y1={height - paddingBottom} x2={width} y2={height - paddingBottom} stroke="rgba(255,255,255,0.05)" strokeWidth="1" />
-                                                            <line x1="0" y1={height / 2} x2={width} y2={height / 2} stroke="rgba(255,255,255,0.03)" strokeWidth="1" strokeDasharray="3,3" />
-                                                            <line x1="0" y1={paddingTop} x2={width} y2={paddingTop} stroke="rgba(255,255,255,0.03)" strokeWidth="1" strokeDasharray="3,3" />
+                                                            <line x1="0" y1={height - paddingBottom} x2={width} y2={height - paddingBottom} stroke="var(--border-subtle)" strokeWidth="1" />
+                                                            <line x1="0" y1={height / 2} x2={width} y2={height / 2} stroke="var(--border-subtle)" strokeWidth="1" strokeDasharray="4,4" opacity="0.6" />
+                                                            <line x1="0" y1={paddingTop} x2={width} y2={paddingTop} stroke="var(--border-subtle)" strokeWidth="1" strokeDasharray="4,4" opacity="0.6" />
 
                                                             <motion.path d={rxArea} fill="url(#rxAreaGrad)" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.5 }} />
                                                             <motion.path d={txArea} fill="url(#txAreaGrad)" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.5 }} />
 
-                                                            <motion.path d={rxLine} fill="none" stroke="var(--accent-cyan)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                                                            <motion.path d={txLine} fill="none" stroke="var(--accent-gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                                            <motion.path d={rxLine} fill="none" stroke="var(--accent-cyan)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                                                            <motion.path d={txLine} fill="none" stroke="var(--accent-gold)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
                                                         </svg>
                                                     </div>
                                                 </motion.div>
                                             );
                                         })()}
 
-                                        <div style={{ maxHeight: '420px', overflowY: 'auto', paddingRight: '8px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+
                                             {(() => {
                                                 const mounts = [];
                                                 // 1. Local disks
