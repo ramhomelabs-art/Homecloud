@@ -21,6 +21,7 @@ const archiver = require('archiver');
 const db = require('../config/database');
 const logger = require('../utils/logger');
 const { decryptPassword } = require('../utils/crypto');
+const storageProvider = require('../utils/storageProvider');
 
 const jwt = require('jsonwebtoken');
 const emailService = require('../services/emailService');
@@ -51,19 +52,60 @@ const isShareAuthorized = (req, share) => {
     }
 };
 
-// Resolve a Windows-style path on any OS
-const resolvePath = (p) => {
+// Resolve paths across Windows UNC, drive letters, Linux mounts, and StorageProvider uploads
+const resolveSharedPath = (p) => {
     if (!p) return null;
-    if (os.platform() !== 'win32' && /^[a-zA-Z]:[\\\/]/.test(p)) {
-        p = p.replace(/^[a-zA-Z]:[\\\/]/, '/').replace(/\\/g, '/');
+    
+    // 1. Direct path check (Windows or native path)
+    try {
+        const direct = path.resolve(p);
+        if (fs.existsSync(direct)) return direct;
+    } catch {}
+
+    // 2. StorageProvider resolution
+    try {
+        const spPath = storageProvider.resolvePath(p);
+        if (fs.existsSync(spPath)) return spPath;
+    } catch {}
+
+    // 3. Normalized cross-platform (e.g. D:\path on Linux)
+    try {
+        let clean = p;
+        if (os.platform() !== 'win32' && /^[a-zA-Z]:[\\\/]/.test(clean)) {
+            clean = clean.replace(/^[a-zA-Z]:[\\\/]/, '/').replace(/\\/g, '/');
+            const norm = path.resolve(clean);
+            if (fs.existsSync(norm)) return norm;
+        }
+    } catch {}
+
+    // 4. LocalBase with stripped drive letter / leading slashes
+    try {
+        const stripped = p.replace(/^[a-zA-Z]:[\\\/]/, '').replace(/^[\\\/]+/, '');
+        const localCandidate = path.resolve(storageProvider.localBase, stripped);
+        if (fs.existsSync(localCandidate)) return localCandidate;
+    } catch {}
+
+    // 5. LocalBase basename match
+    try {
+        const baseCandidate = path.resolve(storageProvider.localBase, path.basename(p));
+        if (fs.existsSync(baseCandidate)) return baseCandidate;
+    } catch {}
+
+    // If file isn't on disk, return best-effort resolved path
+    try {
+        return storageProvider.resolvePath(p);
+    } catch {
+        return path.resolve(p);
     }
-    return path.resolve(p);
 };
 
 // Strict path boundary validation (immune to substring prefix traversal)
 const isWithinRoot = (rootDir, targetDir) => {
     if (!rootDir || !targetDir) return false;
-    const rel = path.relative(rootDir, targetDir);
+    const normRoot = path.normalize(rootDir).toLowerCase();
+    const normTarget = path.normalize(targetDir).toLowerCase();
+    if (normRoot === normTarget) return true;
+    const rel = path.relative(normRoot, normTarget);
     return !rel.startsWith('..') && !path.isAbsolute(rel);
 };
 
@@ -81,15 +123,20 @@ const getShare = async (token) => {
         `, [token]);
         if (r.rows[0]) return r.rows[0];
 
-        // Fallback to legacy shares table
-        const legacy = await db.query(`
-            SELECT id as token, id, path, name as title, '' as description, 
-                   password_hash, email as email_verification, expiry as expires_at,
-                   max_views, -1 as max_downloads
-            FROM shares
-            WHERE UPPER(id) = UPPER($1)
-        `, [token]);
-        return legacy.rows[0] || null;
+        // Fallback to legacy shares table safely
+        try {
+            const legacy = await db.query(`
+                SELECT id::text as token, id, path, '' as title, '' as description, 
+                       password_hash, email as email_verification, expiry as expires_at,
+                       max_views, -1 as max_downloads
+                FROM shares
+                WHERE UPPER(id::text) = UPPER($1)
+            `, [token]);
+            if (legacy.rows[0]) return legacy.rows[0];
+        } catch (legErr) {
+            // Ignore legacy table error if schema differs
+        }
+        return null;
     } catch (e) {
         logger.error('[getShare DB error]', e);
         return null;
@@ -189,7 +236,7 @@ router.get('/info/:token', async (req, res) => {
         let totalSize = 0;
         if (share.type !== 'upload') {
             try {
-                const resolved = resolvePath(share.path);
+                const resolved = resolveSharedPath(share.path);
                 const stat = fs.statSync(resolved);
                 if (stat.isDirectory()) {
                     const entries = fs.readdirSync(resolved);
@@ -298,58 +345,32 @@ router.post('/auth/:token', async (req, res) => {
             const code = crypto.randomInt(100000, 999999).toString();
             otpStore.set(`${share.token}:${email}`, { code, expires: Date.now() + 10 * 60 * 1000 });
             logger.info(`[Share OTP] Code generated for share "${share.token}" -> ${email}`);
-            
-            // Dispatch real email via SMTP
-            const shareTitle = share.title || path.basename(share.path || '') || 'Shared Resource';
-            const emailResult = await emailService.sendOTP({
-                to: email,
-                otpCode: code,
-                shareTitle,
-                expiresMinutes: 10
-            });
 
-            if (!emailResult.success) {
-                logger.warn(`[Share OTP] Email dispatch failed: ${emailResult.error}`);
+            try {
+                const shareTitle = share.title || path.basename(share.path || '') || 'Shared Resource';
+                await emailService.sendVerificationCode(email, code, shareTitle);
+            } catch (mailErr) {
+                logger.error('[Share OTP Email Error]', mailErr);
+                return res.status(500).json({ error: 'Failed to send verification code email' });
             }
 
-            return res.json({ 
-                success: true, 
-                message: 'OTP sent to email',
-                simulated: !!emailResult.simulated
-            });
+            return res.json({ success: true, message: 'Verification code sent to email' });
         }
 
-        // OTP verify — with brute-force lockout (same lockout as password auth)
-        if (otpCode && email) {
-            // Check lockout before verifying OTP
-            const otpLockRecord = authAttempts.get(lockKey);
-            if (otpLockRecord && otpLockRecord.lockedUntil && Date.now() < otpLockRecord.lockedUntil) {
-                const remainingMinutes = Math.ceil((otpLockRecord.lockedUntil - Date.now()) / 60000);
-                return res.status(429).json({ 
-                    error: `Too many failed OTP attempts. Access locked for ${remainingMinutes} minute(s).` 
-                });
+        // Email OTP — verify OTP
+        if (otpCode) {
+            if (!email) return res.status(400).json({ error: 'Email is required to verify OTP' });
+            const stored = otpStore.get(`${share.token}:${email}`);
+            if (!stored) return res.status(400).json({ error: 'No OTP requested or code expired' });
+            if (Date.now() > stored.expires) {
+                otpStore.delete(`${share.token}:${email}`);
+                return res.status(400).json({ error: 'Verification code has expired' });
+            }
+            if (stored.code !== String(otpCode).trim()) {
+                await logAccess(share.id, req, 'invalid_otp');
+                return res.status(401).json({ error: 'Invalid verification code' });
             }
 
-            const record = otpStore.get(`${share.token}:${email}`);
-            if (!record || record.code !== String(otpCode) || Date.now() > record.expires) {
-                // Track failed OTP attempts with same lockout mechanism
-                const currentAttempts = (otpLockRecord?.attempts || 0) + 1;
-                if (currentAttempts >= MAX_AUTH_ATTEMPTS) {
-                    authAttempts.set(lockKey, { attempts: currentAttempts, lockedUntil: Date.now() + LOCKOUT_DURATION_MS });
-                    logger.warn(`[Security Alert] IP ${ip} locked out after ${currentAttempts} failed OTP attempts on share "${req.params.token}".`);
-                } else {
-                    authAttempts.set(lockKey, { attempts: currentAttempts, lockedUntil: null });
-                }
-                await logAccess(share.id, req, 'invalid_otp');
-                const remaining = MAX_AUTH_ATTEMPTS - currentAttempts;
-                return res.status(401).json({ 
-                    error: currentAttempts >= MAX_AUTH_ATTEMPTS
-                        ? 'Too many failed OTP attempts. Access locked for 5 minutes.'
-                        : `Invalid or expired OTP. ${remaining} attempt(s) remaining before lockout.`
-                });
-            }
-            // Success - clear lockout
-            authAttempts.delete(lockKey);
             otpStore.delete(`${share.token}:${email}`);
             await logAccess(share.id, req, 'auth_otp');
             const signedToken = jwt.sign({ shareId: share.id, authorized: true }, process.env.JWT_SECRET, { expiresIn: '24h' });
@@ -376,16 +397,19 @@ router.get('/files/:token', async (req, res) => {
             return res.status(401).json({ error: 'Authentication required', authRequired: true });
         }
 
-        const subPath = req.query.path ? path.join(share.path, req.query.path) : share.path;
-        const resolved = resolvePath(subPath);
+        const shareRoot = resolveSharedPath(share.path);
+        let resolved = shareRoot;
+        if (req.query.path) {
+            resolved = resolveSharedPath(path.join(share.path, req.query.path));
+        }
 
         // Security: must be within share root
-        const shareRoot = resolvePath(share.path);
         if (!isWithinRoot(shareRoot, resolved)) {
             return res.status(403).json({ error: 'Path traversal not allowed' });
         }
 
         if (!fs.existsSync(resolved)) {
+            logger.warn(`[Share Files] Path does not exist: "${resolved}" for share token "${req.params.token}"`);
             return res.status(404).json({ error: 'Shared file or directory not found on disk' });
         }
 
@@ -450,8 +474,8 @@ router.get('/stream', async (req, res) => {
         }
 
         const targetRel = filePath || '';
-        const fullPath = resolvePath(path.join(share.path, targetRel));
-        const shareRoot = resolvePath(share.path);
+        const shareRoot = resolveSharedPath(share.path);
+        const fullPath = targetRel ? resolveSharedPath(path.join(share.path, targetRel)) : shareRoot;
 
         if (!isWithinRoot(shareRoot, fullPath)) {
             return res.status(403).json({ error: 'Path traversal not allowed' });
@@ -495,8 +519,8 @@ router.post('/stream', async (req, res) => {
         }
 
         const targetRel = filePath || '';
-        const fullPath = resolvePath(path.join(share.path, targetRel));
-        const shareRoot = resolvePath(share.path);
+        const shareRoot = resolveSharedPath(share.path);
+        const fullPath = targetRel ? resolveSharedPath(path.join(share.path, targetRel)) : shareRoot;
 
         if (!isWithinRoot(shareRoot, fullPath)) {
             return res.status(403).json({ error: 'Path traversal not allowed' });
@@ -567,7 +591,7 @@ router.post('/upload/:token', upload.array('files'), async (req, res) => {
         }
         if (share.type !== 'upload') return res.status(403).json({ error: 'This share does not accept uploads' });
 
-        const targetDir = resolvePath(share.path);
+        const targetDir = resolveSharedPath(share.path);
         
         const uploaded = [];
         for (const file of (req.files || [])) {

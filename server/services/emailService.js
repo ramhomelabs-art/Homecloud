@@ -139,6 +139,13 @@ class EmailService {
     }
 
     /**
+     * Send Verification Code (Convenience wrapper for sendOTP)
+     */
+    async sendVerificationCode(to, otpCode, shareTitle = 'Shared Resource') {
+        return this.sendOTP({ to, otpCode, shareTitle, expiresMinutes: 10 });
+    }
+
+    /**
      * Send test email to verify SMTP configuration
      */
     async sendTestEmail(targetEmail, customConfig = null) {
