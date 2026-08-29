@@ -187,12 +187,27 @@ const listShareSmbFiles = async (sharePath, subPath = '') => {
         });
 
         const isDirMatch = infoOut.match(/attributes:\s*([A-Za-z0-9_]+)/i);
-        const isFile = infoOut.includes('size:') && (!isDirMatch || !isDirMatch[1].includes('D'));
+        const isFile = (infoOut.includes('size:') || infoOut.includes('stream:') || path.extname(internalSub).length > 0) && (!isDirMatch || !isDirMatch[1].includes('D'));
 
         if (isFile) {
             let size = 0;
-            const sizeMatch = infoOut.match(/size:\s+(\d+)/i) || infoOut.match(/allocation_size:\s+(\d+)/i);
+            const sizeMatch = infoOut.match(/size:\s+(\d+)/i) || 
+                              infoOut.match(/allocation_size:\s+(\d+)/i) ||
+                              infoOut.match(/stream:\s+\[[^\]]*\],\s+(\d+)\s+bytes/i);
             if (sizeMatch) size = parseInt(sizeMatch[1], 10);
+
+            // If size is still 0, query via ls
+            if (!size) {
+                const lsCmd = safeUser
+                    ? `smbclient "${safeShare}" -U "${safeUser}" -t 10 -c 'ls "${internalSub.replace(/"/g, '')}"'`
+                    : `smbclient "${safeShare}" -N -t 10 -c 'ls "${internalSub.replace(/"/g, '')}"'`;
+                const lsOut = await new Promise((res) => {
+                    exec(lsCmd, { env, timeout: 10000 }, (e, out) => res(out || ''));
+                });
+                const lsMatch = lsOut.match(/^(.+?)\s+([DAHRSVN]+)\s+(\d+)\s+/m);
+                if (lsMatch) size = parseInt(lsMatch[3], 10) || 0;
+            }
+
             const fileName = path.basename(internalSub);
             return [{
                 name: fileName,
@@ -445,19 +460,32 @@ router.get('/info/:token', async (req, res) => {
         }
 
         // Get file stats (Fast non-blocking check)
-        let fileCount = 0;
+        let fileCount = 1;
         let totalSize = 0;
         if (share.type !== 'upload') {
             try {
                 const resolved = resolveSharedPath(share.path);
-                const stat = fs.statSync(resolved);
-                if (stat.isDirectory()) {
-                    const entries = fs.readdirSync(resolved);
-                    fileCount = entries.length;
-                    totalSize = stat.size;
+                if (fs.existsSync(resolved)) {
+                    const stat = fs.statSync(resolved);
+                    if (stat.isDirectory()) {
+                        const entries = fs.readdirSync(resolved);
+                        fileCount = entries.length;
+                        totalSize = stat.size;
+                    } else {
+                        fileCount = 1;
+                        totalSize = stat.size;
+                    }
                 } else {
-                    fileCount = 1;
-                    totalSize = stat.size;
+                    const isSmb = (share.path || '').startsWith('\\\\') || (share.path || '').startsWith('//') || (share.path || '').startsWith('smb://');
+                    if (isSmb) {
+                        try {
+                            const smbFiles = await listShareSmbFiles(share.path, '');
+                            if (smbFiles && smbFiles.length > 0) {
+                                fileCount = smbFiles.length;
+                                totalSize = smbFiles.reduce((acc, f) => acc + (f.size || 0), 0);
+                            }
+                        } catch (_) {}
+                    }
                 }
             } catch {}
         }
@@ -484,7 +512,7 @@ router.get('/info/:token', async (req, res) => {
             token: share.token,
             type: share.type,
             title: resolvedTitle,
-            path: share.path || '',
+            path: '', // Sanitized: hide internal storage paths from guest client
             description: share.description || '',
             ownerName,
             expires_at: share.expires_at,

@@ -387,12 +387,14 @@ const GuestPortal = ({ shareId, showToast }) => {
                         }}>
                             {getCleanPortalTitle(info.title, info.path)}
                         </h1>
-                        {((info.path && (info.path.includes('\\') || info.path.includes('/'))) || (info.title && (info.title.includes('\\') || info.title.includes('/')))) && (
-                            <p style={{ margin: '4px 0 0', fontSize: '11.5px', color: 'var(--text-dim)', fontFamily: 'var(--font-mono, monospace)' }}>
-                                {info.path || info.title}
+                        {info.description && (
+                            <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                                {info.description}
                             </p>
                         )}
-                        <p style={grayTxt}>{info.fileCount} items · {fmt(info.totalSize)} · by {info.ownerName}</p>
+                        <p style={grayTxt}>
+                            {(files.length > 0 ? files.length : (info.fileCount || 1))} item{(files.length > 0 ? files.length : (info.fileCount || 1)) === 1 ? '' : 's'} · {fmt(files.length > 0 ? files.reduce((acc, f) => acc + (f.size || 0), 0) : (info.totalSize || 0))} · Shared by {info.ownerName || 'admin'}
+                        </p>
                     </div>
                     <div style={{display:'flex',gap:'8px',alignItems:'center'}}>
                         <div style={searchBox}>
