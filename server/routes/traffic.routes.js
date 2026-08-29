@@ -18,6 +18,16 @@ router.get('/live', authenticateToken, requireAdmin, (req, res) => {
     }
 });
 
+// ─── GET /api/v1/traffic/network-dashboard (ntopng & Wireshark DPI Data) ─────
+router.get('/network-dashboard', authenticateToken, requireAdmin, (req, res) => {
+    try {
+        const data = trafficService.getNetworkDashboardData();
+        res.json(data);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // ─── GET /api/v1/traffic/sessions ────────────────────────────────────────────
 router.get('/sessions', authenticateToken, requireAdmin, (req, res) => {
     try {

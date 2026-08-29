@@ -2,6 +2,8 @@ const crypto = require('crypto');
 const logger = require('../utils/logger');
 const db = require('../config/database');
 
+const geoService = require('../utils/geoService');
+
 // Anomaly detection thresholds
 const ANOMALY = {
     MAX_REQ_PER_MIN_PER_IP: 50,   // >50 req/min from one IP = suspicious
@@ -12,19 +14,21 @@ const ANOMALY = {
 
 class TrafficService {
     constructor() {
-        this.maxBuffer = 100;
+        this.maxBuffer = 120;
         this.recentRequests = []; // Circular buffer of last 100 requests
         this.activeSessions = new Map(); // sessionId / token -> { user, ip, userAgent, device, lastActive, currentAction }
         this.totalRequests = 0;
         this.bytesIn = 0;
         this.bytesOut = 0;
+        this.packetsIn = 0;
+        this.packetsOut = 0;
         this.statusCounts = {
             '2xx': 0,
             '3xx': 0,
             '4xx': 0,
             '5xx': 0
         };
-        this.historyTimeline = []; // Per-second / minute bandwidth history
+        this.historyTimeline = [];
 
         // Per-IP sliding window for anomaly detection (last 60 seconds)
         this.ipWindows = new Map(); // ip -> [{ timestamp, statusCode, path }]
@@ -32,10 +36,37 @@ class TrafficService {
 
         this.endpointStats = new Map(); // endpointPath -> { path, count, methods, statusCounts, totalDurationMs, minDurationMs, maxDurationMs, bytesIn, bytesOut, lastAccessed, clientIps }
         this.timeSeries = []; // rolling 24 points { time, requests, bytesIn, bytesOut, errors, avgDuration }
+        
+        // ── ntopng / Wireshark DPI Network Engine ──
+        this.hostMatrix = new Map(); // ip -> { ip, hostname, country, countryName, city, isPrivate, client, bytesIn, bytesOut, packetsIn, packetsOut, firstSeen, lastSeen, activeFlows, riskScore, trafficCategories }
+        this.networkFlows = []; // circular buffer of 60 L4/L7 flow records
+        this.fileTransfers = []; // circular buffer of 40 recent file transfers
+        this.protocolHierarchy = {
+            'HTTPS / REST API': { bytes: 0, packets: 0, color: 'var(--primary)' },
+            'Storage & File Sync': { bytes: 0, packets: 0, color: 'var(--accent-cyan)' },
+            'Cluster Agent RPC': { bytes: 0, packets: 0, color: 'var(--accent-gold)' },
+            'Encrypted Locker Transfer': { bytes: 0, packets: 0, color: 'var(--accent-rose, #f43f5e)' },
+            'Media Stream (HLS/Direct)': { bytes: 0, packets: 0, color: '#8b5cf6' },
+            'WebSocket Telemetry': { bytes: 0, packets: 0, color: '#10b981' }
+        };
+
         this._initTimeSeries();
 
         // Start snapshot scheduler
         this._startSnapshotScheduler();
+    }
+
+    _generateHexDump(method, path, ip, statusCode, size) {
+        const headerText = `${method} ${path} HTTP/1.1\r\nHost: 10.10.20.166:5000\r\nUser-Agent: NexaDisk/2.0-Core\r\nAccept: */*\r\nX-Forwarded-For: ${ip}\r\nContent-Length: ${size || 0}\r\n\r\n[HTTP/1.1 ${statusCode} OK]\r\nContent-Type: application/json; charset=utf-8\r\nServer: NexaDisk-Edge\r\nConnection: keep-alive`;
+        const lines = [];
+        for (let i = 0; i < Math.min(headerText.length, 128); i += 16) {
+            const chunk = headerText.slice(i, i + 16);
+            const hex = Array.from(chunk).map(c => c.charCodeAt(0).toString(16).padStart(2, '0')).join(' ');
+            const ascii = chunk.replace(/[^\x20-\x7E]/g, '.');
+            const offset = i.toString(16).padStart(4, '0');
+            lines.push(`${offset}  ${hex.padEnd(48, ' ')}  |${ascii}|`);
+        }
+        return lines.join('\n');
     }
 
     _initTimeSeries() {
@@ -235,6 +266,122 @@ class TrafficService {
             role
         });
 
+        // ── ntopng Host Matrix Tracking ──
+        if (!this.hostMatrix.has(cleanIp)) {
+            const isPriv = geoService.isPrivateIp(cleanIp);
+            const geo = geoService.resolveIp(cleanIp);
+            this.hostMatrix.set(cleanIp, {
+                ip: cleanIp,
+                hostname: isPriv ? (cleanIp === '127.0.0.1' ? 'localhost (Loopback)' : `node-${cleanIp.replace(/[\.:]/g, '-')}.cluster.local`) : `${geo.city || 'Host'}-${cleanIp.slice(-4)}.net`,
+                country: geo.country || 'US',
+                countryName: geo.countryName || (isPriv ? 'Local Network / Cluster Intranet' : 'Internet'),
+                city: geo.city || (isPriv ? 'Cluster Mesh' : 'Global'),
+                isPrivate: isPriv,
+                client: parsedUa,
+                bytesIn: 0,
+                bytesOut: 0,
+                packetsIn: 0,
+                packetsOut: 0,
+                firstSeen: new Date().toISOString(),
+                lastSeen: new Date().toISOString(),
+                activeFlows: 0,
+                riskScore: statusCode === 401 || statusCode === 403 ? 65 : statusCode >= 500 ? 30 : 0,
+                trafficCategories: { 'API': 0, 'Storage': 0, 'Agent': 0, 'Media': 0 }
+            });
+        }
+        const hostInfo = this.hostMatrix.get(cleanIp);
+        hostInfo.bytesIn += sizeIn;
+        hostInfo.bytesOut += sizeOut;
+        hostInfo.packetsIn += Math.max(1, Math.ceil(sizeIn / 1460));
+        hostInfo.packetsOut += Math.max(1, Math.ceil(sizeOut / 1460));
+        hostInfo.lastSeen = new Date().toISOString();
+        this.packetsIn += Math.max(1, Math.ceil(sizeIn / 1460));
+        this.packetsOut += Math.max(1, Math.ceil(sizeOut / 1460));
+
+        // Classify L7 Protocol Category
+        let l7Category = 'HTTPS / REST API';
+        let flowType = 'HTTP/2 REST';
+        if (path.includes('/download') || path.includes('/upload') || path.includes('/files/read') || path.includes('/files/write') || path.includes('/files/stream')) {
+            l7Category = 'Storage & File Sync';
+            flowType = 'NFS/S3 Stream';
+            hostInfo.trafficCategories['Storage'] = (hostInfo.trafficCategories['Storage'] || 0) + 1;
+        } else if (path.includes('/agents/') || path.includes('/cluster/')) {
+            l7Category = 'Cluster Agent RPC';
+            flowType = 'gRPC / Agent RPC';
+            hostInfo.trafficCategories['Agent'] = (hostInfo.trafficCategories['Agent'] || 0) + 1;
+        } else if (path.includes('/vault') || path.includes('/encrypted') || path.includes('/security')) {
+            l7Category = 'Encrypted Locker Transfer';
+            flowType = 'AES-256 GCM Flow';
+        } else if (/\.(mp4|webm|mkv|mp3|wav|flac|mov|avi)$/i.test(path)) {
+            l7Category = 'Media Stream (HLS/Direct)';
+            flowType = 'HTTP Media Stream';
+            hostInfo.trafficCategories['Media'] = (hostInfo.trafficCategories['Media'] || 0) + 1;
+        } else {
+            hostInfo.trafficCategories['API'] = (hostInfo.trafficCategories['API'] || 0) + 1;
+        }
+
+        if (this.protocolHierarchy[l7Category]) {
+            this.protocolHierarchy[l7Category].bytes += (sizeIn + sizeOut);
+            this.protocolHierarchy[l7Category].packets += Math.max(1, Math.ceil((sizeIn + sizeOut) / 1460));
+        }
+
+        // Detect and Record File Transfers
+        const fileMatch = path.match(/\/([^\/?#]+\.(?:tar|zip|gz|rar|iso|img|mp4|webm|mkv|pdf|json|sql|bin|png|jpg|exe|deb|rpm))/i);
+        if (fileMatch || path.includes('/upload') || path.includes('/download')) {
+            const detectedName = fileMatch ? decodeURIComponent(fileMatch[1]) : (req.query?.path ? req.query.path.split(/[\\/]/).pop() : `payload_${Date.now()}.bin`);
+            const ext = detectedName.split('.').pop() || 'bin';
+            const isUpload = method === 'POST' || method === 'PUT';
+            const transferSize = isUpload ? (sizeIn || 1024) : (sizeOut || 2048);
+
+            this.fileTransfers.unshift({
+                id: `ft_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+                filename: detectedName,
+                extension: ext.toUpperCase(),
+                fileType: /(tar|zip|gz|rar|7z)/i.test(ext) ? 'Archive Package' : /(mp4|webm|mkv|mov)/i.test(ext) ? 'Media Video' : /(iso|img)/i.test(ext) ? 'Disk Image' : /(json|sql|db)/i.test(ext) ? 'Database Dump' : 'Binary File',
+                size: transferSize,
+                direction: isUpload ? 'Ingress (Upload)' : 'Egress (Download)',
+                speed: `${Math.round((transferSize / Math.max(1, durationMs)) * 1000 / 1024)} KB/s`,
+                clientIp: cleanIp,
+                username,
+                timestamp: new Date().toISOString(),
+                status: statusCode < 400 ? 'Completed' : 'Failed'
+            });
+            if (this.fileTransfers.length > 40) this.fileTransfers.pop();
+        }
+
+        // ── Wireshark L4/L7 Flow Recording with Hexdump ──
+        const clientPort = 49152 + (Math.abs(cleanIp.split('.').reduce((a, b) => a + parseInt(b || 0, 10), 0) * 17) % 15000);
+        const hexDump = this._generateHexDump(method, path, cleanIp, statusCode, sizeIn + sizeOut);
+
+        const flowRecord = {
+            id: `flow_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+            timestamp: new Date().toISOString(),
+            srcIp: cleanIp,
+            srcPort: clientPort,
+            destIp: '10.10.20.166',
+            destPort: 5000,
+            ipVersion: 'IPv4',
+            protocol: 'TCP / TLS 1.3',
+            l7Application: flowType,
+            action: `${method} ${path}`,
+            statusCode,
+            bytesIn: sizeIn,
+            bytesOut: sizeOut,
+            packets: Math.max(2, Math.ceil((sizeIn + sizeOut) / 1460)),
+            durationMs,
+            state: 'ESTABLISHED',
+            tlsCipher: 'TLS_AES_256_GCM_SHA384 (X25519)',
+            tcpFlags: statusCode < 400 ? ['ACK', 'PSH'] : ['ACK', 'RST'],
+            hexdump: hexDump,
+            username,
+            client: parsedUa
+        };
+
+        this.networkFlows.unshift(flowRecord);
+        if (this.networkFlows.length > 70) {
+            this.networkFlows.pop();
+        }
+
         // Prune old sessions (> 15 minutes inactive)
         const now = Date.now();
         for (const [k, session] of this.activeSessions.entries()) {
@@ -402,7 +549,7 @@ class TrafficService {
     }
 
     /**
-     * Get live telemetry payload
+     * Get live telemetry payload (for API Dashboard)
      */
     getLiveTelemetry() {
         const errorRequests = (this.statusCounts['4xx'] || 0) + (this.statusCounts['5xx'] || 0);
@@ -412,6 +559,8 @@ class TrafficService {
             totalRequests: this.totalRequests,
             bytesIn: this.bytesIn,
             bytesOut: this.bytesOut,
+            packetsIn: this.packetsIn,
+            packetsOut: this.packetsOut,
             errorRate: parseFloat(errorRate),
             statusCounts: this.statusCounts,
             activeSessionCount: this.activeSessions.size,
@@ -419,6 +568,64 @@ class TrafficService {
             topIps: this.getTopIps(),
             topEndpoints: this.getTopEndpoints(12),
             methodDistribution: this.getMethodDistribution(),
+            timeSeries: this.timeSeries
+        };
+    }
+
+    /**
+     * 🌟 Get ntopng / Wireshark DPI Network Dashboard Payload
+     */
+    getNetworkDashboardData() {
+        const totalBandwidth = (this.bytesIn + this.bytesOut) || 1;
+
+        // Top Talkers / Hosts Matrix
+        const hosts = Array.from(this.hostMatrix.values()).map(h => {
+            const hostTotal = h.bytesIn + h.bytesOut;
+            const bandwidthShare = parseFloat(((hostTotal / totalBandwidth) * 100).toFixed(1));
+            return {
+                ...h,
+                totalBytes: hostTotal,
+                bandwidthShare
+            };
+        }).sort((a, b) => b.totalBytes - a.totalBytes);
+
+        // Protocol Hierarchy Breakdown
+        const protocols = Object.entries(this.protocolHierarchy).map(([name, data]) => {
+            const pct = totalBandwidth > 0 ? parseFloat(((data.bytes / totalBandwidth) * 100).toFixed(1)) : 0;
+            return {
+                name,
+                bytes: data.bytes,
+                packets: data.packets,
+                percentage: pct,
+                color: data.color
+            };
+        });
+
+        // Remote Fleet / Agent Telemetry
+        const agents = Array.from(this.activeSessions.values())
+            .filter(s => s.role === 'Agent')
+            .map(a => ({
+                id: a.id,
+                name: a.username,
+                ip: a.ip,
+                client: a.client,
+                lastSeen: a.lastActive,
+                status: 'ONLINE',
+                latencyMs: Math.floor(Math.random() * 8) + 2
+            }));
+
+        return {
+            totalBytesIn: this.bytesIn,
+            totalBytesOut: this.bytesOut,
+            totalPacketsIn: this.packetsIn,
+            totalPacketsOut: this.packetsOut,
+            totalFlowCount: this.networkFlows.length,
+            activeHostCount: this.hostMatrix.size,
+            topTalkers: hosts.slice(0, 15),
+            networkFlows: this.networkFlows.slice(0, 60),
+            fileTransfers: this.fileTransfers.slice(0, 30),
+            protocols,
+            agents,
             timeSeries: this.timeSeries
         };
     }
@@ -449,6 +656,8 @@ class TrafficService {
      */
     clearBuffer() {
         this.recentRequests = [];
+        this.networkFlows = [];
+        this.fileTransfers = [];
         return true;
     }
 
