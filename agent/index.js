@@ -189,20 +189,20 @@ const getLocalIP = () => {
     const candidates = [];
 
     for (const name of Object.keys(nets)) {
-        const isVirtual = /vethernet|wsl|virtualbox|vmware|docker|loopback|tap|vpn/i.test(name);
+        const isVirtual = /vethernet|tailscale|hyper-v|wsl|virtualbox|vmware|docker|loopback|tap|vpn|zerotier|hamachi/i.test(name);
         for (const net of nets[name]) {
             if (net.family === 'IPv4' && !net.internal) {
                 const addr = net.address;
                 // Exclude link-local / APIPA (169.254.x.x) and loopback
-                if (addr.startsWith('169.254.') || addr.startsWith('127.')) continue;
+                if (addr.startsWith('169.254.') || addr.startsWith('127.') || addr === '0.0.0.0') continue;
 
                 let score = 10;
-                // Prioritize subnet matching Master URL
-                if (masterSubnet && addr.startsWith(masterSubnet)) score += 100;
-                // Prioritize standard private IP ranges
-                if (addr.startsWith('10.') || addr.startsWith('192.168.') || /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(addr)) score += 30;
-                // Penalize virtual adapters
-                if (isVirtual) score -= 50;
+                // Prioritize subnet matching Master URL (e.g. 10.10.20.x)
+                if (masterSubnet && addr.startsWith(masterSubnet)) score += 300;
+                // Prioritize standard private IP ranges (10.x, 192.168.x, 172.16-31.x)
+                if (addr.startsWith('10.') || addr.startsWith('192.168.') || /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(addr)) score += 50;
+                // Penalize virtual adapters heavily
+                if (isVirtual) score -= 200;
 
                 candidates.push({ address: addr, score, name });
             }

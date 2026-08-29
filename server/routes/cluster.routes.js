@@ -52,12 +52,15 @@ agentsRouter.post('/register', async (req, res) => {
     }
 
     // Auto-detect and fix APIPA / link-local / 169.254.x.x addresses with real incoming socket IP
-    const callerIp = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim().replace(/^.*:/, '');
-    if (url.includes('169.254.') || url.includes('127.0.0.1')) {
-        if (callerIp && !callerIp.startsWith('127.') && callerIp !== '::1') {
-            const port = url.split(':').pop() || '5001';
+    let rawCallerIp = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+    const callerIp = rawCallerIp.replace(/^::ffff:/, '').replace(/^.*:/, '').trim();
+
+    if (url.includes('169.254.') || url.includes('127.0.0.1') || url.includes('localhost') || !url.startsWith('http')) {
+        if (callerIp && !callerIp.startsWith('127.') && callerIp !== '::1' && !callerIp.startsWith('169.254.')) {
+            const portMatch = url.match(/:(\d+)$/);
+            const port = portMatch ? portMatch[1] : '5001';
             url = `http://${callerIp}:${port}`;
-            logger.info(`[Cluster/Agents] Corrected agent URL from link-local to socket origin: ${url}`);
+            logger.info(`[Cluster/Agents] Corrected agent URL from link-local/loopback to verified socket origin: ${url}`);
         }
     }
 
