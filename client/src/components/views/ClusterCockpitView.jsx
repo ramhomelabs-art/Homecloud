@@ -619,7 +619,7 @@ export default function ClusterCockpitView({
                                         </div>
                                         <div>
                                             <div style={{ fontSize: '15px', fontWeight: '800', color: 'var(--text-primary)', letterSpacing: '-0.2px' }}>
-                                                Real-Time WAN Network Throughput
+                                                Network I/O Throughput
                                             </div>
                                             <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
                                                 Live network traffic (Download / Upload)
@@ -832,31 +832,6 @@ export default function ClusterCockpitView({
                                             </div>
                                         </div>
                                     )}
-                                </div>
-
-                                {/* Footer Measurement Calculation Bar */}
-                                <div style={{ 
-                                    display: 'flex', 
-                                    justifyContent: 'space-between', 
-                                    alignItems: 'center', 
-                                    flexWrap: 'wrap', 
-                                    gap: '10px', 
-                                    fontSize: '11px', 
-                                    color: 'var(--text-secondary)', 
-                                    borderTop: '1px solid var(--border-subtle)', 
-                                    paddingTop: '10px',
-                                    marginTop: '2px'
-                                }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                        <span style={{ fontWeight: '800', color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                                            Calculation:
-                                        </span>
-                                        <span>Throughput (MB/s) = (Δ Bytes ÷ 2.0s Interval) ÷ 1,048,576</span>
-                                    </div>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontWeight: '700' }}>
-                                        <span>Rolling Buffer: 30 Samples (60s)</span>
-                                        <span>Peak: ↓ {peakRx.toFixed(1)} MB/s | ↑ {peakTx.toFixed(1)} MB/s</span>
-                                    </div>
                                 </div>
                             </div>
                         );
