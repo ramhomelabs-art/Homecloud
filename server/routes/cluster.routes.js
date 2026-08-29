@@ -45,10 +45,20 @@ const MNT_BASE = getMountBase();
 
 // Agent autonomous registration endpoint (Zero-Trust HMAC & Keyed)
 agentsRouter.post('/register', async (req, res) => {
-    const { id, hostname, url, key, disks, timestamp, nonce, signature } = req.body;
+    let { id, hostname, url, key, disks, timestamp, nonce, signature } = req.body;
 
     if (!id || !hostname || !url) {
         return res.status(400).json({ error: 'Agent ID, hostname, and URL are required' });
+    }
+
+    // Auto-detect and fix APIPA / link-local / 169.254.x.x addresses with real incoming socket IP
+    const callerIp = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim().replace(/^.*:/, '');
+    if (url.includes('169.254.') || url.includes('127.0.0.1')) {
+        if (callerIp && !callerIp.startsWith('127.') && callerIp !== '::1') {
+            const port = url.split(':').pop() || '5001';
+            url = `http://${callerIp}:${port}`;
+            logger.info(`[Cluster/Agents] Corrected agent URL from link-local to socket origin: ${url}`);
+        }
     }
 
     try {
@@ -62,6 +72,7 @@ agentsRouter.post('/register', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+
 
 // Manual Direct Connect (Portainer-style Agent Pairing)
 agentsRouter.post('/manual-connect', authenticateToken, requireRole(['Admin', 'Operator']), async (req, res) => {

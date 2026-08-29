@@ -172,18 +172,51 @@ const upload = multer({ storage });
 // Active ZIP/Archive Operations Tracking
 const activeOps = {};
 
-// Helper: Get first non-loopback IPv4 address
+// Helper: Smart discovery of physical LAN IPv4 address (excluding virtual/APIPA adapters)
 const getLocalIP = () => {
     const nets = os.networkInterfaces();
+    let masterSubnet = '';
+    try {
+        if (MASTER_URL) {
+            const urlObj = new URL(MASTER_URL);
+            const host = urlObj.hostname;
+            if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
+                masterSubnet = host.substring(0, host.lastIndexOf('.'));
+            }
+        }
+    } catch (e) {}
+
+    const candidates = [];
+
     for (const name of Object.keys(nets)) {
+        const isVirtual = /vethernet|wsl|virtualbox|vmware|docker|loopback|tap|vpn/i.test(name);
         for (const net of nets[name]) {
             if (net.family === 'IPv4' && !net.internal) {
-                return net.address;
+                const addr = net.address;
+                // Exclude link-local / APIPA (169.254.x.x) and loopback
+                if (addr.startsWith('169.254.') || addr.startsWith('127.')) continue;
+
+                let score = 10;
+                // Prioritize subnet matching Master URL
+                if (masterSubnet && addr.startsWith(masterSubnet)) score += 100;
+                // Prioritize standard private IP ranges
+                if (addr.startsWith('10.') || addr.startsWith('192.168.') || /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(addr)) score += 30;
+                // Penalize virtual adapters
+                if (isVirtual) score -= 50;
+
+                candidates.push({ address: addr, score, name });
             }
         }
     }
+
+    if (candidates.length > 0) {
+        candidates.sort((a, b) => b.score - a.score);
+        return candidates[0].address;
+    }
+
     return '127.0.0.1';
 };
+
 
 // Helper: Calculate CPU usage from OS ticks
 let lastCPU = { idle: 0, total: 0 };
