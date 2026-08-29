@@ -27,11 +27,12 @@ logs/
 *.log
 
 # Build Caches & Bundles
-client/dist/
-dist/
+/dist/
 build/
 .vite/
 *.tsbuildinfo
+!client/dist
+!client/dist/**
 coverage/
 .nyc_output/
 
