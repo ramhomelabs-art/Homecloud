@@ -417,7 +417,108 @@ export default function FileExplorerView({
                 </div>
             )}
 
-            <div className="explorer-body">
+            <div className="explorer-body" style={{ minHeight: '440px', position: 'relative' }}>
+                {loading ? (
+                    <div style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        minHeight: '440px',
+                        width: '100%',
+                        padding: '60px 20px',
+                        boxSizing: 'border-box'
+                    }}>
+                        <div style={{ position: 'relative', width: '100px', height: '100px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <div style={{
+                                position: 'absolute',
+                                width: '120px',
+                                height: '120px',
+                                borderRadius: '50%',
+                                background: 'radial-gradient(circle, rgba(242, 201, 76, 0.25) 0%, rgba(242, 201, 76, 0) 70%)'
+                            }} />
+                            <motion.div
+                                animate={{ rotate: 360 }}
+                                transition={{ repeat: Infinity, duration: 2.5, ease: 'linear' }}
+                                style={{
+                                    position: 'absolute',
+                                    width: '90px',
+                                    height: '90px',
+                                    borderRadius: '50%',
+                                    border: '2px dashed var(--accent-gold)',
+                                    borderTopColor: 'transparent',
+                                    borderBottomColor: 'transparent',
+                                    opacity: 0.8
+                                }}
+                            />
+                            <motion.div
+                                animate={{ rotate: -360 }}
+                                transition={{ repeat: Infinity, duration: 1.8, ease: 'linear' }}
+                                style={{
+                                    position: 'absolute',
+                                    width: '68px',
+                                    height: '68px',
+                                    borderRadius: '50%',
+                                    border: '2px solid var(--accent-cyan)',
+                                    borderLeftColor: 'transparent',
+                                    borderRightColor: 'transparent',
+                                    opacity: 0.6
+                                }}
+                            />
+                            <motion.div
+                                animate={{ scale: [0.95, 1.05, 0.95] }}
+                                transition={{ repeat: Infinity, duration: 2, ease: 'easeInOut' }}
+                                style={{
+                                    width: '52px',
+                                    height: '52px',
+                                    borderRadius: '16px',
+                                    background: 'linear-gradient(135deg, rgba(242, 201, 76, 0.2), rgba(0, 210, 255, 0.15))',
+                                    backdropFilter: 'blur(8px)',
+                                    border: '1px solid rgba(242, 201, 76, 0.4)',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    boxShadow: '0 0 20px rgba(242, 201, 76, 0.25)'
+                                }}
+                            >
+                                <HardDrive size={26} color="var(--accent-gold)" />
+                            </motion.div>
+                        </div>
+                        <div style={{ marginTop: '24px', textAlign: 'center' }}>
+                            <div style={{
+                                fontSize: '14px',
+                                fontWeight: '800',
+                                letterSpacing: '0.08em',
+                                textTransform: 'uppercase',
+                                color: 'var(--text-primary)',
+                                marginBottom: '6px'
+                            }}>
+                                Accessing Drive Contents
+                            </div>
+                            <div style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                padding: '3px 12px',
+                                borderRadius: '20px',
+                                background: 'rgba(242, 201, 76, 0.1)',
+                                border: '1px solid rgba(242, 201, 76, 0.25)',
+                                fontSize: '11px',
+                                fontWeight: '700',
+                                color: 'var(--accent-gold)',
+                                letterSpacing: '0.05em'
+                            }}>
+                                <motion.span
+                                    animate={{ opacity: [0.4, 1, 0.4] }}
+                                    transition={{ repeat: Infinity, duration: 1.2, ease: 'easeInOut' }}
+                                >
+                                    ●
+                                </motion.span>
+                                Loading...
+                            </div>
+                        </div>
+                    </div>
+                ) : (
                 <div className={`file-row-grid ${
                     explorerMode === 'devices' ? 'devices-grid' : 
                     explorerMode === 'partitions' ? 'partitions-grid' : 
@@ -482,7 +583,7 @@ export default function FileExplorerView({
                                     if (validPath.startsWith('\\\\') && validPath.split('\\').length <= 3) {
                                         validPath = validPath.includes('/') ? '/' : root;
                                     }
-                                    navigateTo(validPath, 'files');
+                                    navigateTo(validPath, 'files', selectedDevice);
                                 }}>
                                     {part.type === 'network' ? (
                                         <Globe size={56} color="var(--accent-cyan)" />
@@ -609,96 +710,6 @@ export default function FileExplorerView({
                                                     </div>
                                                 ))}
                                             </div>
-                                        </div>
-                                    )}
-                                </div>
-                            ) : loading ? (
-                                <div style={{ width: '100%', gridColumn: '1/-1', padding: '10px 0' }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px' }}>
-                                        <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}>
-                                            <RefreshCw size={15} color="var(--accent-gold)" />
-                                        </motion.div>
-                                        <span style={{ fontSize: '12px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.6px', color: 'var(--accent-gold)' }}>
-                                            Loading Drive Contents...
-                                        </span>
-                                    </div>
-
-                                    {viewMode === 'list' ? (
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
-                                            {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
-                                                <motion.div
-                                                    key={`skel-row-${n}`}
-                                                    initial={{ opacity: 0.4 }}
-                                                    animate={{ opacity: [0.4, 0.85, 0.4] }}
-                                                    transition={{ repeat: Infinity, duration: 1.4, delay: n * 0.08 }}
-                                                    style={{
-                                                        height: '46px',
-                                                        background: 'var(--bg-surface-0, #ffffff)',
-                                                        border: '1px solid var(--border-subtle)',
-                                                        borderRadius: '10px',
-                                                        display: 'flex',
-                                                        alignItems: 'center',
-                                                        padding: '0 16px',
-                                                        gap: '16px'
-                                                    }}
-                                                >
-                                                    <div style={{ width: '20px', height: '20px', borderRadius: '4px', background: 'rgba(255, 170, 0, 0.15)' }} />
-                                                    <div style={{ width: '30%', height: '14px', borderRadius: '4px', background: 'var(--bg-surface-2, rgba(0,0,0,0.06))' }} />
-                                                    <div style={{ width: '15%', height: '12px', borderRadius: '4px', background: 'var(--bg-surface-2, rgba(0,0,0,0.04))', marginLeft: 'auto' }} />
-                                                    <div style={{ width: '15%', height: '12px', borderRadius: '4px', background: 'var(--bg-surface-2, rgba(0,0,0,0.04))' }} />
-                                                </motion.div>
-                                            ))}
-                                        </div>
-                                    ) : (
-                                        <div className="grid-shelf" style={{ width: '100%' }}>
-                                            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((n) => (
-                                                <motion.div
-                                                    key={`skel-${n}`}
-                                                    initial={{ opacity: 0.4 }}
-                                                    animate={{ opacity: [0.4, 0.85, 0.4] }}
-                                                    transition={{ repeat: Infinity, duration: 1.4, delay: n * 0.08 }}
-                                                    className="file-card"
-                                                    style={{
-                                                        background: 'var(--bg-surface-0, #ffffff)',
-                                                        border: '1px solid var(--border-subtle)',
-                                                        borderRadius: '16px',
-                                                        padding: '24px 16px',
-                                                        display: 'flex',
-                                                        flexDirection: 'column',
-                                                        alignItems: 'center',
-                                                        justifyContent: 'center',
-                                                        minHeight: '160px',
-                                                        boxShadow: '0 4px 16px rgba(0,0,0,0.03)'
-                                                    }}
-                                                >
-                                                    <div
-                                                        style={{
-                                                            width: '56px',
-                                                            height: '46px',
-                                                            borderRadius: '12px',
-                                                            background: 'rgba(255, 170, 0, 0.12)',
-                                                            marginBottom: '16px'
-                                                        }}
-                                                    />
-                                                    <div
-                                                        style={{
-                                                            width: '65%',
-                                                            height: '14px',
-                                                            borderRadius: '6px',
-                                                            background: 'var(--bg-surface-2, rgba(0,0,0,0.06))',
-                                                            marginBottom: '8px'
-                                                        }}
-                                                    />
-                                                    <div
-                                                        style={{
-                                                            width: '40%',
-                                                            height: '10px',
-                                                            borderRadius: '4px',
-                                                            background: 'var(--bg-surface-2, rgba(0,0,0,0.04))'
-                                                        }}
-                                                    />
-                                                </motion.div>
-                                            ))}
                                         </div>
                                     )}
                                 </div>
@@ -863,8 +874,8 @@ export default function FileExplorerView({
                                 </>
                             )}
                         </>
-                    )}
                 </div>
+            )}
 
                 <AnimatePresence>
                     {inspectorOpen && (
