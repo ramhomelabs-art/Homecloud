@@ -492,129 +492,375 @@ export default function ClusterCockpitView({
                             position: 'relative'
                         }}
                     >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                <div style={{ 
-                                    width: '32px', 
-                                    height: '32px', 
-                                    borderRadius: '8px', 
-                                    background: 'rgba(0, 242, 255, 0.1)', 
-                                    display: 'flex', 
-                                    alignItems: 'center', 
-                                    justifyContent: 'center',
-                                    border: '1px solid rgba(0, 242, 255, 0.25)'
-                                }}>
-                                    <Activity size={16} color="var(--accent-cyan)" />
-                                </div>
-                                <div>
-                                    <span style={{ fontSize: '15px', fontWeight: '850', color: 'var(--text-primary)', letterSpacing: '-0.3px' }}>
-                                        Real-Time I/O & Network Throughput
-                                    </span>
-                                    <p style={{ margin: 0, fontSize: '11px', color: 'var(--text-secondary)' }}>Live cluster socket bandwidth and DMA throughput stream</p>
-                                </div>
-                            </div>
+                    {/* Single Combined Real-Time Area Chart */}
+                    {(() => {
+                        const maxRaw = Math.max(...netHistory.map(d => Math.max(d.rx || 0, d.tx || 0)), 0.2);
+                        let maxScale = 5;
+                        if (maxRaw <= 0.5) maxScale = 0.5;
+                        else if (maxRaw <= 1) maxScale = 1;
+                        else if (maxRaw <= 2) maxScale = 2;
+                        else if (maxRaw <= 5) maxScale = 5;
+                        else if (maxRaw <= 10) maxScale = 10;
+                        else if (maxRaw <= 25) maxScale = 25;
+                        else if (maxRaw <= 50) maxScale = 50;
+                        else if (maxRaw <= 100) maxScale = 100;
+                        else if (maxRaw <= 200) maxScale = 200;
+                        else maxScale = Math.ceil(maxRaw / 50) * 50;
 
-                            <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11.5px', fontWeight: '700' }}>
-                                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--accent-cyan)', boxShadow: '0 0 8px var(--accent-cyan)' }} />
-                                    <span style={{ color: 'var(--text-secondary)' }}>Down:</span>
-                                    <strong style={{ color: 'var(--text-primary)' }}>{(netHistory[netHistory.length - 1]?.rx || 0.0).toFixed(1)} MB/s</strong>
-                                </div>
+                        const width = 680;
+                        const height = 180;
+                        const padL = 65;
+                        const padR = 15;
+                        const padT = 15;
+                        const padB = 26;
+                        const plotW = width - padL - padR;
+                        const plotH = height - padT - padB;
+                        const baseZeroY = padT + plotH;
 
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11.5px', fontWeight: '700' }}>
-                                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--accent-gold)', boxShadow: '0 0 8px var(--accent-gold)' }} />
-                                    <span style={{ color: 'var(--text-secondary)' }}>Up:</span>
-                                    <strong style={{ color: 'var(--text-primary)' }}>{(netHistory[netHistory.length - 1]?.tx || 0.0).toFixed(1)} MB/s</strong>
-                                </div>
-                            </div>
-                        </div>
+                        const numPoints = netHistory.length;
+                        const divisor = Math.max(1, numPoints - 1);
 
-                        {/* Interactive Wave SVG Canvas */}
-                        <div 
-                            style={{ 
-                                position: 'relative', 
-                                width: '100%', 
-                                height: `${svgHeight + 10}px`, 
-                                background: 'var(--bg-surface-2)', 
-                                borderRadius: '12px', 
-                                overflow: 'hidden', 
-                                border: '1px solid var(--border-subtle)' 
-                            }}
-                            onMouseMove={(e) => {
-                                const rect = e.currentTarget.getBoundingClientRect();
-                                const mouseX = e.clientX - rect.left;
-                                const index = Math.round((mouseX / rect.width) * (netHistory.length - 1));
-                                const clampedIndex = Math.min(netHistory.length - 1, Math.max(0, index));
-                                setHoveredDataPoint(netHistory[clampedIndex]);
-                            }}
-                            onMouseLeave={() => setHoveredDataPoint(null)}
-                        >
-                            <svg viewBox={`0 0 ${svgWidth} ${svgHeight + 10}`} preserveAspectRatio="none" style={{ width: '100%', height: '100%', display: 'block' }}>
-                                <defs>
-                                    <linearGradient id="cyberRxGrad" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="0%" stopColor="#00f2ff" stopOpacity="0.35" />
-                                        <stop offset="100%" stopColor="#00f2ff" stopOpacity="0.02" />
-                                    </linearGradient>
-                                    <linearGradient id="cyberTxGrad" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="0%" stopColor="#f2c94c" stopOpacity="0.35" />
-                                        <stop offset="100%" stopColor="#f2c94c" stopOpacity="0.02" />
-                                    </linearGradient>
-                                </defs>
+                        // Generate plotting coordinates
+                        const rxPlotPts = netHistory.map((d, i) => {
+                            const x = padL + (i / divisor) * plotW;
+                            const y = padT + plotH - ((d.rx || 0) / maxScale) * plotH;
+                            return { x, y, val: d.rx, d, i };
+                        });
 
-                                {/* Y-Axis Grid Lines & Measurement Scale Labels */}
-                                <line x1="0" y1={svgHeight + 10 - padBot} x2={svgWidth} y2={svgHeight + 10 - padBot} stroke="var(--border-subtle)" strokeWidth="1" />
-                                <text x="12" y={svgHeight + 10 - padBot - 4} fill="var(--text-secondary)" fontSize="9.5" fontWeight="700" fontFamily="monospace">0.0 MB/s</text>
+                        const txPlotPts = netHistory.map((d, i) => {
+                            const x = padL + (i / divisor) * plotW;
+                            const y = padT + plotH - ((d.tx || 0) / maxScale) * plotH;
+                            return { x, y, val: d.tx, d, i };
+                        });
 
-                                <line x1="0" y1={(svgHeight + 10) / 2} x2={svgWidth} y2={(svgHeight + 10) / 2} stroke="var(--border-subtle)" strokeWidth="1" strokeDasharray="4,4" opacity="0.6" />
-                                <text x="12" y={((svgHeight + 10) / 2) - 4} fill="var(--text-secondary)" fontSize="9.5" fontWeight="700" fontFamily="monospace">{(netMaxVal / 2).toFixed(1)} MB/s</text>
+                        // Smooth Catmull-Rom to Cubic Bezier curve path
+                        const buildSmoothCurve = (pts) => {
+                            if (!pts || pts.length === 0) return '';
+                            if (pts.length === 1) return `M ${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
+                            let p = `M ${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
+                            for (let i = 0; i < pts.length - 1; i++) {
+                                const p0 = i > 0 ? pts[i - 1] : pts[i];
+                                const p1 = pts[i];
+                                const p2 = pts[i + 1];
+                                const p3 = i < pts.length - 2 ? pts[i + 2] : p2;
 
-                                <line x1="0" y1={padTop} x2={svgWidth} y2={padTop} stroke="var(--border-subtle)" strokeWidth="1" strokeDasharray="4,4" opacity="0.6" />
-                                <text x="12" y={padTop + 10} fill="var(--text-secondary)" fontSize="9.5" fontWeight="700" fontFamily="monospace">{netMaxVal.toFixed(1)} MB/s</text>
+                                const cp1x = p1.x + (p2.x - p0.x) / 6;
+                                const cp1y = p1.y + (p2.y - p0.y) / 6;
+                                const cp2x = p2.x - (p3.x - p1.x) / 6;
+                                const cp2y = p2.y - (p3.y - p1.y) / 6;
 
-                                {/* Area Fills */}
-                                <motion.path d={rxArea} fill="url(#cyberRxGrad)" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.5 }} />
-                                <motion.path d={txArea} fill="url(#cyberTxGrad)" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.5 }} />
+                                p += ` C ${cp1x.toFixed(1)},${cp1y.toFixed(1)} ${cp2x.toFixed(1)},${cp2y.toFixed(1)} ${p2.x.toFixed(1)},${p2.y.toFixed(1)}`;
+                            }
+                            return p;
+                        };
 
-                                {/* Bezier Curves */}
-                                <motion.path d={rxLine} fill="none" stroke="#00f2ff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-                                <motion.path d={txLine} fill="none" stroke="#f2c94c" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-                            </svg>
+                        const rxCurve = buildSmoothCurve(rxPlotPts);
+                        const rxFilledArea = rxPlotPts.length > 0
+                            ? `${rxCurve} L ${rxPlotPts[rxPlotPts.length - 1].x.toFixed(1)},${baseZeroY} L ${padL},${baseZeroY} Z`
+                            : '';
 
-                            {/* Scrubber Tooltip */}
-                            {hoveredDataPoint && (
-                                <div style={{
-                                    position: 'absolute',
-                                    top: '10px',
-                                    right: '14px',
-                                    background: 'var(--bg-surface-0)',
-                                    backdropFilter: 'blur(12px)',
+                        const txCurve = buildSmoothCurve(txPlotPts);
+                        const txFilledArea = txPlotPts.length > 0
+                            ? `${txCurve} L ${txPlotPts[txPlotPts.length - 1].x.toFixed(1)},${baseZeroY} L ${padL},${baseZeroY} Z`
+                            : '';
+
+                        // Y-axis grid ticks (4 levels)
+                        const yTicks = [
+                            { label: `${maxScale >= 1 ? maxScale.toFixed(0) : maxScale.toFixed(1)} MB/s`, y: padT },
+                            { label: `${(maxScale * 0.75) >= 1 ? (maxScale * 0.75).toFixed(0) : (maxScale * 0.75).toFixed(1)} MB/s`, y: padT + plotH * 0.25 },
+                            { label: `${(maxScale * 0.5) >= 1 ? (maxScale * 0.5).toFixed(0) : (maxScale * 0.5).toFixed(1)} MB/s`, y: padT + plotH * 0.5 },
+                            { label: `${(maxScale * 0.25) >= 1 ? (maxScale * 0.25).toFixed(0) : (maxScale * 0.25).toFixed(1)} MB/s`, y: padT + plotH * 0.75 },
+                            { label: `0 MB/s`, y: baseZeroY }
+                        ];
+
+                        // X-axis time ticks (6-8 intervals)
+                        const timeIntervalCount = 6;
+                        const xTicks = Array.from({ length: timeIntervalCount + 1 }, (_, idx) => {
+                            const sampleIdx = Math.round((idx / timeIntervalCount) * (numPoints - 1));
+                            const pt = rxPlotPts[sampleIdx] || { x: padL + (idx / timeIntervalCount) * plotW };
+                            const ts = netHistory[sampleIdx]?.timestamp || (Date.now() - (numPoints - 1 - sampleIdx) * 2000);
+                            const timeStr = new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                            return { x: pt.x, label: timeStr };
+                        });
+
+                        const curRx = netHistory[netHistory.length - 1]?.rx || 0.0;
+                        const curTx = netHistory[netHistory.length - 1]?.tx || 0.0;
+                        const peakRx = Math.max(...netHistory.map(d => d.rx || 0), 0);
+                        const peakTx = Math.max(...netHistory.map(d => d.tx || 0), 0);
+
+                        return (
+                            <div 
+                                className="st-card shadow-premium"
+                                style={{
+                                    background: 'var(--bg-surface-0, #ffffff)',
                                     border: '1px solid var(--border-subtle)',
-                                    borderRadius: '8px',
-                                    padding: '6px 12px',
-                                    fontSize: '11px',
-                                    fontWeight: '700',
+                                    borderRadius: '16px',
+                                    padding: '20px 24px',
                                     display: 'flex',
+                                    flexDirection: 'column',
                                     gap: '12px',
-                                    boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
-                                    pointerEvents: 'none'
-                                }}>
-                                    <span style={{ color: 'var(--accent-cyan)' }}>↓ {hoveredDataPoint.rx.toFixed(2)} MB/s</span>
-                                    <span style={{ color: 'var(--accent-gold)' }}>↑ {hoveredDataPoint.tx.toFixed(2)} MB/s</span>
-                                </div>
-                            )}
-                        </div>
+                                    boxShadow: '0 4px 20px rgba(0, 0, 0, 0.04)'
+                                }}
+                            >
+                                {/* Header */}
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                        <div style={{ 
+                                            width: '36px', 
+                                            height: '36px', 
+                                            borderRadius: '10px', 
+                                            background: 'linear-gradient(135deg, #0ea5e9, #0284c7)', 
+                                            display: 'flex', 
+                                            alignItems: 'center', 
+                                            justifyContent: 'center',
+                                            boxShadow: '0 4px 12px rgba(14, 165, 233, 0.25)'
+                                        }}>
+                                            <Activity size={18} color="#ffffff" />
+                                        </div>
+                                        <div>
+                                            <div style={{ fontSize: '15px', fontWeight: '800', color: 'var(--text-primary)', letterSpacing: '-0.2px' }}>
+                                                Real-Time WAN Network Throughput
+                                            </div>
+                                            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                                                Live network traffic (Download / Upload)
+                                            </div>
+                                        </div>
+                                    </div>
 
-                        {/* Measurement Metric & Calculation Legend */}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', fontSize: '10.5px', color: 'var(--text-secondary)', padding: '2px 4px 0' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                <span style={{ fontWeight: '800', color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.4px' }}>Calculation:</span>
-                                <span>Throughput (MB/s) = (Δ Bytes ÷ 2.0s Interval) ÷ 1,048,576</span>
+                                    {/* Legends with Live Speeds */}
+                                    <div style={{ display: 'flex', gap: '18px', alignItems: 'center' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12.5px', fontWeight: '700' }}>
+                                            <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#0ea5e9', display: 'inline-block' }} />
+                                            <span style={{ color: 'var(--text-secondary)' }}>Download:</span>
+                                            <span style={{ color: 'var(--text-primary)', fontWeight: '800' }}>{curRx.toFixed(1)} MB/s</span>
+                                        </div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12.5px', fontWeight: '700' }}>
+                                            <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#f59e0b', display: 'inline-block' }} />
+                                            <span style={{ color: 'var(--text-secondary)' }}>Upload:</span>
+                                            <span style={{ color: 'var(--text-primary)', fontWeight: '800' }}>{curTx.toFixed(1)} MB/s</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* SVG Chart Canvas */}
+                                <div 
+                                    style={{ 
+                                        position: 'relative', 
+                                        width: '100%', 
+                                        height: `${height}px`,
+                                        margin: '4px 0'
+                                    }}
+                                    onMouseMove={(e) => {
+                                        const rect = e.currentTarget.getBoundingClientRect();
+                                        const mouseX = e.clientX - rect.left;
+                                        const relativeX = Math.max(0, Math.min(plotW, (mouseX / rect.width) * width - padL));
+                                        const idx = Math.round((relativeX / plotW) * (numPoints - 1));
+                                        const clamped = Math.min(numPoints - 1, Math.max(0, idx));
+                                        setHoveredDataPoint({ ...netHistory[clamped], index: clamped, plotX: rxPlotPts[clamped]?.x || mouseX });
+                                    }}
+                                    onMouseLeave={() => setHoveredDataPoint(null)}
+                                >
+                                    <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" style={{ width: '100%', height: '100%', display: 'block' }}>
+                                        <defs>
+                                            {/* Download Area Gradient (Blue/Cyan) */}
+                                            <linearGradient id="areaGradDownload" x1="0" y1="0" x2="0" y2="1">
+                                                <stop offset="0%" stopColor="#0ea5e9" stopOpacity="0.45" />
+                                                <stop offset="100%" stopColor="#0ea5e9" stopOpacity="0.08" />
+                                            </linearGradient>
+                                            
+                                            {/* Upload Area Gradient (Amber/Orange) */}
+                                            <linearGradient id="areaGradUpload" x1="0" y1="0" x2="0" y2="1">
+                                                <stop offset="0%" stopColor="#f59e0b" stopOpacity="0.65" />
+                                                <stop offset="100%" stopColor="#f59e0b" stopOpacity="0.15" />
+                                            </linearGradient>
+                                        </defs>
+
+                                        {/* Horizontal Gridlines & Y-Axis Labels */}
+                                        {yTicks.map((tick, i) => (
+                                            <g key={`y-${i}`}>
+                                                <line 
+                                                    x1={padL} 
+                                                    y1={tick.y} 
+                                                    x2={padL + plotW} 
+                                                    y2={tick.y} 
+                                                    stroke="var(--border-subtle, rgba(0,0,0,0.06))" 
+                                                    strokeWidth={i === yTicks.length - 1 ? "1.5" : "1"} 
+                                                    opacity={i === yTicks.length - 1 ? 1 : 0.6}
+                                                />
+                                                <text 
+                                                    x={padL - 10} 
+                                                    y={tick.y + 3.5} 
+                                                    textAnchor="end" 
+                                                    fill="var(--text-secondary, #64748b)" 
+                                                    fontSize="10.5" 
+                                                    fontWeight="600" 
+                                                    fontFamily="system-ui, -apple-system, sans-serif"
+                                                >
+                                                    {tick.label}
+                                                </text>
+                                            </g>
+                                        ))}
+
+                                        {/* Y-Axis Vertical Line */}
+                                        <line 
+                                            x1={padL} 
+                                            y1={padT} 
+                                            x2={padL} 
+                                            y2={baseZeroY} 
+                                            stroke="var(--border-subtle, rgba(0,0,0,0.12))" 
+                                            strokeWidth="1.2" 
+                                        />
+
+                                        {/* Vertical Time Gridlines & X-Axis Labels */}
+                                        {xTicks.map((xt, i) => (
+                                            <g key={`x-${i}`}>
+                                                <line 
+                                                    x1={xt.x} 
+                                                    y1={padT} 
+                                                    x2={xt.x} 
+                                                    y2={baseZeroY} 
+                                                    stroke="var(--border-subtle, rgba(0,0,0,0.04))" 
+                                                    strokeWidth="1" 
+                                                    opacity="0.5"
+                                                />
+                                                <line 
+                                                    x1={xt.x} 
+                                                    y1={baseZeroY} 
+                                                    x2={xt.x} 
+                                                    y2={baseZeroY + 4} 
+                                                    stroke="var(--border-subtle, rgba(0,0,0,0.2))" 
+                                                    strokeWidth="1" 
+                                                />
+                                                <text 
+                                                    x={xt.x} 
+                                                    y={height - 8} 
+                                                    textAnchor={i === 0 ? "start" : (i === xTicks.length - 1 ? "end" : "middle")} 
+                                                    fill="var(--text-secondary, #64748b)" 
+                                                    fontSize="10" 
+                                                    fontWeight="600" 
+                                                    fontFamily="system-ui, -apple-system, sans-serif"
+                                                >
+                                                    {xt.label}
+                                                </text>
+                                            </g>
+                                        ))}
+
+                                        {/* Series 1: Download Filled Area & Curve (Rendered first) */}
+                                        {rxFilledArea && (
+                                            <motion.path 
+                                                d={rxFilledArea} 
+                                                fill="url(#areaGradDownload)" 
+                                                initial={{ opacity: 0 }} 
+                                                animate={{ opacity: 1 }} 
+                                                transition={{ duration: 0.4 }} 
+                                            />
+                                        )}
+                                        {rxCurve && (
+                                            <motion.path 
+                                                d={rxCurve} 
+                                                fill="none" 
+                                                stroke="#0ea5e9" 
+                                                strokeWidth="2.8" 
+                                                strokeLinecap="round" 
+                                                strokeLinejoin="round" 
+                                            />
+                                        )}
+
+                                        {/* Series 2: Upload Filled Area & Curve (Rendered over download) */}
+                                        {txFilledArea && (
+                                            <motion.path 
+                                                d={txFilledArea} 
+                                                fill="url(#areaGradUpload)" 
+                                                initial={{ opacity: 0 }} 
+                                                animate={{ opacity: 1 }} 
+                                                transition={{ duration: 0.4 }} 
+                                            />
+                                        )}
+                                        {txCurve && (
+                                            <motion.path 
+                                                d={txCurve} 
+                                                fill="none" 
+                                                stroke="#f59e0b" 
+                                                strokeWidth="2.8" 
+                                                strokeLinecap="round" 
+                                                strokeLinejoin="round" 
+                                            />
+                                        )}
+
+                                        {/* Vertical Hover Crosshair */}
+                                        {hoveredDataPoint && (
+                                            <line 
+                                                x1={hoveredDataPoint.plotX || (padL + (hoveredDataPoint.index / divisor) * plotW)} 
+                                                y1={padT} 
+                                                x2={hoveredDataPoint.plotX || (padL + (hoveredDataPoint.index / divisor) * plotW)} 
+                                                y2={baseZeroY} 
+                                                stroke="#64748b" 
+                                                strokeWidth="1.5" 
+                                                strokeDasharray="3,3" 
+                                            />
+                                        )}
+                                    </svg>
+
+                                    {/* Clean Hover Tooltip */}
+                                    {hoveredDataPoint && (
+                                        <div style={{
+                                            position: 'absolute',
+                                            top: '12px',
+                                            right: '16px',
+                                            background: 'var(--bg-surface-0, #ffffff)',
+                                            border: '1px solid var(--border-subtle)',
+                                            borderRadius: '8px',
+                                            padding: '8px 14px',
+                                            fontSize: '11px',
+                                            boxShadow: '0 6px 16px rgba(0, 0, 0, 0.12)',
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            gap: '3px',
+                                            pointerEvents: 'none',
+                                            zIndex: 10
+                                        }}>
+                                            <div style={{ fontWeight: '750', color: 'var(--text-secondary)', marginBottom: '2px' }}>
+                                                Time: {new Date(hoveredDataPoint.timestamp || Date.now()).toLocaleTimeString()}
+                                            </div>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#0ea5e9', fontWeight: '800' }}>
+                                                <span>● Download:</span>
+                                                <span>{(hoveredDataPoint.rx || 0).toFixed(1)} MB/s</span>
+                                            </div>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#f59e0b', fontWeight: '800' }}>
+                                                <span>● Upload:</span>
+                                                <span>{(hoveredDataPoint.tx || 0).toFixed(1)} MB/s</span>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Footer Measurement Calculation Bar */}
+                                <div style={{ 
+                                    display: 'flex', 
+                                    justifyContent: 'space-between', 
+                                    alignItems: 'center', 
+                                    flexWrap: 'wrap', 
+                                    gap: '10px', 
+                                    fontSize: '11px', 
+                                    color: 'var(--text-secondary)', 
+                                    borderTop: '1px solid var(--border-subtle)', 
+                                    paddingTop: '10px',
+                                    marginTop: '2px'
+                                }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                        <span style={{ fontWeight: '800', color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                            Calculation:
+                                        </span>
+                                        <span>Throughput (MB/s) = (Δ Bytes ÷ 2.0s Interval) ÷ 1,048,576</span>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontWeight: '700' }}>
+                                        <span>Rolling Buffer: 30 Samples (60s)</span>
+                                        <span>Peak: ↓ {peakRx.toFixed(1)} MB/s | ↑ {peakTx.toFixed(1)} MB/s</span>
+                                    </div>
+                                </div>
                             </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontWeight: '700' }}>
-                                <span>Rolling Buffer: 30 Samples (60s)</span>
-                                <span>Peak: ↓ {Math.max(...netHistory.map(d => d.rx), 0).toFixed(1)} MB/s | ↑ {Math.max(...netHistory.map(d => d.tx), 0).toFixed(1)} MB/s</span>
-                            </div>
-                        </div>
+                        );
+                    })()}
                     </div>
 
                     {/* Mounted Storage Allocations Section */}
