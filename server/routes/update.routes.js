@@ -93,4 +93,19 @@ router.post('/config', authenticateToken, requireRole(['Admin']), async (req, re
     }
 });
 
+// Restart Server after update
+router.post('/restart', authenticateToken, requireRole(['Admin']), async (req, res) => {
+    try {
+        logger.info(`[OTA Update] Server restart triggered by ${req.user?.username || 'admin'}`);
+        res.json({ success: true, message: 'Server restart initiated. NexaDisk will reload shortly.' });
+
+        setTimeout(() => {
+            logger.info('[System Restart] Exiting process to allow service manager / container auto-restart...');
+            process.exit(0);
+        }, 1200);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 module.exports = router;

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import {
     Sparkles, ShieldCheck, RefreshCw, AlertTriangle, CheckCircle2, RotateCcw,
-    X, Server, Check, ArrowUpRight, Terminal, Cpu, Clock, Layers
+    X, Server, Check, ArrowUpRight, Terminal, Cpu, Clock, Layers, Power
 } from 'lucide-react';
 
 import ConfirmModal from './ConfirmModal';
@@ -17,6 +17,8 @@ const ClusterUpdateModal = ({ show, onClose, showToast }) => {
     const [updating, setUpdating] = useState(false);
     const [logs, setLogs] = useState([]);
     const [updateSuccess, setUpdateSuccess] = useState(false);
+    const [restarting, setRestarting] = useState(false);
+    const [restartCountdown, setRestartCountdown] = useState(null);
 
     // In-UI Confirmation Modal States
     const [confirmDeployShow, setConfirmDeployShow] = useState(false);
@@ -24,6 +26,9 @@ const ClusterUpdateModal = ({ show, onClose, showToast }) => {
 
     useEffect(() => {
         if (show) {
+            setUpdateSuccess(false);
+            setRestarting(false);
+            setRestartCountdown(null);
             fetchUpdateData();
         }
     }, [show, channel]);
@@ -92,6 +97,32 @@ const ClusterUpdateModal = ({ show, onClose, showToast }) => {
             clearInterval(pollInterval);
             setUpdating(false);
         }
+    };
+
+    const handleRestartServer = async () => {
+        setRestarting(true);
+        setRestartCountdown(5);
+        const token = localStorage.getItem('token') || '';
+        const headers = { Authorization: `Bearer ${token}` };
+
+        try {
+            await axios.post(`${API_BASE}/v1/updates/restart`, {}, { headers });
+            if (showToast) showToast('Restart initiated. System is rebooting...', 'info');
+        } catch (_) {
+            try {
+                await axios.post(`${API_BASE}/v1/system/restart`, {}, { headers });
+            } catch (e) {}
+        }
+
+        let count = 5;
+        const timer = setInterval(() => {
+            count -= 1;
+            setRestartCountdown(count);
+            if (count <= 0) {
+                clearInterval(timer);
+                window.location.reload();
+            }
+        }, 1000);
     };
 
     const handleRollback = async () => {
@@ -263,45 +294,76 @@ const ClusterUpdateModal = ({ show, onClose, showToast }) => {
                     </div>
 
                     <div style={{ display: 'flex', gap: '10px' }}>
-                        <button className="btn-outline" onClick={onClose} style={{ padding: '8px 16px', fontSize: '12px' }}>
+                        <button className="btn-outline" onClick={onClose} disabled={restarting} style={{ padding: '8px 16px', fontSize: '12px' }}>
                             Close
                         </button>
-                        <button 
-                            className={canDeploy ? "btn-primary" : "btn-secondary"} 
-                            onClick={() => setConfirmDeployShow(true)} 
-                            disabled={!canDeploy} 
-                            style={{ 
-                                padding: '8px 20px', 
-                                fontSize: '12px', 
-                                fontWeight: '800', 
-                                display: 'flex', 
-                                alignItems: 'center', 
-                                gap: '6px',
-                                opacity: canDeploy ? 1 : 0.5,
-                                cursor: canDeploy ? 'pointer' : 'not-allowed',
-                                background: canDeploy ? undefined : 'var(--bg-surface-2)',
-                                color: canDeploy ? undefined : 'var(--text-muted)',
-                                borderColor: canDeploy ? undefined : 'var(--border-subtle)'
-                            }}
-                        >
-                            {updating ? (
-                                <>
-                                    <RefreshCw size={14} className="animate-spin" /> Deploying...
-                                </>
-                            ) : loading ? (
-                                <>
-                                    <RefreshCw size={14} className="animate-spin" /> Checking Updates...
-                                </>
-                            ) : isUpdateAvailable ? (
-                                <>
-                                    <Sparkles size={14} /> Deploy v{manifest?.latestVersion} to Cluster
-                                </>
-                            ) : (
-                                <>
-                                    <CheckCircle2 size={14} color="#10b981" /> System Up to Date (v{manifest?.currentVersion || '2.4.2'})
-                                </>
-                            )}
-                        </button>
+                        {updateSuccess ? (
+                            <button 
+                                className="btn-primary" 
+                                onClick={handleRestartServer} 
+                                disabled={restarting} 
+                                style={{ 
+                                    padding: '8px 22px', 
+                                    fontSize: '12px', 
+                                    fontWeight: '800', 
+                                    display: 'flex', 
+                                    alignItems: 'center', 
+                                    gap: '8px',
+                                    background: 'linear-gradient(135deg, #10b981, #059669)',
+                                    boxShadow: '0 4px 14px rgba(16, 185, 129, 0.4)',
+                                    color: '#fff',
+                                    border: 'none',
+                                    cursor: restarting ? 'not-allowed' : 'pointer'
+                                }}
+                            >
+                                {restarting ? (
+                                    <>
+                                        <RefreshCw size={14} className="animate-spin" /> Restarting Server ({restartCountdown}s)...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Power size={14} /> Restart Server to Apply Update
+                                    </>
+                                )}
+                            </button>
+                        ) : (
+                            <button 
+                                className={canDeploy ? "btn-primary" : "btn-secondary"} 
+                                onClick={() => setConfirmDeployShow(true)} 
+                                disabled={!canDeploy} 
+                                style={{ 
+                                    padding: '8px 20px', 
+                                    fontSize: '12px', 
+                                    fontWeight: '800', 
+                                    display: 'flex', 
+                                    alignItems: 'center', 
+                                    gap: '6px',
+                                    opacity: canDeploy ? 1 : 0.5,
+                                    cursor: canDeploy ? 'pointer' : 'not-allowed',
+                                    background: canDeploy ? undefined : 'var(--bg-surface-2)',
+                                    color: canDeploy ? undefined : 'var(--text-muted)',
+                                    borderColor: canDeploy ? undefined : 'var(--border-subtle)'
+                                }}
+                            >
+                                {updating ? (
+                                    <>
+                                        <RefreshCw size={14} className="animate-spin" /> Deploying...
+                                    </>
+                                ) : loading ? (
+                                    <>
+                                        <RefreshCw size={14} className="animate-spin" /> Checking Updates...
+                                    </>
+                                ) : isUpdateAvailable ? (
+                                    <>
+                                        <Sparkles size={14} /> Deploy v{manifest?.latestVersion} to Cluster
+                                    </>
+                                ) : (
+                                    <>
+                                        <CheckCircle2 size={14} color="#10b981" /> System Up to Date (v{manifest?.currentVersion || '2.4.4'})
+                                    </>
+                                )}
+                            </button>
+                        )}
                     </div>
                 </div>
             </div>
