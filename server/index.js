@@ -345,9 +345,29 @@ const trafficService = require('./services/trafficService');
 // --- REAL-TIME INBOUND TRAFFIC INTERCEPTOR ---
 app.use((req, res, next) => {
     const start = Date.now();
+    let bytesSent = 0;
+    const origWrite = res.write;
+    const origEnd = res.end;
+
+    res.write = function (chunk, ...args) {
+        if (chunk) {
+            bytesSent += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(String(chunk));
+        }
+        return origWrite.apply(res, [chunk, ...args]);
+    };
+
+    res.end = function (chunk, ...args) {
+        if (chunk) {
+            bytesSent += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(String(chunk));
+        }
+        return origEnd.apply(res, [chunk, ...args]);
+    };
+
     res.on('finish', () => {
         const duration = Date.now() - start;
-        trafficService.recordRequest(req, res, duration);
+        const bytesIn = parseInt(req.headers['content-length'] || 0, 10);
+        const bytesOut = bytesSent || parseInt(res.getHeader('content-length') || 0, 10);
+        trafficService.recordRequest(req, res, duration, bytesIn, bytesOut);
     });
     next();
 });

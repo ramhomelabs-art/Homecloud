@@ -9,7 +9,8 @@ import {
     TrendingUp, Zap, Clock, Search, ExternalLink, Copy, Check,
     Filter, Layers, Flame, ArrowRight, CornerDownRight, X,
     Network, HardDrive, Download, Upload, FileText, Database,
-    Share2, AlertTriangle, Shield, CheckCircle2, Binary, Sliders
+    Share2, AlertTriangle, Shield, CheckCircle2, Binary, Sliders,
+    RadioTower, Cable, CpuIcon
 } from 'lucide-react';
 import ConfirmModal from '../modals/ConfirmModal';
 
@@ -39,7 +40,7 @@ const NetworkTrafficView = ({ showToast }) => {
     const [statusFilter, setStatusFilter] = useState('ALL'); // 'ALL' | '2xx' | '4xx/5xx'
 
     // Network Dashboard States
-    const [networkSubTab, setNetworkSubTab] = useState('flows'); // 'flows' | 'hosts' | 'transfers' | 'agents'
+    const [networkSubTab, setNetworkSubTab] = useState('flows'); // 'flows' | 'hosts' | 'transfers' | 'adapters' | 'agents'
     const [flowFilter, setFlowFilter] = useState('');
     const [hostSearch, setHostSearch] = useState('');
 
@@ -136,6 +137,7 @@ const NetworkTrafficView = ({ showToast }) => {
     const topTalkers = networkData?.topTalkers || [];
     const networkFlows = networkData?.networkFlows || [];
     const fileTransfers = networkData?.fileTransfers || [];
+    const osAdapters = networkData?.osAdapters || [];
     const protocols = networkData?.protocols || [];
     const agents = networkData?.agents || [];
 
@@ -199,12 +201,6 @@ const NetworkTrafficView = ({ showToast }) => {
         return Object.values(methodDistribution).reduce((a, b) => a + b, 0) || 1;
     }, [methodDistribution]);
 
-    const maxHostBandwidth = useMemo(() => {
-        if (!topTalkers.length) return 1;
-        const max = Math.max(...topTalkers.map(h => h.totalBytes || 0));
-        return max > 0 ? max : 1;
-    }, [topTalkers]);
-
     return (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '24px', padding: '10px 0' }}>
             {/* Header Title & Top-Level Dashboard Mode Switcher */}
@@ -212,12 +208,12 @@ const NetworkTrafficView = ({ showToast }) => {
                 <div>
                     <h2 style={{ fontSize: '26px', fontWeight: '800', margin: 0, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '10px' }}>
                         {viewMode === 'api' ? <Wifi size={28} color="var(--primary)" /> : <Network size={28} color="var(--accent-cyan)" />}
-                        {viewMode === 'api' ? 'Network Traffic & API Analytics' : 'ntopng Network & Deep Packet Flow Inspector'}
+                        {viewMode === 'api' ? 'Network Traffic & API Analytics' : 'Network Flow & Deep Packet Inspector'}
                     </h2>
                     <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: 'var(--text-secondary)' }}>
                         {viewMode === 'api' 
                             ? 'Real-time HTTP packet inspector, API endpoint traffic graphs, latency telemetry, and client session controls' 
-                            : 'Layer-4/7 flow analysis, host bandwidth matrices, packet captures, file sync traffic, and Wireshark inspection'}
+                            : 'Layer-4/7 flow analysis, host bandwidth matrices, physical NIC adapters, file sync traffic, and deep packet inspection'}
                     </p>
                 </div>
 
@@ -260,7 +256,7 @@ const NetworkTrafficView = ({ showToast }) => {
                                 transition: 'all 0.15s'
                             }}
                         >
-                            <Network size={15} /> Network Dashboard (ntopng)
+                            <Network size={15} /> Network Dashboard
                         </button>
                     </div>
 
@@ -288,42 +284,42 @@ const NetworkTrafficView = ({ showToast }) => {
                 <div className="glass" style={{ padding: '20px', borderRadius: '16px', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-0)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                         <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase' }}>
-                            {viewMode === 'api' ? 'Total Requests' : 'Total Network Ingress / Egress'}
+                            {viewMode === 'api' ? 'Total Requests' : 'Total Bandwidth Processed'}
                         </span>
                         <Activity size={18} color="var(--primary)" />
                     </div>
                     <span style={{ fontSize: '26px', fontWeight: '900', color: 'var(--text-primary)' }}>
-                        {viewMode === 'api' ? telemetry?.totalRequests || 0 : formatBytes(networkData?.totalBytesIn + networkData?.totalBytesOut)}
+                        {viewMode === 'api' ? telemetry?.totalRequests || 0 : formatBytes((telemetry?.bytesIn || 0) + (telemetry?.bytesOut || 0))}
                     </span>
                     <span style={{ display: 'block', fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-                        {viewMode === 'api' ? 'Captured cluster requests' : `${networkData?.totalPacketsIn + networkData?.totalPacketsOut || 0} Total Packets Transmitted`}
+                        {viewMode === 'api' ? 'Captured cluster requests' : `${telemetry?.packetsIn + telemetry?.packetsOut || 0} Total Transmitted Packets`}
                     </span>
                 </div>
 
                 <div className="glass" style={{ padding: '20px', borderRadius: '16px', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-0)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                         <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase' }}>
-                            {viewMode === 'api' ? 'Active Connected Sessions' : 'Active Network Hosts (ntopng)'}
+                            {viewMode === 'api' ? 'Active Connected Sessions' : 'Active Network Talkers (Hosts)'}
                         </span>
                         <Users size={18} color="#10b981" />
                     </div>
                     <span style={{ fontSize: '26px', fontWeight: '900', color: '#10b981' }}>
-                        {viewMode === 'api' ? `${sessions.length} Online` : `${networkData?.activeHostCount || topTalkers.length} Talkers`}
+                        {viewMode === 'api' ? `${sessions.length} Online` : `${topTalkers.length} Talkers`}
                     </span>
                     <span style={{ display: 'block', fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-                        {viewMode === 'api' ? 'Authenticated + Guest tokens' : `${networkData?.totalFlowCount || 0} Active L4/L7 Flows Tracked`}
+                        {viewMode === 'api' ? 'Authenticated + Guest tokens' : `${networkFlows.length} Active L4/L7 Flows Tracked`}
                     </span>
                 </div>
 
                 <div className="glass" style={{ padding: '20px', borderRadius: '16px', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-0)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                        <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase' }}>Data Ingest / Outflow</span>
+                        <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase' }}>Data Received / Transferred</span>
                         <ArrowUpRight size={18} color="var(--accent-cyan)" />
                     </div>
                     <span style={{ fontSize: '20px', fontWeight: '900', color: 'var(--text-primary)' }}>
-                        <span style={{ color: '#10b981' }}>↓ {formatBytes(telemetry?.bytesIn || networkData?.totalBytesIn)}</span>
+                        <span style={{ color: '#10b981' }}>↓ {formatBytes(telemetry?.bytesIn)}</span>
                         <span style={{ fontSize: '13px', color: 'var(--text-dim)', margin: '0 6px' }}>/</span>
-                        <span style={{ color: 'var(--accent-cyan)' }}>↑ {formatBytes(telemetry?.bytesOut || networkData?.totalBytesOut)}</span>
+                        <span style={{ color: 'var(--accent-cyan)' }}>↑ {formatBytes(telemetry?.bytesOut)}</span>
                     </span>
                     <span style={{ display: 'block', fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
                         Inbound payload / Outbound data
@@ -333,15 +329,15 @@ const NetworkTrafficView = ({ showToast }) => {
                 <div className="glass" style={{ padding: '20px', borderRadius: '16px', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-0)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                         <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase' }}>
-                            {viewMode === 'api' ? 'Error & Block Rate' : 'Cluster Mesh Nodes'}
+                            {viewMode === 'api' ? 'Error & Block Rate' : 'OS Network Adapters'}
                         </span>
                         <ShieldAlert size={18} color={telemetry?.errorRate > 5 ? '#f43f5e' : '#10b981'} />
                     </div>
                     <span style={{ fontSize: '26px', fontWeight: '900', color: telemetry?.errorRate > 5 ? '#f43f5e' : '#10b981' }}>
-                        {viewMode === 'api' ? `${telemetry?.errorRate || '0.0'}%` : `${agents.length} Fleet Nodes`}
+                        {viewMode === 'api' ? `${telemetry?.errorRate || '0.0'}%` : `${osAdapters.length} Physical NICs`}
                     </span>
                     <span style={{ display: 'block', fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-                        {viewMode === 'api' ? '4xx client & 5xx server errors' : 'Zero packet loss in peer mesh'}
+                        {viewMode === 'api' ? '4xx client & 5xx server errors' : 'Ethernet, Wi-Fi, Tailscale'}
                     </span>
                 </div>
             </div>
@@ -706,7 +702,7 @@ const NetworkTrafficView = ({ showToast }) => {
                                 <h3 style={{ fontSize: '15px', fontWeight: '800', margin: 0, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
                                     <Layers size={18} color="var(--accent-cyan)" /> Application Protocols & L7 Distribution
                                 </h3>
-                                <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)' }}>ntopng DPI Engine</span>
+                                <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)' }}>L4/L7 DPI Engine</span>
                             </div>
 
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -730,11 +726,11 @@ const NetworkTrafficView = ({ showToast }) => {
                         <div className="glass" style={{ padding: '22px', borderRadius: '20px', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-0)' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                                 <h3 style={{ fontSize: '15px', fontWeight: '800', margin: 0, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                    <TrendingUp size={18} color="#10b981" /> Live Ingress / Egress Dual Flow
+                                    <TrendingUp size={18} color="#10b981" /> Live Ingress / Egress Throughput
                                 </h3>
                                 <div style={{ display: 'flex', gap: '10px', fontSize: '11px', fontWeight: '800' }}>
-                                    <span style={{ color: '#10b981' }}>● Inbound (Ingress)</span>
-                                    <span style={{ color: 'var(--accent-cyan)' }}>● Outbound (Egress)</span>
+                                    <span style={{ color: '#10b981' }}>● Inbound (Received)</span>
+                                    <span style={{ color: 'var(--accent-cyan)' }}>● Outbound (Transferred)</span>
                                 </div>
                             </div>
 
@@ -772,14 +768,14 @@ const NetworkTrafficView = ({ showToast }) => {
                             </div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', marginTop: '8px' }}>
                                 <span>Throughput Speedometer</span>
-                                <span>Packets: {networkData?.totalPacketsIn + networkData?.totalPacketsOut || 0} Total</span>
-                                <span>Peak: {formatBytes(networkData?.totalBytesIn + networkData?.totalBytesOut)}</span>
+                                <span>Packets: {telemetry?.packetsIn + telemetry?.packetsOut || 0} Total</span>
+                                <span>Peak Volume: {formatBytes((telemetry?.bytesIn || 0) + (telemetry?.bytesOut || 0))}</span>
                             </div>
                         </div>
                     </div>
 
-                    {/* Network Tabs: Flows | Top Hosts (ntopng) | File Transfers | Remote Agents */}
-                    <div style={{ display: 'flex', gap: '8px', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '8px' }}>
+                    {/* Network Tabs: Flows | Top Hosts (ntopng) | File Transfers | Physical NIC Adapters | Remote Agents */}
+                    <div style={{ display: 'flex', gap: '8px', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '8px', flexWrap: 'wrap' }}>
                         <button
                             onClick={() => setNetworkSubTab('flows')}
                             style={{
@@ -796,7 +792,7 @@ const NetworkTrafficView = ({ showToast }) => {
                                 gap: '8px'
                             }}
                         >
-                            <Terminal size={15} /> Live Network Flows & Wireshark DPI ({networkFlows.length})
+                            <Terminal size={15} /> Live Network Flows & DPI ({networkFlows.length})
                         </button>
                         <button
                             onClick={() => setNetworkSubTab('hosts')}
@@ -833,6 +829,24 @@ const NetworkTrafficView = ({ showToast }) => {
                             }}
                         >
                             <FileText size={15} /> File Transfers Stream ({fileTransfers.length})
+                        </button>
+                        <button
+                            onClick={() => setNetworkSubTab('adapters')}
+                            style={{
+                                padding: '8px 16px',
+                                borderRadius: '10px',
+                                background: networkSubTab === 'adapters' ? 'rgba(14, 165, 233, 0.15)' : 'transparent',
+                                border: `1px solid ${networkSubTab === 'adapters' ? 'var(--accent-cyan)' : 'transparent'}`,
+                                color: networkSubTab === 'adapters' ? 'var(--accent-cyan)' : 'var(--text-secondary)',
+                                fontWeight: '800',
+                                fontSize: '13px',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px'
+                            }}
+                        >
+                            <Cable size={15} /> Physical & Mesh Adapters ({osAdapters.length})
                         </button>
                         <button
                             onClick={() => setNetworkSubTab('agents')}
@@ -910,16 +924,16 @@ const NetworkTrafficView = ({ showToast }) => {
                                                 </span>
                                             </div>
 
-                                            {/* Packets & Hex Inspection Trigger */}
+                                            {/* Data Received vs Transferred */}
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '11.5px' }}>
-                                                <span style={{ color: '#10b981', fontWeight: '700', fontFamily: 'var(--font-mono)' }}>
-                                                    ↓ {formatBytes(flow.bytesIn)} / ↑ {formatBytes(flow.bytesOut)}
+                                                <span style={{ color: '#10b981', fontWeight: '700', fontFamily: 'var(--font-mono)' }} title="Data Received from Client">
+                                                    ↓ {formatBytes(flow.bytesIn)}
+                                                </span>
+                                                <span style={{ color: 'var(--accent-cyan)', fontWeight: '700', fontFamily: 'var(--font-mono)' }} title="Data Transferred to Client">
+                                                    ↑ {formatBytes(flow.bytesOut)}
                                                 </span>
                                                 <span style={{ color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
                                                     {flow.durationMs}ms
-                                                </span>
-                                                <span style={{ fontSize: '10px', fontWeight: '800', padding: '2px 6px', borderRadius: '4px', background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)', color: 'var(--text-dim)' }}>
-                                                    {flow.tcpFlags.join('/')}
                                                 </span>
                                                 <button
                                                     onClick={(e) => {
@@ -929,7 +943,7 @@ const NetworkTrafficView = ({ showToast }) => {
                                                     className="btn-secondary"
                                                     style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '4px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: '800', color: 'var(--accent-cyan)' }}
                                                 >
-                                                    <Binary size={13} /> Wireshark DPI
+                                                    <Binary size={13} /> Deep Packet Inspection
                                                 </button>
                                             </div>
                                         </div>
@@ -1017,7 +1031,7 @@ const NetworkTrafficView = ({ showToast }) => {
                                                             {formatBytes(host.totalBytes)} <span style={{ fontSize: '11px', color: 'var(--accent-cyan)' }}>({sharePct}%)</span>
                                                         </div>
                                                         <div style={{ fontSize: '11px', color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
-                                                            ↓ {formatBytes(host.bytesIn)} / ↑ {formatBytes(host.bytesOut)}
+                                                            <span style={{ color: '#10b981' }}>↓ {formatBytes(host.bytesIn)} Recv</span> • <span style={{ color: 'var(--accent-cyan)' }}>↑ {formatBytes(host.bytesOut)} Sent</span>
                                                         </div>
                                                     </div>
 
@@ -1103,7 +1117,84 @@ const NetworkTrafficView = ({ showToast }) => {
                         </div>
                     )}
 
-                    {/* NETWORK SUB-TAB 4: REMOTE FLEET AGENTS */}
+                    {/* NETWORK SUB-TAB 4: PHYSICAL & VIRTUAL OS NETWORK ADAPTERS */}
+                    {networkSubTab === 'adapters' && (
+                        <div className="glass" style={{ padding: '20px', borderRadius: '18px', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-0)', boxShadow: 'var(--shadow-md)' }}>
+                            <div style={{ marginBottom: '16px' }}>
+                                <h3 style={{ fontSize: '15px', fontWeight: '800', margin: 0, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <Cable size={18} color="var(--accent-cyan)" /> Physical Network Interface Cards (NICs) & Mesh Adapters
+                                </h3>
+                                <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                                    Real OS kernel adapter telemetry (Hardware Ethernet, Tailscale, Wi-Fi, vEthernet) with cumulative RX/TX bytes and packet statistics
+                                </p>
+                            </div>
+
+                            {osAdapters.length === 0 ? (
+                                <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-dim)', fontSize: '13px' }}>
+                                    Polling operating system network interface statistics...
+                                </div>
+                            ) : (
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px' }}>
+                                    {osAdapters.map(nic => (
+                                        <div
+                                            key={nic.name}
+                                            style={{
+                                                padding: '18px',
+                                                borderRadius: '14px',
+                                                background: 'var(--bg-surface-2)',
+                                                border: '1px solid var(--border-subtle)',
+                                                display: 'flex',
+                                                flexDirection: 'column',
+                                                gap: '12px'
+                                            }}
+                                        >
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                    <Cable size={18} color="var(--accent-cyan)" />
+                                                    <strong style={{ fontSize: '14px', color: 'var(--text-primary)' }}>{nic.name}</strong>
+                                                </div>
+                                                <span style={{ fontSize: '10px', fontWeight: '800', padding: '2px 6px', borderRadius: '4px', background: 'rgba(16, 185, 129, 0.15)', color: '#10b981' }}>
+                                                    {nic.status}
+                                                </span>
+                                            </div>
+
+                                            {/* Hardware Address & IP Details */}
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text-secondary)', background: 'var(--bg-surface-0)', padding: '10px', borderRadius: '8px' }}>
+                                                <div>IPv4: <code style={{ color: 'var(--primary)', fontWeight: '700' }}>{nic.ipv4}</code></div>
+                                                <div>MAC: <code style={{ color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>{nic.mac}</code></div>
+                                                <div style={{ fontSize: '11px', color: 'var(--text-dim)' }}>Netmask: {nic.netmask}</div>
+                                            </div>
+
+                                            {/* Cumulative Data Received (RX) vs Sent (TX) */}
+                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', paddingTop: '4px' }}>
+                                                <div style={{ padding: '8px 10px', borderRadius: '8px', background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)' }}>
+                                                    <div style={{ fontSize: '10.5px', fontWeight: '800', color: '#10b981' }}>DATA RECEIVED (RX)</div>
+                                                    <div style={{ fontSize: '16px', fontWeight: '900', color: 'var(--text-primary)', marginTop: '2px' }}>
+                                                        {formatBytes(nic.rxBytes)}
+                                                    </div>
+                                                    <div style={{ fontSize: '10px', color: 'var(--text-dim)' }}>
+                                                        {nic.rxPackets.toLocaleString()} pkts
+                                                    </div>
+                                                </div>
+
+                                                <div style={{ padding: '8px 10px', borderRadius: '8px', background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)' }}>
+                                                    <div style={{ fontSize: '10.5px', fontWeight: '800', color: 'var(--accent-cyan)' }}>DATA SENT (TX)</div>
+                                                    <div style={{ fontSize: '16px', fontWeight: '900', color: 'var(--text-primary)', marginTop: '2px' }}>
+                                                        {formatBytes(nic.txBytes)}
+                                                    </div>
+                                                    <div style={{ fontSize: '10px', color: 'var(--text-dim)' }}>
+                                                        {nic.txPackets.toLocaleString()} pkts
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* NETWORK SUB-TAB 5: REMOTE FLEET AGENTS */}
                     {networkSubTab === 'agents' && (
                         <div className="glass" style={{ padding: '20px', borderRadius: '18px', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-0)', boxShadow: 'var(--shadow-md)' }}>
                             <h3 style={{ fontSize: '15px', fontWeight: '800', margin: '0 0 16px 0', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -1137,8 +1228,128 @@ const NetworkTrafficView = ({ showToast }) => {
             )}
 
             {/* ========================================================================= */}
-            {/* 🌟 ANIMATED MODAL: WIRESHARK DEEP PACKET INSPECTION (DPI) & HEXDUMP        */}
+            {/* 🌟 ANIMATED MODAL: HOST DEEP-DIVE INSPECTOR (ntopng Host Profile)          */}
             {/* ========================================================================= */}
+            <AnimatePresence>
+                {selectedHost && (
+                    <div style={{
+                        position: 'fixed',
+                        top: 0, left: 0, right: 0, bottom: 0,
+                        background: 'rgba(0, 0, 0, 0.75)',
+                        backdropFilter: 'blur(10px)',
+                        zIndex: 2600,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '20px'
+                    }}>
+                        <motion.div
+                            initial={{ opacity: 0, scale: 0.92, y: 20 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.92, y: 20 }}
+                            transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+                            className="glass custom-scrollbar"
+                            style={{
+                                width: '100%',
+                                maxWidth: '720px',
+                                maxHeight: '90vh',
+                                overflowY: 'auto',
+                                borderRadius: '24px',
+                                border: '1px solid var(--border-bright)',
+                                background: 'var(--bg-surface-0)',
+                                boxShadow: '0 24px 80px rgba(0,0,0,0.6)',
+                                padding: '28px'
+                            }}
+                        >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
+                                <div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                                        <span style={{ fontSize: '11px', fontWeight: '900', padding: '3px 8px', borderRadius: '5px', background: 'var(--accent-cyan)', color: '#000000', fontFamily: 'var(--font-mono)' }}>
+                                            HOST PROFILE
+                                        </span>
+                                        <span style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-secondary)' }}>
+                                            {selectedHost.countryName} ({selectedHost.city})
+                                        </span>
+                                    </div>
+                                    <h3 style={{ fontSize: '18px', fontWeight: '800', margin: 0, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
+                                        {selectedHost.ip} <span style={{ fontSize: '13px', color: 'var(--text-dim)' }}>({selectedHost.hostname})</span>
+                                    </h3>
+                                </div>
+                                <button onClick={() => setSelectedHost(null)} style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', padding: '4px' }}>
+                                    <X size={22} />
+                                </button>
+                            </div>
+
+                            {/* Host Deep Metrics */}
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '20px' }}>
+                                <div style={{ padding: '12px', borderRadius: '12px', background: 'var(--bg-surface-2)', border: '1px solid var(--border-subtle)' }}>
+                                    <div style={{ fontSize: '11px', fontWeight: '800', color: '#10b981', textTransform: 'uppercase' }}>Data Received (RX)</div>
+                                    <div style={{ fontSize: '20px', fontWeight: '900', color: 'var(--text-primary)', marginTop: '2px' }}>
+                                        {formatBytes(selectedHost.bytesIn)}
+                                    </div>
+                                    <div style={{ fontSize: '10.5px', color: 'var(--text-dim)' }}>{selectedHost.packetsIn || 0} Packets Received</div>
+                                </div>
+
+                                <div style={{ padding: '12px', borderRadius: '12px', background: 'var(--bg-surface-2)', border: '1px solid var(--border-subtle)' }}>
+                                    <div style={{ fontSize: '11px', fontWeight: '800', color: 'var(--accent-cyan)', textTransform: 'uppercase' }}>Data Transferred (TX)</div>
+                                    <div style={{ fontSize: '20px', fontWeight: '900', color: 'var(--text-primary)', marginTop: '2px' }}>
+                                        {formatBytes(selectedHost.bytesOut)}
+                                    </div>
+                                    <div style={{ fontSize: '10.5px', color: 'var(--text-dim)' }}>{selectedHost.packetsOut || 0} Packets Transferred</div>
+                                </div>
+
+                                <div style={{ padding: '12px', borderRadius: '12px', background: 'var(--bg-surface-2)', border: '1px solid var(--border-subtle)' }}>
+                                    <div style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase' }}>Total Bandwidth Share</div>
+                                    <div style={{ fontSize: '20px', fontWeight: '900', color: 'var(--primary)', marginTop: '2px' }}>
+                                        {selectedHost.bandwidthShare}%
+                                    </div>
+                                    <div style={{ fontSize: '10.5px', color: 'var(--text-dim)' }}>{selectedHost.activeFlows || 0} Active Network Flows</div>
+                                </div>
+                            </div>
+
+                            {/* Files Transferred by this Host */}
+                            {selectedHost.files && selectedHost.files.length > 0 && (
+                                <div style={{ marginBottom: '18px' }}>
+                                    <div style={{ fontSize: '12.5px', fontWeight: '800', color: 'var(--text-primary)', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                        <FileText size={15} color="var(--accent-gold)" /> Transferred Files by this Host ({selectedHost.files.length})
+                                    </div>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                        {selectedHost.files.map(f => (
+                                            <div key={f.id} style={{ padding: '8px 12px', borderRadius: '8px', background: 'var(--bg-surface-2)', border: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+                                                <span style={{ fontFamily: 'var(--font-mono)', fontWeight: '700', color: 'var(--text-primary)' }}>{f.filename}</span>
+                                                <span style={{ color: 'var(--accent-cyan)', fontWeight: '800' }}>{formatBytes(f.size)} ({f.direction})</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Actions */}
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                                <button
+                                    onClick={() => {
+                                        setIpToBan(selectedHost.ip);
+                                        setSelectedHost(null);
+                                    }}
+                                    className="btn-danger"
+                                    style={{ padding: '9px 16px', borderRadius: '10px', fontSize: '12px', fontWeight: '800' }}
+                                >
+                                    Ban Host IP ({selectedHost.ip})
+                                </button>
+                                <button
+                                    onClick={() => setSelectedHost(null)}
+                                    className="btn-secondary"
+                                    style={{ padding: '9px 16px', borderRadius: '10px', fontSize: '12px', fontWeight: '800' }}
+                                >
+                                    Close
+                                </button>
+                            </div>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
+
+            {/* 🌟 ANIMATED MODAL: WIRESHARK DEEP PACKET INSPECTION (DPI) & HEXDUMP */}
             <AnimatePresence>
                 {selectedFlow && (
                     <div style={{
@@ -1170,12 +1381,11 @@ const NetworkTrafficView = ({ showToast }) => {
                                 padding: '28px'
                             }}
                         >
-                            {/* Header */}
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '18px' }}>
                                 <div>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
                                         <span style={{ fontSize: '11px', fontWeight: '900', padding: '3px 8px', borderRadius: '5px', background: 'var(--accent-cyan)', color: '#000000', fontFamily: 'var(--font-mono)' }}>
-                                            WIRESHARK DPI
+                                            DEEP PACKET INSPECTOR
                                         </span>
                                         <span style={{ fontSize: '12px', fontWeight: '800', color: selectedFlow.statusCode < 400 ? '#10b981' : '#f43f5e', fontFamily: 'var(--font-mono)' }}>
                                             {selectedFlow.protocol} • Status {selectedFlow.statusCode}
@@ -1192,7 +1402,6 @@ const NetworkTrafficView = ({ showToast }) => {
 
                             {/* Wireshark Protocol Tree Breakdown */}
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
-                                {/* Layer 2/3 */}
                                 <div style={{ padding: '12px 14px', borderRadius: '10px', background: 'var(--bg-surface-2)', border: '1px solid var(--border-subtle)', fontSize: '12px', fontFamily: 'var(--font-mono)' }}>
                                     <div style={{ fontWeight: '800', color: 'var(--accent-cyan)', marginBottom: '4px' }}>▶ Frame & Internet Protocol Version 4 (IPv4)</div>
                                     <div style={{ color: 'var(--text-secondary)', paddingLeft: '14px' }}>
@@ -1200,7 +1409,6 @@ const NetworkTrafficView = ({ showToast }) => {
                                     </div>
                                 </div>
 
-                                {/* Layer 4 */}
                                 <div style={{ padding: '12px 14px', borderRadius: '10px', background: 'var(--bg-surface-2)', border: '1px solid var(--border-subtle)', fontSize: '12px', fontFamily: 'var(--font-mono)' }}>
                                     <div style={{ fontWeight: '800', color: '#10b981', marginBottom: '4px' }}>▶ Transmission Control Protocol (TCP) & TLS 1.3</div>
                                     <div style={{ color: 'var(--text-secondary)', paddingLeft: '14px' }}>
@@ -1208,7 +1416,6 @@ const NetworkTrafficView = ({ showToast }) => {
                                     </div>
                                 </div>
 
-                                {/* Layer 7 */}
                                 <div style={{ padding: '12px 14px', borderRadius: '10px', background: 'var(--bg-surface-2)', border: '1px solid var(--border-subtle)', fontSize: '12px', fontFamily: 'var(--font-mono)' }}>
                                     <div style={{ fontWeight: '800', color: 'var(--primary)', marginBottom: '4px' }}>▶ Application Layer: {selectedFlow.l7Application}</div>
                                     <div style={{ color: 'var(--text-secondary)', paddingLeft: '14px' }}>
