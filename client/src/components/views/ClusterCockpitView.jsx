@@ -378,6 +378,23 @@ export default function ClusterCockpitView({
 
     const totalPercentage = activeCapacity > 0 ? Math.round((activeUsed / activeCapacity) * 100) : 0;
 
+    // Dynamically calculate live cluster latency from telemetry polling
+    const dynamicLatency = useMemo(() => {
+        if (!metrics?.metricsHistory) return '< 1.8 ms Average';
+        const latencies = [];
+        Object.values(metrics.metricsHistory).forEach(arr => {
+            if (Array.isArray(arr) && arr.length > 0) {
+                const latest = arr[arr.length - 1];
+                if (latest && typeof latest.latency === 'number' && latest.latency > 0) {
+                    latencies.push(latest.latency);
+                }
+            }
+        });
+        if (latencies.length === 0) return '< 1.8 ms Average';
+        const avg = (latencies.reduce((a, b) => a + b, 0) / latencies.length).toFixed(1);
+        return `${avg} ms Average`;
+    }, [metrics]);
+
     return (
         <motion.div 
             initial={{ opacity: 0, y: 10 }}
@@ -507,7 +524,7 @@ export default function ClusterCockpitView({
                     <Radio size={18} color="var(--accent-cyan)" />
                     <div>
                         <span style={{ fontSize: '10px', fontWeight: '800', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Cluster Latency</span>
-                        <div style={{ fontSize: '13px', fontWeight: '800', color: 'var(--text-primary)' }}>&lt; 1.8 ms Average</div>
+                        <div style={{ fontSize: '13px', fontWeight: '800', color: 'var(--text-primary)' }}>{dynamicLatency}</div>
                     </div>
                 </div>
 
