@@ -23,8 +23,7 @@ const formatGB = (gbVal) => {
 
 // Liquid Wave Metric Card Component matching Screenshot 2
 const LiquidWaveGaugeCard = ({
-    titleLine1,
-    titleLine2,
+    title,
     sublabel,
     value,
     statusText,
@@ -82,7 +81,7 @@ const LiquidWaveGaugeCard = ({
     };
 
     const cfg = themeConfig[theme] || themeConfig.blue;
-    // Dynamic liquid fill level directly proportional to % (15% min baseline, 100% full at 100%)
+    // Dynamic liquid fill level directly proportional to % (14% min baseline, 100% full at 100%)
     const waveHeightPercent = Math.max(14, Math.min(100, clamped));
 
     return (
@@ -94,51 +93,48 @@ const LiquidWaveGaugeCard = ({
                 background: 'var(--bg-surface-0, #ffffff)',
                 border: '1px solid var(--border-subtle)',
                 borderRadius: '20px',
-                padding: '20px 20px 16px',
+                padding: '18px 18px 14px',
                 display: 'flex',
                 flexDirection: 'column',
                 justifyContent: 'space-between',
                 position: 'relative',
                 overflow: 'hidden',
-                height: '195px',
+                height: '190px',
                 boxShadow: '0 4px 20px rgba(0, 0, 0, 0.04)'
             }}
         >
             {/* Top Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%', position: 'relative', zIndex: 2 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', position: 'relative', zIndex: 2 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '9px' }}>
                     {Icon && (
                         <div style={{
-                            width: '34px',
-                            height: '34px',
-                            borderRadius: '10px',
+                            width: '32px',
+                            height: '32px',
+                            borderRadius: '9px',
                             background: cfg.iconBg,
                             display: 'flex',
                             alignItems: 'center',
-                            justifyContent: 'center'
+                            justifyContent: 'center',
+                            flexShrink: 0
                         }}>
-                            <Icon size={17} color={cfg.iconColor} />
+                            <Icon size={16} color={cfg.iconColor} />
                         </div>
                     )}
-                    <div style={{ display: 'flex', flexDirection: 'column', lineHeight: '1.15' }}>
-                        <span style={{ fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.6px', color: 'var(--text-primary)' }}>
-                            {titleLine1}
-                        </span>
-                        <span style={{ fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.6px', color: 'var(--text-primary)' }}>
-                            {titleLine2}
-                        </span>
-                    </div>
+                    <span style={{ fontSize: '12px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.6px', color: 'var(--text-primary)' }}>
+                        {title}
+                    </span>
                 </div>
 
                 {statusText && (
                     <span style={{
                         fontSize: '10px',
                         fontWeight: '700',
-                        padding: '3px 9px',
-                        borderRadius: '8px',
+                        padding: '3px 8px',
+                        borderRadius: '7px',
                         background: cfg.badgeBg,
                         color: cfg.badgeColor,
-                        letterSpacing: '0.2px'
+                        letterSpacing: '0.2px',
+                        flexShrink: 0
                     }}>
                         {statusText}
                     </span>
@@ -502,8 +498,7 @@ export default function ClusterCockpitView({
                     {/* 4 Liquid Wave Fluid Metric Cards matching User Reference */}
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '16px' }}>
                         <LiquidWaveGaugeCard
-                            titleLine1="STORAGE"
-                            titleLine2="POOL"
+                            title="STORAGE"
                             value={totalPercentage}
                             sublabel={`${formatGB(stats.used / 1e9)} / ${formatGB(stats.total / 1e9)}`}
                             statusText={totalPercentage > 85 ? 'High' : 'Normal'}
@@ -511,8 +506,7 @@ export default function ClusterCockpitView({
                             icon={HardDrive}
                         />
                         <LiquidWaveGaugeCard
-                            titleLine1="CLUSTER"
-                            titleLine2="CPU"
+                            title="CPU"
                             value={avgCpu}
                             sublabel={`${onlineApprovedNodes.length} Active Node(s)`}
                             statusText={avgCpu > 80 ? 'Heavy' : 'Optimal'}
@@ -520,8 +514,7 @@ export default function ClusterCockpitView({
                             icon={Cpu}
                         />
                         <LiquidWaveGaugeCard
-                            titleLine1="CLUSTER"
-                            titleLine2="RAM"
+                            title="RAM"
                             value={avgMemory}
                             sublabel="Telemetry Buffered"
                             statusText={avgMemory > 85 ? 'Warning' : 'Normal'}
@@ -529,8 +522,7 @@ export default function ClusterCockpitView({
                             icon={Layers}
                         />
                         <LiquidWaveGaugeCard
-                            titleLine1="NODE"
-                            titleLine2="MESH"
+                            title="MESH"
                             value={filteredNodes.length > 0 ? Math.round((filteredNodes.filter(n => n.online).length / filteredNodes.length) * 100) : 100}
                             sublabel={`${filteredNodes.filter(n => n.online).length} / ${filteredNodes.length} Online`}
                             statusText="Connected"
