@@ -1883,6 +1883,55 @@ router.get('/download', async (req, res) => {
     const isSmb = filePath.startsWith('\\\\') || filePath.startsWith('//') || filePath.startsWith('smb://');
     if (isSmb) {
         try {
+            const fileName = path.basename(filePath.replace(/\\/g, '/'));
+            const mimeType = getMediaMimeType(fileName);
+            const isStreaming = req.query.intent === 'stream';
+
+            // Check if accessible via native UNC filesystem (Windows / mounted Linux paths)
+            let directUncCandidates = [
+                filePath,
+                filePath.replace(/\\/g, '/'),
+                '//' + filePath.trim().replace(/\\/g, '/').replace(/^(smb:)?\/+/, '')
+            ];
+            if (process.platform === 'win32') {
+                directUncCandidates.push('\\\\' + filePath.trim().replace(/\//g, '\\').replace(/^(\\\\)?/, ''));
+            }
+
+            const directPath = directUncCandidates.find(p => {
+                try { return fs.existsSync(p) && fs.statSync(p).isFile(); } catch (e) { return false; }
+            });
+
+            if (directPath) {
+                const stats = fs.statSync(directPath);
+                const range = req.headers.range;
+
+                if (range) {
+                    const rParts = range.replace(/bytes=/, "").split("-");
+                    const start = parseInt(rParts[0], 10);
+                    const end = rParts[1] ? parseInt(rParts[1], 10) : stats.size - 1;
+                    const chunksize = (end - start) + 1;
+                    const fileStream = fs.createReadStream(directPath, { start, end });
+
+                    res.writeHead(206, {
+                        'Content-Range': `bytes ${start}-${end}/${stats.size}`,
+                        'Accept-Ranges': 'bytes',
+                        'Content-Length': chunksize,
+                        'Content-Type': mimeType,
+                        'Content-Disposition': isStreaming ? 'inline' : `attachment; filename="${encodeURIComponent(fileName)}"`
+                    });
+                    return fileStream.pipe(res);
+                }
+
+                res.writeHead(200, {
+                    'Content-Length': stats.size,
+                    'Accept-Ranges': 'bytes',
+                    'Content-Type': mimeType,
+                    'Content-Disposition': isStreaming ? 'inline' : `attachment; filename="${encodeURIComponent(fileName)}"`
+                });
+                return fs.createReadStream(directPath).pipe(res);
+            }
+
+            // If not directly accessible via native OS UNC, fallback to network share credentials & smbclient
             const sharesRes = await db.query('SELECT * FROM network_shares');
             let clean = filePath.trim().replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
             const parts = clean.split('/');
@@ -1904,10 +1953,6 @@ router.get('/download', async (req, res) => {
                 try { pass = cryptoHelper.decrypt(matchedShare.password); } catch (e) { pass = matchedShare.password; }
             }
 
-            const fileName = path.basename(filePath.replace(/\\/g, '/'));
-            const mimeType = getMediaMimeType(fileName);
-            const isStreaming = req.query.intent === 'stream';
-            
             // Check if file is already cached locally for instant seeking
             const os = require('os');
             const cacheDir = path.join(os.tmpdir(), 'nexadisk_media_cache');
@@ -1977,6 +2022,13 @@ router.get('/download', async (req, res) => {
 
             const range = req.headers.range;
             const proc = spawn('smbclient', args, { env });
+
+            proc.on('error', (err) => {
+                logger.error(`[SMB Download Spawn Error] ${err.message}`);
+                if (!res.headersSent) {
+                    res.status(500).json({ error: `SMB stream unavailable: ${err.message}` });
+                }
+            });
 
             if (isStreaming && !fs.existsSync(cachePath)) {
                 // Background cache stream

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
     Search, Bell, Activity, ShieldCheck, User, Trash2, Folder, File, RotateCcw,
     LayoutDashboard, FolderTree, Star, Cpu, Link2, Globe, RefreshCw, Sparkles,
-    Settings, Clock, X, Menu, Sun, Moon, Wifi
+    Settings, Clock, X, Menu, Sun, Moon, Wifi, Zap
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import axios from 'axios';
