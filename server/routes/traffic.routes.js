@@ -153,4 +153,14 @@ router.post('/ban-client', authenticateToken, requireAdmin, async (req, res) => 
     }
 });
 
+// ─── POST /api/v1/traffic/clear-buffer ─────────────────────────────────────────
+router.post('/clear-buffer', authenticateToken, requireAdmin, (req, res) => {
+    try {
+        trafficService.clearBuffer();
+        res.json({ success: true, message: 'Stream buffer cleared' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 module.exports = router;

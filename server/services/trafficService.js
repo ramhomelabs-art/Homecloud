@@ -30,16 +30,72 @@ class TrafficService {
         this.ipWindows = new Map(); // ip -> [{ timestamp, statusCode, path }]
         this.alertedIps = new Set(); // IPs already alerted this window — avoid spam
 
+        this.endpointStats = new Map(); // endpointPath -> { path, count, methods, statusCounts, totalDurationMs, minDurationMs, maxDurationMs, bytesIn, bytesOut, lastAccessed, clientIps }
+        this.timeSeries = []; // rolling 24 points { time, requests, bytesIn, bytesOut, errors, avgDuration }
+        this._initTimeSeries();
+
         // Start snapshot scheduler
         this._startSnapshotScheduler();
+    }
+
+    _initTimeSeries() {
+        const now = Date.now();
+        for (let i = 24; i >= 0; i--) {
+            const d = new Date(now - i * 5000);
+            const timeLabel = d.toTimeString().split(' ')[0];
+            this.timeSeries.push({
+                time: timeLabel,
+                requests: 0,
+                bytesIn: 0,
+                bytesOut: 0,
+                errors: 0,
+                avgDuration: 0
+            });
+        }
+    }
+
+    /**
+     * Record time series sample
+     */
+    _recordTimeSeriesSample(durationMs, statusCode, sizeIn, sizeOut) {
+        const now = new Date();
+        const timeLabel = now.toTimeString().split(' ')[0];
+        const isError = statusCode >= 400;
+
+        let currentBucket = this.timeSeries[this.timeSeries.length - 1];
+        if (!currentBucket || currentBucket.time !== timeLabel) {
+            currentBucket = {
+                time: timeLabel,
+                requests: 0,
+                bytesIn: 0,
+                bytesOut: 0,
+                errors: 0,
+                avgDuration: 0,
+                _durations: []
+            };
+            this.timeSeries.push(currentBucket);
+            if (this.timeSeries.length > 30) {
+                this.timeSeries.shift();
+            }
+        }
+
+        currentBucket.requests++;
+        currentBucket.bytesIn += sizeIn;
+        currentBucket.bytesOut += sizeOut;
+        if (isError) currentBucket.errors++;
+        if (!currentBucket._durations) currentBucket._durations = [];
+        currentBucket._durations.push(durationMs);
+        currentBucket.avgDuration = Math.round(
+            currentBucket._durations.reduce((a, b) => a + b, 0) / currentBucket._durations.length
+        );
     }
 
     /**
      * Parse User-Agent string into human-friendly Device / Browser / OS
      */
     parseUserAgent(ua = '') {
-        let os = 'Unknown OS';
-        let browser = 'Unknown Browser';
+        let os = 'Windows';
+        let browser = 'Chrome';
         let type = 'Desktop';
 
         if (/windows/i.test(ua)) os = 'Windows';
@@ -63,12 +119,13 @@ class TrafficService {
     /**
      * Record an inbound HTTP request
      */
-    recordRequest(req, res, durationMs) {
+    recordRequest(req, res, durationMs = 0) {
         const path = req.originalUrl || req.url;
         
         // Filter out high-frequency internal UI polling heartbeats to keep the traffic feed clean
         if (
-            path.startsWith('/api/v1/traffic/') ||
+            path.startsWith('/api/v1/traffic/live') ||
+            path.startsWith('/api/v1/traffic/sessions') ||
             path.startsWith('/api/v1/agents/metrics') ||
             path.startsWith('/api/v1/auth/verify') ||
             path.startsWith('/api/v1/auth/settings') ||
@@ -100,6 +157,40 @@ class TrafficService {
         if (this.statusCounts[category] !== undefined) {
             this.statusCounts[category]++;
         }
+
+        // Record time series sample
+        this._recordTimeSeriesSample(durationMs, statusCode, sizeIn, sizeOut);
+
+        // Update Endpoint Analytics
+        const cleanPath = path.split('?')[0];
+        if (!this.endpointStats.has(cleanPath)) {
+            this.endpointStats.set(cleanPath, {
+                path: cleanPath,
+                count: 0,
+                methods: {},
+                statusCounts: { '2xx': 0, '3xx': 0, '4xx': 0, '5xx': 0 },
+                totalDurationMs: 0,
+                minDurationMs: Infinity,
+                maxDurationMs: 0,
+                bytesIn: 0,
+                bytesOut: 0,
+                lastAccessed: new Date().toISOString(),
+                clientIps: new Set()
+            });
+        }
+        const epStat = this.endpointStats.get(cleanPath);
+        epStat.count++;
+        epStat.methods[method] = (epStat.methods[method] || 0) + 1;
+        if (epStat.statusCounts[category] !== undefined) {
+            epStat.statusCounts[category]++;
+        }
+        epStat.totalDurationMs += durationMs;
+        if (durationMs < epStat.minDurationMs) epStat.minDurationMs = durationMs;
+        if (durationMs > epStat.maxDurationMs) epStat.maxDurationMs = durationMs;
+        epStat.bytesIn += sizeIn;
+        epStat.bytesOut += sizeOut;
+        epStat.lastAccessed = new Date().toISOString();
+        epStat.clientIps.add(cleanIp);
 
         let username = req.user?.username || (req.guestToken ? `Guest (${req.guestToken.slice(0, 6)})` : 'Anonymous');
         let role = req.user?.role || (req.guestToken ? 'Guest' : 'Visitor');
@@ -160,24 +251,20 @@ class TrafficService {
 
     /**
      * 🔍 Behavioral Anomaly Detection Engine
-     * Runs per request — lightweight sliding-window analysis over the last 60 seconds
      */
     _checkAnomalies(ip, statusCode, path) {
         const now = Date.now();
-        const windowMs = 60 * 1000; // 1-minute window
+        const windowMs = 60 * 1000;
 
-        // Initialize per-IP window
         if (!this.ipWindows.has(ip)) {
             this.ipWindows.set(ip, []);
         }
         const window = this.ipWindows.get(ip);
         window.push({ timestamp: now, statusCode, path });
 
-        // Evict entries older than 1 minute
         const fresh = window.filter(e => now - e.timestamp < windowMs);
         this.ipWindows.set(ip, fresh);
 
-        // --- Rule 1: High request rate per IP (>50 req/min) ---
         if (fresh.length > ANOMALY.MAX_REQ_PER_MIN_PER_IP && !this.alertedIps.has(`rate_${ip}`)) {
             this.alertedIps.add(`rate_${ip}`);
             setTimeout(() => this.alertedIps.delete(`rate_${ip}`), windowMs);
@@ -188,7 +275,6 @@ class TrafficService {
             });
         }
 
-        // --- Rule 2: High 401 rate (>30% of req/min = brute-force) ---
         const errors401 = fresh.filter(e => e.statusCode === 401).length;
         const errorRate = fresh.length > 5 ? Math.round((errors401 / fresh.length) * 100) : 0;
         if (errorRate > ANOMALY.MAX_401_RATE_PCT && !this.alertedIps.has(`auth_${ip}`)) {
@@ -202,10 +288,9 @@ class TrafficService {
             });
         }
 
-        // --- Rule 3: Single-endpoint hammering (>100 req/min to same path) ---
         const pathCounts = {};
         for (const e of fresh) {
-            const stripped = e.path.split('?')[0]; // ignore query params
+            const stripped = e.path.split('?')[0];
             pathCounts[stripped] = (pathCounts[stripped] || 0) + 1;
         }
         for (const [p, count] of Object.entries(pathCounts)) {
@@ -223,9 +308,6 @@ class TrafficService {
         }
     }
 
-    /**
-     * Fire an anomaly alert via notificationService (lazy loaded)
-     */
     async _fireAnomalyAlert(eventKey, ip, details) {
         logger.warn(`[TrafficService IDS] Anomaly detected from ${ip}: ${details.rule}`);
         try {
@@ -243,9 +325,6 @@ class TrafficService {
         }
     }
 
-    /**
-     * Persist an hourly traffic snapshot to the database for forensics
-     */
     async _persistSnapshot() {
         try {
             const snapshot = {
@@ -254,6 +333,7 @@ class TrafficService {
                 bytes_out: this.bytesOut,
                 status_counts: this.statusCounts,
                 top_ips: this.getTopIps(),
+                top_endpoints: this.getTopEndpoints(10),
                 active_sessions: this.activeSessions.size,
                 captured_at: new Date().toISOString()
             };
@@ -275,6 +355,53 @@ class TrafficService {
     }
 
     /**
+     * Calculate Top API Endpoints accessed
+     */
+    getTopEndpoints(limit = 10) {
+        const total = this.totalRequests || 1;
+        const list = Array.from(this.endpointStats.values()).map(ep => {
+            const avgDuration = ep.count > 0 ? Math.round(ep.totalDurationMs / ep.count) : 0;
+            const errorCount = (ep.statusCounts['4xx'] || 0) + (ep.statusCounts['5xx'] || 0);
+            const errorRate = ep.count > 0 ? parseFloat(((errorCount / ep.count) * 100).toFixed(1)) : 0;
+            const percentage = parseFloat(((ep.count / total) * 100).toFixed(1));
+            const primaryMethod = Object.entries(ep.methods).sort((a, b) => b[1] - a[1])[0]?.[0] || 'GET';
+
+            return {
+                path: ep.path,
+                count: ep.count,
+                percentage,
+                methods: ep.methods,
+                primaryMethod,
+                avgDuration,
+                minDuration: ep.minDurationMs === Infinity ? 0 : ep.minDurationMs,
+                maxDuration: ep.maxDurationMs,
+                statusCounts: ep.statusCounts,
+                errorRate,
+                bytesIn: ep.bytesIn,
+                bytesOut: ep.bytesOut,
+                lastAccessed: ep.lastAccessed,
+                uniqueClients: ep.clientIps.size
+            };
+        });
+
+        return list.sort((a, b) => b.count - a.count).slice(0, limit);
+    }
+
+    /**
+     * Get HTTP method distribution
+     */
+    getMethodDistribution() {
+        const methods = { GET: 0, POST: 0, PUT: 0, DELETE: 0, PATCH: 0, OTHER: 0 };
+        for (const ep of this.endpointStats.values()) {
+            for (const [m, count] of Object.entries(ep.methods)) {
+                if (methods[m] !== undefined) methods[m] += count;
+                else methods.OTHER += count;
+            }
+        }
+        return methods;
+    }
+
+    /**
      * Get live telemetry payload
      */
     getLiveTelemetry() {
@@ -288,8 +415,11 @@ class TrafficService {
             errorRate: parseFloat(errorRate),
             statusCounts: this.statusCounts,
             activeSessionCount: this.activeSessions.size,
-            recentRequests: this.recentRequests.slice(0, 50),
-            topIps: this.getTopIps()
+            recentRequests: this.recentRequests.slice(0, 80),
+            topIps: this.getTopIps(),
+            topEndpoints: this.getTopEndpoints(12),
+            methodDistribution: this.getMethodDistribution(),
+            timeSeries: this.timeSeries
         };
     }
 
@@ -315,6 +445,14 @@ class TrafficService {
     }
 
     /**
+     * Clear recent requests stream buffer
+     */
+    clearBuffer() {
+        this.recentRequests = [];
+        return true;
+    }
+
+    /**
      * Calculate Top Client IPs
      */
     getTopIps() {
@@ -325,7 +463,7 @@ class TrafficService {
         return Object.entries(ipCounts)
             .map(([ip, count]) => ({ ip, count }))
             .sort((a, b) => b.count - a.count)
-            .slice(0, 5);
+            .slice(0, 6);
     }
 }
 
