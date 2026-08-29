@@ -105,7 +105,9 @@ class SiteMeshService {
         }
 
         let configuredLocation = 'Primary Datacenter / On-Premise Host';
-        let configuredSiteName = `${os.hostname()} (Primary Hub)`;
+        const defaultNodeName = process.env.NODE_NAME || process.env.SERVER_NAME || process.env.CLUSTER_NODE_NAME || os.hostname();
+        let configuredSiteName = `${defaultNodeName} (Primary Hub)`;
+
 
         try {
             const locRes = await db.query("SELECT value FROM app_settings WHERE key = 'site_location'");

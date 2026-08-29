@@ -479,9 +479,11 @@ router.get('/agents', authenticateToken, requireAdmin, async (req, res) => {
         const cpuModel = os.cpus()[0]?.model || 'Unknown CPU';
         const loadAvg = os.loadavg()[0];
 
+        const masterLabel = process.env.NODE_NAME || process.env.SERVER_NAME || process.env.CLUSTER_NODE_NAME || os.hostname();
         const masterNode = {
             id: 'master-local',
-            hostname: `${os.hostname()} (Master Server)`,
+            hostname: `${masterLabel} (Master Server)`,
+
             ip: '127.0.0.1',
             platform: os.platform(),
             online: true,

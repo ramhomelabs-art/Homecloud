@@ -570,14 +570,16 @@ storageRouter.get('/devices', authenticateToken, async (req, res) => {
         }
 
         const totalSize = drives.reduce((acc, d) => acc + (d.size || 0), 0);
+        const nodeName = process.env.NODE_NAME || process.env.SERVER_NAME || process.env.CLUSTER_NODE_NAME || os.hostname();
         const hostNode = {
             id: 'master_host',
-            name: `${os.hostname()} (Primary Master)`,
+            name: `${nodeName} (Primary Master)`,
             type: 'host',
             size: totalSize,
             children: drives,
             status: 'online'
         };
+
 
         const resultNodes = [hostNode];
 
