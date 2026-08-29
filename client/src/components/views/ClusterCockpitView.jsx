@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
     Cpu, Server, HardDrive, Globe, Activity, RefreshCw, 
     ShieldCheck, Zap, Radio, ArrowUpRight, ArrowDownRight, 
