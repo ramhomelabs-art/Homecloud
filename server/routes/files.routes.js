@@ -217,105 +217,134 @@ const deleteSmbFile = async (targetPath) => {
 };
 
 const smbRenameOrMove = async (srcPath, destPath) => {
-    const sharesRes = await db.query('SELECT * FROM network_shares');
-    let cleanSrc = srcPath.trim().replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
-    const srcParts = cleanSrc.split('/');
-    const srcHost = srcParts[0];
-    const srcShare = srcParts[1] || '';
-    const srcInternal = srcParts.slice(2).join('/');
+    try {
+        const sharesRes = await db.query('SELECT * FROM network_shares');
+        let cleanSrc = srcPath.trim().replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
+        const srcParts = cleanSrc.split('/');
+        const srcHost = srcParts[0];
+        const srcShare = srcParts[1] || '';
+        const srcInternal = srcParts.slice(2).join('/');
 
-    let cleanDest = destPath.trim().replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
-    const destParts = cleanDest.split('/');
-    let destInternal = destParts.slice(2).join('/');
-    if (destParts.length <= 2 || !destInternal) {
-        destInternal = path.basename(cleanSrc);
-    } else if (destInternal.endsWith('/') || !destInternal.includes('.')) {
-        destInternal = `${destInternal.replace(/\/+$/, '')}/${path.basename(cleanSrc)}`;
-    }
+        let cleanDest = destPath.trim().replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
+        const destParts = cleanDest.split('/');
+        const destHost = destParts[0];
+        const destShare = destParts[1] || '';
+        let destInternal = destParts.slice(2).join('/');
+        if (destParts.length <= 2 || !destInternal) {
+            destInternal = path.basename(cleanSrc);
+        } else if (destInternal.endsWith('/') || !destInternal.includes('.')) {
+            destInternal = `${destInternal.replace(/\/+$/, '')}/${path.basename(cleanSrc)}`;
+        }
 
-    const uncShare = `//${srcHost}/${srcShare}`;
-    const matchedShare = sharesRes.rows.find(row => {
-        let cleanRow = (row.path || '').replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
-        const rowParts = cleanRow.split('/');
-        return rowParts[0]?.toLowerCase() === srcHost.toLowerCase() && 
-               (rowParts[1] || '').toLowerCase() === srcShare.toLowerCase();
-    });
+        if (srcHost.toLowerCase() !== destHost.toLowerCase() || srcShare.toLowerCase() !== destShare.toLowerCase()) {
+            await smbCopyFile(srcPath, destPath);
+            await deleteSmbFile(srcPath);
+            return true;
+        }
 
-    const user = matchedShare?.username || '';
-    let pass = '';
-    if (matchedShare?.password) {
-        try { pass = cryptoHelper.decrypt(matchedShare.password); } catch (e) { pass = matchedShare.password; }
-    }
-
-    const env = { ...process.env, PASSWD: pass || '' };
-    const safeUser = (user || '').replace(/[;&|`$<>\\"']/g, '');
-    const safeShare = uncShare.replace(/[;&|`$<>\\"']/g, '');
-    const renameCmd = `rename "${srcInternal.replace(/"/g, '')}" "${destInternal.replace(/"/g, '')}"`;
-
-    const cmd = safeUser
-        ? `smbclient "${safeShare}" -U "${safeUser}" -t 15 -c '${renameCmd}'`
-        : `smbclient "${safeShare}" -N -t 15 -c '${renameCmd}'`;
-
-    return new Promise((resolve, reject) => {
-        exec(cmd, { env, timeout: 20000 }, (err, stdout, stderr) => {
-            if (err) {
-                const errMsg = (stderr || stdout || err.message || '').trim();
-                return reject(new Error(`SMB operation failed: ${errMsg}`));
-            }
-            resolve(true);
+        const uncShare = `//${srcHost}/${srcShare}`;
+        const matchedShare = sharesRes.rows.find(row => {
+            let cleanRow = (row.path || '').replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
+            const rowParts = cleanRow.split('/');
+            return rowParts[0]?.toLowerCase() === srcHost.toLowerCase() && 
+                   (rowParts[1] || '').toLowerCase() === srcShare.toLowerCase();
         });
-    });
+
+        const user = matchedShare?.username || '';
+        let pass = '';
+        if (matchedShare?.password) {
+            try { pass = cryptoHelper.decrypt(matchedShare.password); } catch (e) { pass = matchedShare.password; }
+        }
+
+        const env = { ...process.env, PASSWD: pass || '' };
+        const safeUser = (user || '').replace(/[;&|`$<>\\"']/g, '');
+        const safeShare = uncShare.replace(/[;&|`$<>\\"']/g, '');
+
+        const winSrc = srcInternal.replace(/\//g, '\\');
+        const winDest = destInternal.replace(/\//g, '\\');
+        const renameCmd = `rename "${winSrc.replace(/"/g, '')}" "${winDest.replace(/"/g, '')}"`;
+
+        const cmd = safeUser
+            ? `smbclient "${safeShare}" -U "${safeUser}" -t 15 -c '${renameCmd}'`
+            : `smbclient "${safeShare}" -N -t 15 -c '${renameCmd}'`;
+
+        await new Promise((resolve, reject) => {
+            exec(cmd, { env, timeout: 20000 }, (err, stdout, stderr) => {
+                if (err) {
+                    const errMsg = (stderr || stdout || err.message || '').trim();
+                    return reject(new Error(errMsg));
+                }
+                resolve(true);
+            });
+        });
+        return true;
+    } catch (moveErr) {
+        logger.warn(`[SMB Move] Native rename fallback to copy+delete: ${moveErr.message}`);
+        await smbCopyFile(srcPath, destPath);
+        await deleteSmbFile(srcPath);
+        return true;
+    }
 };
 
 const smbCopyFile = async (srcPath, destPath) => {
     const sharesRes = await db.query('SELECT * FROM network_shares');
-    let cleanSrc = srcPath.trim().replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
-    const srcParts = cleanSrc.split('/');
-    const srcHost = srcParts[0];
-    const srcShare = srcParts[1] || '';
-    const srcInternal = srcParts.slice(2).join('/');
-
-    let cleanDest = destPath.trim().replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
-    const destParts = cleanDest.split('/');
-    let destInternal = destParts.slice(2).join('/');
-    if (destParts.length <= 2 || !destInternal) {
-        destInternal = path.basename(cleanSrc);
-    } else if (destInternal.endsWith('/') || !destInternal.includes('.')) {
-        destInternal = `${destInternal.replace(/\/+$/, '')}/${path.basename(cleanSrc)}`;
-    }
-
-    const uncShare = `//${srcHost}/${srcShare}`;
-    const matchedShare = sharesRes.rows.find(row => {
-        let cleanRow = (row.path || '').replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
-        const rowParts = cleanRow.split('/');
-        return rowParts[0]?.toLowerCase() === srcHost.toLowerCase() && 
-               (rowParts[1] || '').toLowerCase() === srcShare.toLowerCase();
-    });
-
-    const user = matchedShare?.username || '';
-    let pass = '';
-    if (matchedShare?.password) {
-        try { pass = cryptoHelper.decrypt(matchedShare.password); } catch (e) { pass = matchedShare.password; }
-    }
-
-    const env = { ...process.env, PASSWD: pass || '' };
-    const safeUser = (user || '').replace(/[;&|`$<>\\"']/g, '');
-    const safeShare = uncShare.replace(/[;&|`$<>\\"']/g, '');
+    const isSrcSmb = srcPath && (srcPath.startsWith('\\\\') || srcPath.startsWith('//') || srcPath.startsWith('smb://'));
+    const isDestSmb = destPath && (destPath.startsWith('\\\\') || destPath.startsWith('//') || destPath.startsWith('smb://'));
 
     const spawn = require('child_process').spawn;
-    const getArgs = safeUser
-        ? ['-U', safeUser, safeShare, '-t', '30', '-c', `get "${srcInternal.replace(/"/g, '')}" -`]
-        : ['-N', safeShare, '-t', '30', '-c', `get "${srcInternal.replace(/"/g, '')}" -`];
 
-    const isDestSmb = destPath.startsWith('\\\\') || destPath.startsWith('//') || destPath.startsWith('smb://');
-    if (isDestSmb) {
-        const putArgs = safeUser
-            ? ['-U', safeUser, safeShare, '-t', '30', '-c', `put - "${destInternal.replace(/"/g, '')}"`]
-            : ['-N', safeShare, '-t', '30', '-c', `put - "${destInternal.replace(/"/g, '')}"`];
+    const getSmbDetails = (rawPath) => {
+        let clean = rawPath.trim().replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
+        const parts = clean.split('/');
+        const host = parts[0];
+        const share = parts[1] || '';
+        const internal = parts.slice(2).join('/');
+        const unc = `//${host}/${share}`;
+
+        const matched = sharesRes.rows.find(row => {
+            let cleanRow = (row.path || '').replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
+            const rowParts = cleanRow.split('/');
+            return rowParts[0]?.toLowerCase() === host.toLowerCase() && 
+                   (rowParts[1] || '').toLowerCase() === share.toLowerCase();
+        });
+
+        const user = matched?.username || '';
+        let pass = '';
+        if (matched?.password) {
+            try { pass = cryptoHelper.decrypt(matched.password); } catch (e) { pass = matched.password; }
+        }
+
+        return { host, share, internal, unc, user, pass };
+    };
+
+    if (isSrcSmb && isDestSmb) {
+        const src = getSmbDetails(srcPath);
+        const dest = getSmbDetails(destPath);
+        
+        let destInternal = dest.internal;
+        if (!destInternal || destInternal.endsWith('/') || !destInternal.includes('.')) {
+            destInternal = `${destInternal.replace(/\/+$/, '')}/${path.basename(srcPath.replace(/\\/g, '/'))}`.replace(/^\//, '');
+        }
+
+        const srcEnv = { ...process.env, PASSWD: src.pass || '' };
+        const destEnv = { ...process.env, PASSWD: dest.pass || '' };
+
+        const safeSrcUser = (src.user || '').replace(/[;&|`$<>\\"']/g, '');
+        const safeSrcShare = src.unc.replace(/[;&|`$<>\\"']/g, '');
+        const safeDestUser = (dest.user || '').replace(/[;&|`$<>\\"']/g, '');
+        const safeDestShare = dest.unc.replace(/[;&|`$<>\\"']/g, '');
+
+        const getArgs = safeSrcUser
+            ? ['-U', safeSrcUser, safeSrcShare, '-t', '30', '-c', `get "${src.internal.replace(/"/g, '')}" -`]
+            : ['-N', safeSrcShare, '-t', '30', '-c', `get "${src.internal.replace(/"/g, '')}" -`];
+
+        const putArgs = safeDestUser
+            ? ['-U', safeDestUser, safeDestShare, '-t', '30', '-c', `put - "${destInternal.replace(/"/g, '')}"`]
+            : ['-N', safeDestShare, '-t', '30', '-c', `put - "${destInternal.replace(/"/g, '')}"`];
 
         return new Promise((resolve, reject) => {
-            const getProc = spawn('smbclient', getArgs, { env });
-            const putProc = spawn('smbclient', putArgs, { env });
+            const getProc = spawn('smbclient', getArgs, { env: srcEnv });
+            const putProc = spawn('smbclient', putArgs, { env: destEnv });
 
             getProc.stdout.pipe(putProc.stdin);
 
@@ -328,22 +357,63 @@ const smbCopyFile = async (srcPath, destPath) => {
             getProc.on('error', reject);
             putProc.on('error', reject);
         });
-    } else {
+    } else if (isSrcSmb && !isDestSmb) {
+        const src = getSmbDetails(srcPath);
+        const srcEnv = { ...process.env, PASSWD: src.pass || '' };
+        const safeSrcUser = (src.user || '').replace(/[;&|`$<>\\"']/g, '');
+        const safeSrcShare = src.unc.replace(/[;&|`$<>\\"']/g, '');
+
+        const getArgs = safeSrcUser
+            ? ['-U', safeSrcUser, safeSrcShare, '-t', '30', '-c', `get "${src.internal.replace(/"/g, '')}" -`]
+            : ['-N', safeSrcShare, '-t', '30', '-c', `get "${src.internal.replace(/"/g, '')}" -`];
+
         const resolvedDest = storageProvider.resolvePath(destPath);
         const finalDestFile = fs.existsSync(resolvedDest) && fs.statSync(resolvedDest).isDirectory()
-            ? path.join(resolvedDest, path.basename(srcPath))
+            ? path.join(resolvedDest, path.basename(srcPath.replace(/\\/g, '/')))
             : resolvedDest;
 
         return new Promise((resolve, reject) => {
-            const getProc = spawn('smbclient', getArgs, { env });
+            const getProc = spawn('smbclient', getArgs, { env: srcEnv });
             const outStream = fs.createWriteStream(finalDestFile);
             getProc.stdout.pipe(outStream);
             outStream.on('finish', () => resolve(true));
             outStream.on('error', reject);
             getProc.on('error', reject);
         });
+    } else if (!isSrcSmb && isDestSmb) {
+        const dest = getSmbDetails(destPath);
+        let destInternal = dest.internal;
+        if (!destInternal || destInternal.endsWith('/') || !destInternal.includes('.')) {
+            destInternal = `${destInternal.replace(/\/+$/, '')}/${path.basename(srcPath.replace(/\\/g, '/'))}`.replace(/^\//, '');
+        }
+
+        const destEnv = { ...process.env, PASSWD: dest.pass || '' };
+        const safeDestUser = (dest.user || '').replace(/[;&|`$<>\\"']/g, '');
+        const safeDestShare = dest.unc.replace(/[;&|`$<>\\"']/g, '');
+
+        const putArgs = safeDestUser
+            ? ['-U', safeDestUser, safeDestShare, '-t', '30', '-c', `put - "${destInternal.replace(/"/g, '')}"`]
+            : ['-N', safeDestShare, '-t', '30', '-c', `put - "${destInternal.replace(/"/g, '')}"`];
+
+        const resolvedSrc = storageProvider.resolvePath(srcPath);
+        return new Promise((resolve, reject) => {
+            const inStream = fs.createReadStream(resolvedSrc);
+            const putProc = spawn('smbclient', putArgs, { env: destEnv });
+
+            inStream.pipe(putProc.stdin);
+
+            let putErr = '';
+            putProc.stderr.on('data', d => { putErr += d.toString(); });
+            putProc.on('close', code => {
+                if (code === 0) resolve(true);
+                else reject(new Error(putErr || `SMB copy failed with code ${code}`));
+            });
+            inStream.on('error', reject);
+            putProc.on('error', reject);
+        });
     }
 };
+
 
 const moveToTrash = async (targetPath, userId, req) => {
     const isSmb = targetPath && (targetPath.startsWith('\\\\') || targetPath.startsWith('//') || targetPath.startsWith('smb://'));
