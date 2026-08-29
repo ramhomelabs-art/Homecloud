@@ -93,12 +93,13 @@ class FileService {
     }
 
     async getShareById(idOrToken) {
+        if (!idOrToken) return null;
         const res = await db.query(`
             SELECT sl.*, ss.password_hash, ss.email_verification, ss.max_views, ss.max_downloads
             FROM share_links sl
             LEFT JOIN share_security ss ON ss.share_id = sl.id
-            WHERE sl.id::text = $1 OR sl.token = $1
-        `, [idOrToken]);
+            WHERE sl.id::text = $1 OR UPPER(sl.token) = UPPER($1)
+        `, [idOrToken.trim()]);
         return res.rows[0];
     }
 
@@ -115,7 +116,8 @@ class FileService {
     }
 
     async deleteShare(idOrToken) {
-        await db.query('DELETE FROM share_links WHERE id::text = $1 OR token = $1', [idOrToken]);
+        if (!idOrToken) return;
+        await db.query('DELETE FROM share_links WHERE id::text = $1 OR UPPER(token) = UPPER($1)', [idOrToken.trim()]);
         logger.info(`[FileService] Deleted share link: ${idOrToken}`);
     }
 

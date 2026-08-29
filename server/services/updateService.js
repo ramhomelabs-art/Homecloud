@@ -10,7 +10,7 @@ const logger = require('../utils/logger');
 const clusterService = require('./clusterService');
 const siteMeshService = require('./siteMeshService');
 
-const CURRENT_VERSION = '2.4.1';
+const CURRENT_VERSION = '2.4.2';
 const DEFAULT_REPO = 'ramhomelabs-art/Homecloud';
 
 class UpdateService {
@@ -448,10 +448,10 @@ class UpdateService {
             log('✅ Application files successfully extracted and synchronized.');
 
             // Step 4: Run Dependency Updates & DB Migrations
-            log('Step 4/5: Running database migrations and dependency verifications...');
+            log('Step 4/5: Running database migrations and schema updates...');
             try {
-                await db.query('SELECT NOW()');
-                log('Database connection verified. Schema constraints intact.');
+                await db.initDatabase();
+                log('✅ Database schema verified and all migrations applied successfully.');
             } catch (dbErr) {
                 log(`Database notice: ${dbErr.message}`);
             }

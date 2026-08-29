@@ -113,7 +113,7 @@ router.get('/list', authenticateToken, async (req, res) => {
 // ─── DELETE /api/v1/shares/:token ─────────────────────────────────────────────
 router.delete('/:token', authenticateToken, requireRole(ADMIN_ROLES), async (req, res) => {
     try {
-        await db.query('DELETE FROM share_links WHERE token = $1', [req.params.token]);
+        await db.query('DELETE FROM share_links WHERE UPPER(token) = UPPER($1) OR id::text = $1', [req.params.token]);
         logger.info(`[Shares] Revoked share ${req.params.token}`);
         res.json({ success: true });
     } catch (e) {
@@ -126,7 +126,7 @@ router.delete('/:token', authenticateToken, requireRole(ADMIN_ROLES), async (req
 router.put('/:token', authenticateToken, requireRole(ADMIN_ROLES), async (req, res) => {
     const { password, email, expiryHours, maxViews } = req.body;
     try {
-        const slRes = await db.query('SELECT id FROM share_links WHERE token = $1', [req.params.token]);
+        const slRes = await db.query('SELECT id FROM share_links WHERE UPPER(token) = UPPER($1) OR id::text = $1', [req.params.token]);
         if (!slRes.rows[0]) return res.status(404).json({ error: 'Share not found' });
         const shareId = slRes.rows[0].id;
 

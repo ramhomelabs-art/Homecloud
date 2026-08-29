@@ -33,7 +33,12 @@ router.post('/verify', async (req, res) => {
     if (!id) return res.status(400).json({ error: 'Share ID is required' });
 
     try {
-        const shareRes = await db.query('SELECT * FROM share_links WHERE id = $1', [id]);
+        let shareRes = await db.query(`
+            SELECT sl.*, ss.password_hash, ss.email_verification, ss.max_views, ss.max_downloads
+            FROM share_links sl
+            LEFT JOIN share_security ss ON ss.share_id = sl.id
+            WHERE UPPER(sl.token) = UPPER($1) OR sl.id::text = $1
+        `, [id.trim()]);
         const share = shareRes.rows[0];
         if (!share) return res.status(404).json({ error: 'Share link not found or expired' });
 

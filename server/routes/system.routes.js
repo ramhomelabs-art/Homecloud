@@ -79,12 +79,21 @@ router.get('/settings', authenticateToken, async (req, res) => {
 
 
 // ── POST /api/v1/system/update ──────────────────────────────────────────────
-router.post('/update', authenticateToken, requireRole(['Admin']), (req, res) => {
+router.post('/update', authenticateToken, requireRole(['Admin']), async (req, res) => {
     res.json({ message: 'Update process started in the background. NexaDisk will restart shortly.' });
 
     const updateCmd = process.platform === 'win32' ? 'update.bat' : 'sudo ./update.sh';
 
-    setTimeout(() => {
+    setTimeout(async () => {
+        logger.info(`[System Update] Running automatic database migrations...`);
+        try {
+            const db = require('../config/database');
+            await db.initDatabase();
+            logger.info(`[System Update] Database schemas updated successfully.`);
+        } catch (dbErr) {
+            logger.warn(`[System Update] Migration notice: ${dbErr.message}`);
+        }
+
         logger.info(`[System Update] Executing update command: "${updateCmd}"`);
         exec(updateCmd, { cwd: path.join(__dirname, '../..') }, (err, stdout, stderr) => {
             if (err) {
