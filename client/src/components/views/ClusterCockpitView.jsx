@@ -386,12 +386,12 @@ export default function ClusterCockpitView({
         const measurePing = async () => {
             const t0 = performance.now();
             try {
-                await axios.get('/api/v1/system/health', { timeout: 3000 });
+                await axios.get('/api/v1/health', { timeout: 3000 });
                 const rtt = Math.max(1, Math.round(performance.now() - t0));
                 if (isMounted) setLiveApiPing(rtt);
             } catch {
                 try {
-                    await axios.get('/api/v1/system/stats', { timeout: 3000 });
+                    await axios.get('/health', { timeout: 3000 });
                     const rtt = Math.max(1, Math.round(performance.now() - t0));
                     if (isMounted) setLiveApiPing(rtt);
                 } catch {}

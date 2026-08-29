@@ -405,7 +405,7 @@ app.use('/api/v1/updates', updateRouter);
 app.use('/api/v1/deployment', deploymentRouter);
 
 // --- HEALTH CHECK ENDPOINTS ---
-app.get(['/api/v1/health', '/health'], (req, res) => {
+app.get(['/api/v1/health', '/api/v1/system/health', '/api/v1/system/stats', '/health', '/api/health'], (req, res) => {
     res.json({
         status: 'ok',
         service: 'NexaDisk Master Cluster',
