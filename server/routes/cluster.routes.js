@@ -263,9 +263,49 @@ storageRouter.get('/local', authenticateToken, async (req, res) => {
             } catch (winErr) {
                 logger.warn(`[Cluster/Storage] Win32 logical disk query failed: ${winErr.message}`);
             }
+        } else {
+            try {
+                const dfOut = execSync('df -kP', { timeout: 3500 }).toString();
+                const lines = dfOut.trim().split('\n').slice(1);
+                const linuxDisks = [];
+                for (const line of lines) {
+                    const parts = line.trim().split(/\s+/);
+                    if (parts.length >= 6) {
+                        const fsName = parts[0];
+                        const totalKb = parseInt(parts[1], 10) || 0;
+                        const usedKb = parseInt(parts[2], 10) || 0;
+                        const availKb = parseInt(parts[3], 10) || 0;
+                        const mount = parts[5];
+                        
+                        const isReal = mount === '/' || mount.startsWith('/mnt') || mount.startsWith('/media') || mount.startsWith('/var/lib/nexadisk') || fsName.startsWith('/dev/');
+                        if (isReal && totalKb > 0 && !mount.startsWith('/etc') && !mount.startsWith('/sys') && !mount.startsWith('/proc') && !mount.startsWith('/dev/pts')) {
+                            const size = totalKb * 1024;
+                            const free = availKb * 1024;
+                            const used = usedKb * 1024;
+                            const pct = size > 0 ? Math.round((used / size) * 100) : 0;
+                            linuxDisks.push({
+                                mount: mount,
+                                name: path.basename(mount) || 'Root',
+                                label: mount === '/' ? 'System Root' : `Storage Mount (${mount})`,
+                                size: size,
+                                free: free,
+                                used: used,
+                                percentage: pct,
+                                type: 'disk'
+                            });
+                        }
+                    }
+                }
+                if (linuxDisks.length > 0) {
+                    disks = linuxDisks;
+                }
+            } catch (linuxErr) {
+                logger.warn(`[Cluster/Storage] Linux df logical disk query failed: ${linuxErr.message}`);
+            }
         }
 
         if (disks.length === 0) {
+
             let disk = cachedDiskSpace;
             const now = Date.now();
             if (!disk || (now - lastDiskQueryTime > 10000)) {

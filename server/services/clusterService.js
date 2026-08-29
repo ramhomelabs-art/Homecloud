@@ -392,7 +392,9 @@ class ClusterService {
                     const lines = data.split('\n');
                     for (const line of lines) {
                         if (line.includes(':')) {
-                            const parts = line.split(':')[1].trim().split(/\s+/);
+                            const [iface, dataPart] = line.split(':');
+                            if (iface.trim() === 'lo') continue;
+                            const parts = dataPart.trim().split(/\s+/);
                             if (parts.length >= 9) {
                                 rx += parseInt(parts[0], 10) || 0;
                                 tx += parseInt(parts[8], 10) || 0;
@@ -401,6 +403,7 @@ class ClusterService {
                     }
                     resolve({ rx, tx });
                 });
+
             }
         });
     }

@@ -14,8 +14,9 @@ RUN npm run build
 FROM node:20-alpine AS runtime
 WORKDIR /app
 
-# Install hardware telemetry & media processing utilities
-RUN apk add --no-cache smartmontools ffmpeg openssl bash iproute2 ca-certificates samba-client cifs-utils
+# Install hardware telemetry, compression, media processing & networking utilities
+RUN apk add --no-cache smartmontools ffmpeg openssl bash iproute2 ca-certificates samba-client cifs-utils p7zip curl tzdata procps
+
 
 # Install server dependencies
 WORKDIR /app/server
