@@ -409,7 +409,7 @@ app.get(['/api/v1/health', '/api/v1/system/health', '/api/v1/system/stats', '/he
     res.json({
         status: 'ok',
         service: 'NexaDisk Master Cluster',
-        version: '2.4.2',
+        version: '2.4.3',
         uptime: process.uptime(),
         timestamp: new Date().toISOString()
     });

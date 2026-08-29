@@ -149,18 +149,50 @@ const listShareSmbFiles = async (sharePath, subPath = '') => {
         try { pass = cryptoHelper.decrypt(matchedShare.password); } catch (e) { pass = matchedShare.password; }
     }
 
-    const cdCmd = internalSub ? `cd "${internalSub.replace(/"/g, '')}"; ` : '';
-    const listCmd = `${cdCmd}ls`;
-
     const env = { ...process.env, PASSWD: pass || '' };
     const safeUser = (user || '').replace(/[;&|`$<>\\"']/g, '');
     const safeShare = uncShare.replace(/[;&|`$<>\\"']/g, '');
+    const { exec } = require('child_process');
+
+    // Case 1: Check if the target internal path is a single file directly
+    if (internalSub) {
+        const allinfoCmd = safeUser
+            ? `smbclient "${safeShare}" -U "${safeUser}" -t 10 -c 'allinfo "${internalSub.replace(/"/g, '')}"'`
+            : `smbclient "${safeShare}" -N -t 10 -c 'allinfo "${internalSub.replace(/"/g, '')}"'`;
+
+        const infoOut = await new Promise((resolve) => {
+            exec(allinfoCmd, { env, timeout: 10000 }, (err, stdout) => {
+                resolve(stdout || '');
+            });
+        });
+
+        const isDirMatch = infoOut.match(/attributes:\s*([A-Za-z0-9_]+)/i);
+        const isFile = infoOut.includes('size:') && (!isDirMatch || !isDirMatch[1].includes('D'));
+
+        if (isFile) {
+            let size = 0;
+            const sizeMatch = infoOut.match(/size:\s+(\d+)/i) || infoOut.match(/allocation_size:\s+(\d+)/i);
+            if (sizeMatch) size = parseInt(sizeMatch[1], 10);
+            const fileName = path.basename(internalSub);
+            return [{
+                name: fileName,
+                path: '',
+                isDirectory: false,
+                size,
+                modified: new Date(),
+                extension: path.extname(fileName).slice(1).toLowerCase()
+            }];
+        }
+    }
+
+    // Case 2: Target is a directory — list directory contents
+    const cdCmd = internalSub ? `cd "${internalSub.replace(/"/g, '')}"; ` : '';
+    const listCmd = `${cdCmd}ls`;
 
     const cmd = safeUser
         ? `smbclient "${safeShare}" -U "${safeUser}" -t 10 -c '${listCmd}'`
         : `smbclient "${safeShare}" -N -t 10 -c '${listCmd}'`;
 
-    const { exec } = require('child_process');
     return new Promise((resolve, reject) => {
         exec(cmd, { env, timeout: 15000 }, (err, stdout, stderr) => {
             if (err) {
@@ -202,12 +234,70 @@ const listShareSmbFiles = async (sharePath, subPath = '') => {
     });
 };
 
+const streamShareSmbFile = async (sharePath, relFilePath = '', req, res, isInline = false) => {
+    const sharesRes = await db.query('SELECT * FROM network_shares');
+    let combined = sharePath;
+    if (relFilePath) {
+        combined = path.join(sharePath, relFilePath);
+    }
+    let clean = combined.trim().replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
+    const parts = clean.split('/');
+    const host = parts[0];
+    const shareName = parts[1] || '';
+    const uncShare = `//${host}/${shareName}`;
+    const internalFile = parts.slice(2).join('/');
+
+    const matchedShare = sharesRes.rows.find(row => {
+        let cleanRow = (row.path || '').replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
+        const rowParts = cleanRow.split('/');
+        return rowParts[0]?.toLowerCase() === host.toLowerCase() && 
+               (rowParts[1] || '').toLowerCase() === shareName.toLowerCase();
+    });
+
+    const user = matchedShare?.username || '';
+    let pass = '';
+    if (matchedShare?.password) {
+        try { pass = cryptoHelper.decrypt(matchedShare.password); } catch (e) { pass = matchedShare.password; }
+    }
+
+    const env = { ...process.env, PASSWD: pass || '' };
+    const safeUser = (user || '').replace(/[;&|`$<>\\"']/g, '');
+    const safeShare = uncShare.replace(/[;&|`$<>\\"']/g, '');
+    const smbCmd = `get "${internalFile.replace(/"/g, '')}" -`;
+
+    const { spawn } = require('child_process');
+    const args = safeUser
+        ? ['-U', safeUser, safeShare, '-t', '30', '-c', smbCmd]
+        : ['-N', safeShare, '-t', '30', '-c', smbCmd];
+
+    const fileName = path.basename(internalFile);
+    const mime = require('mime-types');
+    const mimeType = (mime && mime.lookup && mime.lookup(fileName)) || 'application/octet-stream';
+
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    if (isInline) {
+        res.setHeader('Content-Type', mimeType);
+        res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
+    } else {
+        res.setHeader('Content-Type', mimeType);
+        res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    }
+
+    const proc = spawn('smbclient', args, { env });
+    proc.on('error', (err) => {
+        logger.error(`[SMB Download Spawn Error] ${err.message}`);
+        if (!res.headersSent) res.status(500).json({ error: `SMB stream unavailable: ${err.message}` });
+    });
+    proc.stdout.pipe(res);
+};
+
 // Strict path boundary validation (immune to substring prefix traversal)
 const isWithinRoot = (rootDir, targetDir) => {
     if (!rootDir || !targetDir) return false;
-    const normRoot = path.normalize(rootDir).toLowerCase();
-    const normTarget = path.normalize(targetDir).toLowerCase();
+    const normRoot = rootDir.replace(/\\/g, '/').toLowerCase();
+    const normTarget = targetDir.replace(/\\/g, '/').toLowerCase();
     if (normRoot === normTarget) return true;
+    if (normTarget.startsWith(normRoot.endsWith('/') ? normRoot : normRoot + '/')) return true;
     const rel = path.relative(normRoot, normTarget);
     return !rel.startsWith('..') && !path.isAbsolute(rel);
 };
@@ -606,6 +696,11 @@ router.get('/stream', async (req, res) => {
         }
 
         if (!fs.existsSync(fullPath)) {
+            const isSmb = (share.path || '').startsWith('\\\\') || (share.path || '').startsWith('//') || (share.path || '').startsWith('smb://');
+            if (isSmb) {
+                await logAccess(share.id, req, intent === 'stream' ? 'stream_get' : 'download');
+                return await streamShareSmbFile(share.path, targetRel, req, res, intent === 'stream');
+            }
             return res.status(404).json({ error: 'File not found' });
         }
 
@@ -651,6 +746,11 @@ router.post('/stream', async (req, res) => {
         }
 
         if (!fs.existsSync(fullPath)) {
+            const isSmb = (share.path || '').startsWith('\\\\') || (share.path || '').startsWith('//') || (share.path || '').startsWith('smb://');
+            if (isSmb) {
+                await logAccess(share.id, req, 'download');
+                return await streamShareSmbFile(share.path, targetRel, req, res, false);
+            }
             return res.status(404).json({ error: 'File not found' });
         }
 

@@ -10,7 +10,7 @@ const logger = require('../utils/logger');
 
 async function runMigration() {
     console.log('---------------------------------------------------------');
-    console.log('⚡ NexaDisk Database Schema & Migration Runner (v2.4.2)');
+    console.log('⚡ NexaDisk Database Schema & Migration Runner (v2.4.3)');
     console.log('---------------------------------------------------------');
     console.log('Connecting to PostgreSQL database...');
 
