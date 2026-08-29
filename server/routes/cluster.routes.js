@@ -268,6 +268,8 @@ storageRouter.get('/local', authenticateToken, async (req, res) => {
                 const dfOut = execSync('df -kP', { timeout: 3500 }).toString();
                 const lines = dfOut.trim().split('\n').slice(1);
                 const linuxDisks = [];
+                const seenDevices = new Set();
+
                 for (const line of lines) {
                     const parts = line.trim().split(/\s+/);
                     if (parts.length >= 6) {
@@ -277,16 +279,37 @@ storageRouter.get('/local', authenticateToken, async (req, res) => {
                         const availKb = parseInt(parts[3], 10) || 0;
                         const mount = parts[5];
                         
-                        const isReal = mount === '/' || mount.startsWith('/mnt') || mount.startsWith('/media') || mount.startsWith('/var/lib/nexadisk') || fsName.startsWith('/dev/');
-                        if (isReal && totalKb > 0 && !mount.startsWith('/etc') && !mount.startsWith('/sys') && !mount.startsWith('/proc') && !mount.startsWith('/dev/pts')) {
+                        // Exclude virtual OS mountpoints
+                        if (mount.startsWith('/etc') || mount.startsWith('/sys') || mount.startsWith('/proc') || mount.startsWith('/dev') || mount.startsWith('/run') || mount.startsWith('/tmp')) {
+                            continue;
+                        }
+
+                        // Ignore internal container duplicate sub-mounts sharing the same root partition
+                        if (mount.startsWith('/var/lib/nexadisk/trash') || mount.startsWith('/var/lib/nexadisk/profiles') || mount.startsWith('/var/lib/nexadisk/backups')) {
+                            continue;
+                        }
+
+                        const isStorageRoot = mount === storageProvider.localBase || mount === '/var/lib/nexadisk/storage';
+                        const isSystemRoot = mount === '/';
+                        const isExternalMount = mount.startsWith('/mnt') || mount.startsWith('/media') || mount.startsWith('/data') || mount.startsWith('/srv');
+                        const isBlockDev = fsName.startsWith('/dev/') && !seenDevices.has(fsName);
+
+                        if ((isSystemRoot || isStorageRoot || isExternalMount || isBlockDev) && totalKb > 0) {
+                            seenDevices.add(fsName);
                             const size = totalKb * 1024;
                             const free = availKb * 1024;
                             const used = usedKb * 1024;
                             const pct = size > 0 ? Math.round((used / size) * 100) : 0;
+                            
+                            let label = 'System Root';
+                            if (isStorageRoot) label = 'NexaDisk Data Pool';
+                            else if (isExternalMount) label = `External Drive (${path.basename(mount)})`;
+                            else if (mount !== '/') label = `Volume (${mount})`;
+
                             linuxDisks.push({
                                 mount: mount,
                                 name: path.basename(mount) || 'Root',
-                                label: mount === '/' ? 'System Root' : `Storage Mount (${mount})`,
+                                label: label,
                                 size: size,
                                 free: free,
                                 used: used,
@@ -302,6 +325,7 @@ storageRouter.get('/local', authenticateToken, async (req, res) => {
             } catch (linuxErr) {
                 logger.warn(`[Cluster/Storage] Linux df logical disk query failed: ${linuxErr.message}`);
             }
+
         }
 
         if (disks.length === 0) {
