@@ -529,13 +529,13 @@ export default function ClusterCockpitView({
                             </div>
                         </div>
 
-                        {/* Interactive Wave SVG */}
+                        {/* Interactive Wave SVG Canvas */}
                         <div 
                             style={{ 
                                 position: 'relative', 
                                 width: '100%', 
-                                height: `${svgHeight}px`, 
-                                background: 'rgba(0, 0, 0, 0.25)', 
+                                height: `${svgHeight + 10}px`, 
+                                background: 'var(--bg-surface-2)', 
                                 borderRadius: '12px', 
                                 overflow: 'hidden', 
                                 border: '1px solid var(--border-subtle)' 
@@ -549,22 +549,27 @@ export default function ClusterCockpitView({
                             }}
                             onMouseLeave={() => setHoveredDataPoint(null)}
                         >
-                            <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} preserveAspectRatio="none" style={{ width: '100%', height: '100%', display: 'block' }}>
+                            <svg viewBox={`0 0 ${svgWidth} ${svgHeight + 10}`} preserveAspectRatio="none" style={{ width: '100%', height: '100%', display: 'block' }}>
                                 <defs>
                                     <linearGradient id="cyberRxGrad" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="0%" stopColor="#00f2ff" stopOpacity="0.3" />
-                                        <stop offset="100%" stopColor="#00f2ff" stopOpacity="0.0" />
+                                        <stop offset="0%" stopColor="#00f2ff" stopOpacity="0.35" />
+                                        <stop offset="100%" stopColor="#00f2ff" stopOpacity="0.02" />
                                     </linearGradient>
                                     <linearGradient id="cyberTxGrad" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="0%" stopColor="#f2c94c" stopOpacity="0.3" />
-                                        <stop offset="100%" stopColor="#f2c94c" stopOpacity="0.0" />
+                                        <stop offset="0%" stopColor="#f2c94c" stopOpacity="0.35" />
+                                        <stop offset="100%" stopColor="#f2c94c" stopOpacity="0.02" />
                                     </linearGradient>
                                 </defs>
 
-                                {/* Grid Lines */}
-                                <line x1="0" y1={svgHeight - padBot} x2={svgWidth} y2={svgHeight - padBot} stroke="rgba(255,255,255,0.06)" strokeWidth="1" />
-                                <line x1="0" y1={svgHeight / 2} x2={svgWidth} y2={svgHeight / 2} stroke="rgba(255,255,255,0.04)" strokeWidth="1" strokeDasharray="4,4" />
-                                <line x1="0" y1={padTop} x2={svgWidth} y2={padTop} stroke="rgba(255,255,255,0.04)" strokeWidth="1" strokeDasharray="4,4" />
+                                {/* Y-Axis Grid Lines & Measurement Scale Labels */}
+                                <line x1="0" y1={svgHeight + 10 - padBot} x2={svgWidth} y2={svgHeight + 10 - padBot} stroke="var(--border-subtle)" strokeWidth="1" />
+                                <text x="12" y={svgHeight + 10 - padBot - 4} fill="var(--text-secondary)" fontSize="9.5" fontWeight="700" fontFamily="monospace">0.0 MB/s</text>
+
+                                <line x1="0" y1={(svgHeight + 10) / 2} x2={svgWidth} y2={(svgHeight + 10) / 2} stroke="var(--border-subtle)" strokeWidth="1" strokeDasharray="4,4" opacity="0.6" />
+                                <text x="12" y={((svgHeight + 10) / 2) - 4} fill="var(--text-secondary)" fontSize="9.5" fontWeight="700" fontFamily="monospace">{(netMaxVal / 2).toFixed(1)} MB/s</text>
+
+                                <line x1="0" y1={padTop} x2={svgWidth} y2={padTop} stroke="var(--border-subtle)" strokeWidth="1" strokeDasharray="4,4" opacity="0.6" />
+                                <text x="12" y={padTop + 10} fill="var(--text-secondary)" fontSize="9.5" fontWeight="700" fontFamily="monospace">{netMaxVal.toFixed(1)} MB/s</text>
 
                                 {/* Area Fills */}
                                 <motion.path d={rxArea} fill="url(#cyberRxGrad)" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.5 }} />
@@ -581,22 +586,34 @@ export default function ClusterCockpitView({
                                     position: 'absolute',
                                     top: '10px',
                                     right: '14px',
-                                    background: 'rgba(15, 23, 42, 0.85)',
+                                    background: 'var(--bg-surface-0)',
                                     backdropFilter: 'blur(12px)',
-                                    border: '1px solid rgba(255, 255, 255, 0.12)',
+                                    border: '1px solid var(--border-subtle)',
                                     borderRadius: '8px',
                                     padding: '6px 12px',
                                     fontSize: '11px',
                                     fontWeight: '700',
                                     display: 'flex',
                                     gap: '12px',
-                                    boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
+                                    boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
                                     pointerEvents: 'none'
                                 }}>
-                                    <span style={{ color: '#00f2ff' }}>↓ {hoveredDataPoint.rx.toFixed(2)} MB/s</span>
-                                    <span style={{ color: '#f2c94c' }}>↑ {hoveredDataPoint.tx.toFixed(2)} MB/s</span>
+                                    <span style={{ color: 'var(--accent-cyan)' }}>↓ {hoveredDataPoint.rx.toFixed(2)} MB/s</span>
+                                    <span style={{ color: 'var(--accent-gold)' }}>↑ {hoveredDataPoint.tx.toFixed(2)} MB/s</span>
                                 </div>
                             )}
+                        </div>
+
+                        {/* Measurement Metric & Calculation Legend */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', fontSize: '10.5px', color: 'var(--text-secondary)', padding: '2px 4px 0' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span style={{ fontWeight: '800', color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.4px' }}>Calculation:</span>
+                                <span>Throughput (MB/s) = (Δ Bytes ÷ 2.0s Interval) ÷ 1,048,576</span>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontWeight: '700' }}>
+                                <span>Rolling Buffer: 30 Samples (60s)</span>
+                                <span>Peak: ↓ {Math.max(...netHistory.map(d => d.rx), 0).toFixed(1)} MB/s | ↑ {Math.max(...netHistory.map(d => d.tx), 0).toFixed(1)} MB/s</span>
+                            </div>
                         </div>
                     </div>
 
