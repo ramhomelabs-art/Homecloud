@@ -258,10 +258,20 @@ router.get('/info/:token', async (req, res) => {
 
         await logAccess(share.id, req, 'access');
 
+        const extractCleanName = (p) => {
+            if (!p) return 'Shared Item';
+            const normalized = String(p).replace(/\\/g, '/').replace(/\/+$/, '');
+            const parts = normalized.split('/').filter(Boolean);
+            return parts.length > 0 ? parts[parts.length - 1] : p;
+        };
+
+        const resolvedTitle = share.title || extractCleanName(share.path);
+
         res.json({
             token: share.token,
             type: share.type,
-            title: share.title || path.basename(share.path || '') || 'Shared',
+            title: resolvedTitle,
+            path: share.path || '',
             description: share.description || '',
             ownerName,
             expires_at: share.expires_at,

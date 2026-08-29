@@ -13,11 +13,16 @@ import {
 import { useDropzone } from 'react-dropzone';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const fmt = (bytes) => {
-    if (!bytes || bytes === 0) return '0 B';
-    const k = 1024, s = ['B','KB','MB','GB','TB','PB'];
-    const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), s.length - 1);
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + s[i];
+const getCleanPortalTitle = (rawTitle, rawPath) => {
+    const candidate = rawTitle || rawPath || '';
+    if (!candidate) return 'Secure File Drop Box';
+    if (candidate.includes('\\') || candidate.includes('/')) {
+        const parts = candidate.replace(/\\/g, '/').replace(/\/+$/, '').split('/').filter(Boolean);
+        if (parts.length > 0) {
+            return parts[parts.length - 1];
+        }
+    }
+    return candidate;
 };
 
 const UploadPortal = ({ shareId }) => {
@@ -291,13 +296,17 @@ const UploadPortal = ({ shareId }) => {
     );
 
     // ── AUTHORIZED INGESTION PORTAL ────────────────────────────────────────────
+    const displayTitle = getCleanPortalTitle(info.title, info.path);
+    const hasPathInfo = (info.path && (info.path.includes('\\') || info.path.includes('/'))) || (info.title && (info.title.includes('\\') || info.title.includes('/')));
+    const fullPath = info.path || info.title;
+
     return (
         <Shell>
             <motion.div 
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3 }}
-                style={{ maxWidth: '640px', width: '100%', margin: '0 auto' }}
+                style={{ maxWidth: '580px', width: '100%', margin: '0 auto' }}
             >
                 <div style={cardStyle}>
                     {/* Header */}
@@ -305,13 +314,50 @@ const UploadPortal = ({ shareId }) => {
                         <div style={iconBadgeStyle}>
                             <UploadCloud size={28} color="var(--primary)"/>
                         </div>
-                        <h1 style={{ margin: '0 0 6px', fontSize: '24px', fontWeight: 900, color: 'var(--text-primary)', letterSpacing: '-0.4px' }}>
-                            {info.title || 'Secure File Drop Box'}
+                        <h1 style={{ 
+                            margin: '0 0 8px', 
+                            fontSize: '24px', 
+                            fontWeight: 900, 
+                            color: 'var(--text-primary)', 
+                            letterSpacing: '-0.3px',
+                            wordBreak: 'break-word',
+                            overflowWrap: 'anywhere',
+                            lineHeight: 1.35,
+                            maxWidth: '100%'
+                        }}>
+                            {displayTitle}
                         </h1>
+
+                        {hasPathInfo && (
+                            <div style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                fontSize: '11.5px',
+                                fontFamily: 'var(--font-mono, monospace)',
+                                color: 'var(--text-secondary)',
+                                background: 'var(--bg-surface-2, rgba(0,0,0,0.03))',
+                                padding: '4px 10px',
+                                borderRadius: '6px',
+                                border: '1px solid var(--border-subtle)',
+                                marginBottom: '12px',
+                                maxWidth: '100%',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap'
+                            }} title={fullPath}>
+                                <HardDrive size={12} color="var(--primary)" style={{ flexShrink: 0 }} />
+                                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fullPath}</span>
+                            </div>
+                        )}
+
                         {info.description && <p style={{ ...subTextStyle, marginBottom: '10px' }}>{info.description}</p>}
-                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--text-secondary)', background: 'var(--bg-surface-2)', padding: '5px 14px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
-                            <span>Recipient:</span>
-                            <strong style={{ color: 'var(--text-primary)' }}>{info.ownerName || 'Cluster Operator'}</strong>
+                        
+                        <div style={{ display: 'flex', justifyContent: 'center' }}>
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--text-secondary)', background: 'var(--bg-surface-2)', padding: '5px 14px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+                                <span>Recipient:</span>
+                                <strong style={{ color: 'var(--text-primary)' }}>{info.ownerName || 'Cluster Operator'}</strong>
+                            </div>
                         </div>
                     </div>
 
@@ -459,7 +505,7 @@ const cardStyle = {
     padding: '36px 32px',
     boxShadow: 'var(--shadow-lg)',
     position: 'relative',
-    maxWidth: '460px',
+    maxWidth: '580px',
     width: '100%',
     boxSizing: 'border-box'
 };

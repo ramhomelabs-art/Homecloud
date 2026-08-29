@@ -40,8 +40,13 @@ router.post('/create', authenticateToken, requireRole(ADMIN_ROLES), async (req, 
 
         const passwordHash = password ? await bcrypt.hash(password, 10) : null;
         const hours = parseInt(expiryHours) || 24;
-        const expiresAt = new Date(Date.now() + hours * 3600 * 1000).toISOString();
-        const shareTitle = title || path.basename(filePath) || 'Shared';
+        const extractCleanName = (p) => {
+            if (!p) return 'Shared Resource';
+            const normalized = String(p).replace(/\\/g, '/').replace(/\/+$/, '');
+            const parts = normalized.split('/').filter(Boolean);
+            return parts.length > 0 ? parts[parts.length - 1] : p;
+        };
+        const shareTitle = title || extractCleanName(filePath);
 
         // Insert share_links
         const slRes = await db.query(`

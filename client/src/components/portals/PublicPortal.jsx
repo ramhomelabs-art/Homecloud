@@ -15,6 +15,18 @@ const fmt = (bytes) => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + s[i];
 };
 
+const getCleanPortalTitle = (rawTitle, rawPath) => {
+    const candidate = rawTitle || rawPath || '';
+    if (!candidate) return 'Shared Item';
+    if (candidate.includes('\\') || candidate.includes('/')) {
+        const parts = candidate.replace(/\\/g, '/').replace(/\/+$/, '').split('/').filter(Boolean);
+        if (parts.length > 0) {
+            return parts[parts.length - 1];
+        }
+    }
+    return candidate;
+};
+
 const getFileIcon = (title = '') => {
     const ext = title.split('.').pop()?.toLowerCase() || '';
     if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return <FolderArchive size={32} color="#f59e0b" />;
@@ -155,9 +167,23 @@ const PublicPortal = ({ shareId }) => {
                             {getFileIcon(info.title)}
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                            <h1 style={{ margin: '0 0 6px 0', fontSize: '20px', fontWeight: 900, color: 'var(--text-primary)', wordBreak: 'break-all', letterSpacing: '-0.3px' }}>
-                                {info.title}
+                            <h1 style={{ 
+                                margin: '0 0 6px 0', 
+                                fontSize: '20px', 
+                                fontWeight: 900, 
+                                color: 'var(--text-primary)', 
+                                wordBreak: 'break-word',
+                                overflowWrap: 'anywhere',
+                                lineHeight: 1.35,
+                                letterSpacing: '-0.3px' 
+                            }}>
+                                {getCleanPortalTitle(info.title, info.path)}
                             </h1>
+                            {((info.path && (info.path.includes('\\') || info.path.includes('/'))) || (info.title && (info.title.includes('\\') || info.title.includes('/')))) && (
+                                <p style={{ margin: '0 0 8px 0', fontSize: '11.5px', color: 'var(--text-dim)', fontFamily: 'var(--font-mono, monospace)', wordBreak: 'break-word' }}>
+                                    {info.path || info.title}
+                                </p>
+                            )}
                             {info.description && (
                                 <p style={{ color: 'var(--text-secondary)', fontSize: '13px', margin: '0 0 10px 0', lineHeight: '1.5' }}>
                                     {info.description}

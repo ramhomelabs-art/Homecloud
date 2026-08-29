@@ -14,6 +14,18 @@ import {
 } from 'lucide-react';
 import MediaPreviewModal from '../modals/MediaPreviewModal';
 
+const getCleanPortalTitle = (rawTitle, rawPath) => {
+    const candidate = rawTitle || rawPath || '';
+    if (!candidate) return 'Shared Item';
+    if (candidate.includes('\\') || candidate.includes('/')) {
+        const parts = candidate.replace(/\\/g, '/').replace(/\/+$/, '').split('/').filter(Boolean);
+        if (parts.length > 0) {
+            return parts[parts.length - 1];
+        }
+    }
+    return candidate;
+};
+
 const fmt = (bytes) => {
     if (!bytes) return '0 B';
     const k = 1024, s = ['B','KB','MB','GB','TB','PB'];
@@ -360,8 +372,23 @@ const GuestPortal = ({ shareId, showToast }) => {
             <div style={{maxWidth:'900px',width:'100%',margin:'0 auto',padding:'32px 16px'}}>
                 {/* Header */}
                 <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'24px',gap:'16px',flexWrap:'wrap'}}>
-                    <div>
-                        <h1 style={{margin:0,fontSize:'22px',fontWeight:800}}>{info.title}</h1>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                        <h1 style={{ 
+                            margin: 0, 
+                            fontSize: '22px', 
+                            fontWeight: 800, 
+                            color: 'var(--text-primary)',
+                            wordBreak: 'break-word',
+                            overflowWrap: 'anywhere',
+                            lineHeight: 1.35
+                        }}>
+                            {getCleanPortalTitle(info.title, info.path)}
+                        </h1>
+                        {((info.path && (info.path.includes('\\') || info.path.includes('/'))) || (info.title && (info.title.includes('\\') || info.title.includes('/')))) && (
+                            <p style={{ margin: '4px 0 0', fontSize: '11.5px', color: 'var(--text-dim)', fontFamily: 'var(--font-mono, monospace)' }}>
+                                {info.path || info.title}
+                            </p>
+                        )}
                         <p style={grayTxt}>{info.fileCount} items · {fmt(info.totalSize)} · by {info.ownerName}</p>
                     </div>
                     <div style={{display:'flex',gap:'8px',alignItems:'center'}}>
