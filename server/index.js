@@ -422,34 +422,39 @@ app.get('/.well-known/appspecific/com.chrome.devtools.json', (req, res) => res.j
 const clientDist = path.join(__dirname, '..', 'client', 'dist');
 const mobileDist = path.join(__dirname, '..', 'mobile');
 
-app.get('/', (req, res, next) => {
+app.use('/mobile', express.static(mobileDist));
+app.use('/assets', express.static(path.join(clientDist, 'assets'), {
+    maxAge: '1y',
+    immutable: true
+}));
+app.use(express.static(clientDist, {
+    setHeaders: (res, filePath) => {
+        if (filePath.endsWith('index.html')) {
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        }
+    }
+}));
+
+app.get('*', (req, res, next) => {
+    // Never send index.html for API requests, public static paths, assets, or requests with file extensions
+    if (
+        req.url.startsWith('/api') || 
+        req.url.startsWith('/public') || 
+        req.url.startsWith('/mobile') || 
+        req.url.startsWith('/assets') ||
+        path.extname(req.path) !== ''
+    ) {
+        return next();
+    }
+
     const ua = req.headers['user-agent'] || '';
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobi/i.test(ua);
     const forceMobile = req.query.ui === 'mobile';
     const forceDesktop = req.query.ui === 'desktop';
 
-    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
 
     if ((isMobile || forceMobile) && !forceDesktop && fs.existsSync(path.join(mobileDist, 'index.html'))) {
-        return res.sendFile(path.join(mobileDist, 'index.html'));
-    }
-
-    if (fs.existsSync(clientDist)) {
-        return res.sendFile(path.join(clientDist, 'index.html'));
-    }
-    next();
-});
-
-app.use('/mobile', express.static(mobileDist));
-app.use(express.static(clientDist));
-
-app.get('*', (req, res, next) => {
-    if (req.url.startsWith('/api') || req.url.startsWith('/public') || req.url.startsWith('/mobile')) return next();
-
-    const ua = req.headers['user-agent'] || '';
-    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobi/i.test(ua);
-
-    if (isMobile && fs.existsSync(path.join(mobileDist, 'index.html'))) {
         return res.sendFile(path.join(mobileDist, 'index.html'));
     }
 
