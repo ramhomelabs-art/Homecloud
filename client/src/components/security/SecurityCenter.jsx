@@ -442,22 +442,14 @@ function SecurityCenter({ showToast: externalToast }) {
         }, 1200);
     };
 
-    if (!stats) {
-        return (
-            <div style={styles.loading}>
-                {loading ? 'Initializing Security Engine...' : 'Failed to load security statistics. Please check server status.'}
-            </div>
-        );
-    }
-
-    const securityScore = Math.max(0, 100 - (stats.malicious * 5) - (stats.suspicious * 2));
+    const securityScore = Math.max(0, 100 - ((stats?.malicious || 0) * 5) - ((stats?.suspicious || 0) * 2));
     const scoreColor = securityScore > 80 ? '#2ea043' : securityScore > 50 ? '#f2c94c' : '#f85149';
 
     const pieData = [
-        { name: 'Clean', value: Number(stats.clean || 0) },
-        { name: 'Suspicious', value: Number(stats.suspicious || 0) },
-        { name: 'Malicious', value: Number(stats.malicious || 0) },
-        { name: 'Quarantine', value: Number(stats.quarantined || 0) }
+        { name: 'Clean', value: Number(stats?.clean || 0) },
+        { name: 'Suspicious', value: Number(stats?.suspicious || 0) },
+        { name: 'Malicious', value: Number(stats?.malicious || 0) },
+        { name: 'Quarantine', value: Number(stats?.quarantined || 0) }
     ].filter(item => item.value > 0);
 
     const COLORS = ['#10b981', '#f59e0b', '#f43f5e', '#8b5cf6'];
@@ -490,6 +482,14 @@ function SecurityCenter({ showToast: externalToast }) {
         }
         return result;
     }, [stats]);
+
+    if (!stats) {
+        return (
+            <div style={styles.loading}>
+                {loading ? 'Initializing Security Engine...' : 'Failed to load security statistics. Please check server status.'}
+            </div>
+        );
+    }
 
     const getEventBadgeColor = (type) => {
         const t = (type || '').toUpperCase();
