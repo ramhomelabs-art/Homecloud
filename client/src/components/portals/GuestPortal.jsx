@@ -262,11 +262,25 @@ const GuestPortal = ({ shareId, showToast }) => {
     };
 
     // ── AUTH SUBMIT ────────────────────────────────────────────────────────────
+    const computePasskeyDigest = async (plainPassword, token) => {
+        try {
+            if (!window.crypto?.subtle) return { password: plainPassword };
+            const encoder = new TextEncoder();
+            const data = encoder.encode(`${plainPassword}:${token}:nexadisk-vault-auth`);
+            const hashBuf = await window.crypto.subtle.digest('SHA-256', data);
+            const hashHex = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+            return { authDigest: hashHex };
+        } catch {
+            return { password: plainPassword };
+        }
+    };
+
     const submitPassword = async (e) => {
         e.preventDefault();
         setSubmitting(true); setAuthErr('');
         try {
-            await axios.post(`/api/share/auth/${shareId}`, { password });
+            const authPayload = await computePasskeyDigest(password, shareId);
+            await axios.post(`/api/share/auth/${shareId}`, authPayload);
             setAuthed(true); setStep('authorized');
         } catch (e) {
             setAuthErr(String(e.response?.data?.error || 'Incorrect password'));

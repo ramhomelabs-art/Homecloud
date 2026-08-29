@@ -530,7 +530,7 @@ router.get('/info/:token', async (req, res) => {
 // ─── POST /api/share/auth/:token ──────────────────────────────────────────────
 // Public — authenticate with password or verify OTP
 router.post('/auth/:token', async (req, res) => {
-    const { password, otpCode, email } = req.body;
+    const { password, authDigest, otpCode, email } = req.body;
     const ip = req.ip || req.connection?.remoteAddress || 'unknown';
     const lockKey = `${ip}:${req.params.token}`;
 
@@ -549,15 +549,24 @@ router.post('/auth/:token', async (req, res) => {
         if (err) return res.status(404).json({ error: err });
 
         // Password auth
-        if (password !== undefined) {
+        if (password !== undefined || authDigest !== undefined) {
             if (!share.password_hash) return res.status(400).json({ error: 'No password required' });
             
-            let ok = false;
+            let realPlain = '';
             if (share.password_hash.startsWith('AES:')) {
-                ok = decryptPassword(share.password_hash) === String(password);
-            } else {
-                // Fallback for existing bcrypt hashes
-                ok = await bcrypt.compare(String(password), share.password_hash);
+                realPlain = decryptPassword(share.password_hash);
+            }
+
+            let ok = false;
+            if (authDigest && realPlain) {
+                const expectedDigest = crypto.createHash('sha256').update(`${realPlain}:${req.params.token}:nexadisk-vault-auth`).digest('hex');
+                ok = (authDigest.toLowerCase() === expectedDigest.toLowerCase());
+            } else if (password !== undefined) {
+                if (share.password_hash.startsWith('AES:')) {
+                    ok = (realPlain === String(password));
+                } else {
+                    ok = await bcrypt.compare(String(password), share.password_hash);
+                }
             }
 
             if (!ok) {

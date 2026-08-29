@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import axios from 'axios';
-import { Link2, Shield, Clock, Eye, Mail, Key, Copy, Check, RefreshCw, X } from 'lucide-react';
+import { Link2, Shield, Clock, Eye, EyeOff, Mail, Key, Copy, Check, RefreshCw, X } from 'lucide-react';
 import { copyTextToClipboard } from '../../utils/clipboard';
 
 const API = '/api/v1/shares';
@@ -25,6 +25,8 @@ const ShareModal = ({ path: filePath, onClose, onCreated, showToast, forceUpload
     // Form state
     const [type, setType] = useState(existingType);  // download | upload | exchange
     const [password, setPassword] = useState('');
+    const [showPassInput, setShowPassInput] = useState(false);
+    const [showCreatedPass, setShowCreatedPass] = useState(false);
     const [email, setEmail] = useState('');
     const [expiryHours, setExpiryHours] = useState(24);
     const [maxViews, setMaxViews] = useState('');
@@ -136,17 +138,24 @@ const ShareModal = ({ path: filePath, onClose, onCreated, showToast, forceUpload
                             <div style={styles.detail}>
                                 <span style={styles.detailLabel}>PASSKEY</span>
                                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                                    <span style={{ ...styles.detailValue, fontFamily: 'monospace', color: '#f2c94c' }}>{password}</span>
-                                    <button onClick={async () => {
-                                        const success = await copyTextToClipboard(password);
-                                        if (success) {
-                                            showToast('Passkey copied!', 'success');
-                                        } else {
-                                            showToast('Failed to copy passkey', 'error');
-                                        }
-                                    }} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: 0 }} title="Copy Password">
-                                        <Copy size={13} />
-                                    </button>
+                                    <span style={{ ...styles.detailValue, fontFamily: 'monospace', color: '#f2c94c' }}>
+                                        {showCreatedPass ? password : '••••••••••••'}
+                                    </span>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                        <button onClick={() => setShowCreatedPass(!showCreatedPass)} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: 0 }} title={showCreatedPass ? "Hide Passkey" : "Reveal Passkey"}>
+                                            {showCreatedPass ? <EyeOff size={13} /> : <Eye size={13} />}
+                                        </button>
+                                        <button onClick={async () => {
+                                            const success = await copyTextToClipboard(password);
+                                            if (success) {
+                                                showToast('Passkey copied!', 'success');
+                                            } else {
+                                                showToast('Failed to copy passkey', 'error');
+                                            }
+                                        }} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: 0 }} title="Copy Passkey">
+                                            <Copy size={13} />
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         )}
@@ -222,13 +231,25 @@ const ShareModal = ({ path: filePath, onClose, onCreated, showToast, forceUpload
                     {/* Password */}
                     <div style={styles.field}>
                         <label style={styles.label}><Key size={13} style={{marginRight:4}}/> Passkey Protection (optional)</label>
-                        <div style={{ display: 'flex', gap: '8px' }}>
+                        <div style={{ display: 'flex', gap: '8px', position: 'relative' }}>
                             <input
-                                type="text" placeholder="Leave blank for no password"
-                                value={password} onChange={e => setPassword(e.target.value)}
-                                style={{ ...styles.input, flex: 1 }}
+                                type={showPassInput ? "text" : "password"} 
+                                placeholder="Leave blank for no passkey"
+                                value={password} 
+                                onChange={e => setPassword(e.target.value)}
+                                style={{ ...styles.input, flex: 1, paddingRight: '36px' }}
                             />
-                            <button type="button" onClick={generatePassword} style={styles.iconBtn} title="Auto-generate">
+                            {password && (
+                                <button 
+                                    type="button" 
+                                    onClick={() => setShowPassInput(!showPassInput)} 
+                                    style={{ position: 'absolute', right: '46px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px' }}
+                                    title={showPassInput ? "Hide Passkey" : "Show Passkey"}
+                                >
+                                    {showPassInput ? <EyeOff size={14} /> : <Eye size={14} />}
+                                </button>
+                            )}
+                            <button type="button" onClick={generatePassword} style={styles.iconBtn} title="Auto-generate secure passkey">
                                 <RefreshCw size={14} />
                             </button>
                         </div>
