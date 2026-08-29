@@ -8,7 +8,7 @@ import {
     ArrowLeft, ArrowRight, ChevronUp, ChevronDown, ListIcon, LayoutGrid, LayoutList,
     Square, CheckSquare, MoreVertical, Database as DriveIcon, Key, Monitor, Smartphone,
     ChevronRight, ChevronLeft, CreditCard, Box, Grid, List, Search, Bell, HelpCircle, Settings as SettingsIcon, LogOut,
-    HardDrive, FolderOpen, Eye, EyeOff, Save, Send, Star, Tag, PieChart, KeyRound
+    HardDrive, FolderOpen, Eye, EyeOff, Save, Send, Star, Tag, PieChart, KeyRound, Zap
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ConfirmationModal from './components/modals/ConfirmationModal';
