@@ -1373,6 +1373,7 @@ function App() {
     const fetchFiles = async (p) => {
         let normalizedPath = p || '/';
         if (/^[a-zA-Z]:$/i.test(normalizedPath)) normalizedPath += '\\';
+        setFiles([]);
         setLoading(true);
         try {
             let url = guestToken
@@ -1381,7 +1382,7 @@ function App() {
 
             if (!guestToken && selectedDevice?.type === 'Agent') url += `&agentId=${selectedDevice.id}`;
             const res = await axios.get(url, { headers: { Authorization: guestToken ? `Bearer ${guestToken}` : `Bearer ${token}` } });
-            setFiles(res.data);
+            setFiles(res.data || []);
             setPath(normalizedPath);
         } catch (err) {
             const status = err.response?.status;
@@ -2912,6 +2913,96 @@ function App() {
                                                         </div>
                                                     )}
                                                 </div>
+                                            ) : loading ? (
+                                                <div style={{ width: '100%', gridColumn: '1/-1', padding: '10px 0' }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px' }}>
+                                                        <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}>
+                                                            <RefreshCw size={15} color="var(--accent-gold)" />
+                                                        </motion.div>
+                                                        <span style={{ fontSize: '12px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.6px', color: 'var(--accent-gold)' }}>
+                                                            Loading Drive Contents...
+                                                        </span>
+                                                    </div>
+
+                                                    {viewMode === 'list' ? (
+                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
+                                                            {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
+                                                                <motion.div
+                                                                    key={`skel-row-${n}`}
+                                                                    initial={{ opacity: 0.4 }}
+                                                                    animate={{ opacity: [0.4, 0.85, 0.4] }}
+                                                                    transition={{ repeat: Infinity, duration: 1.4, delay: n * 0.08 }}
+                                                                    style={{
+                                                                        height: '46px',
+                                                                        background: 'var(--bg-surface-0, #ffffff)',
+                                                                        border: '1px solid var(--border-subtle)',
+                                                                        borderRadius: '10px',
+                                                                        display: 'flex',
+                                                                        alignItems: 'center',
+                                                                        padding: '0 16px',
+                                                                        gap: '16px'
+                                                                    }}
+                                                                >
+                                                                    <div style={{ width: '20px', height: '20px', borderRadius: '4px', background: 'rgba(255, 170, 0, 0.15)' }} />
+                                                                    <div style={{ width: '30%', height: '14px', borderRadius: '4px', background: 'var(--bg-surface-2, rgba(0,0,0,0.06))' }} />
+                                                                    <div style={{ width: '15%', height: '12px', borderRadius: '4px', background: 'var(--bg-surface-2, rgba(0,0,0,0.04))', marginLeft: 'auto' }} />
+                                                                    <div style={{ width: '15%', height: '12px', borderRadius: '4px', background: 'var(--bg-surface-2, rgba(0,0,0,0.04))' }} />
+                                                                </motion.div>
+                                                            ))}
+                                                        </div>
+                                                    ) : (
+                                                        <div className="grid-shelf" style={{ width: '100%' }}>
+                                                            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((n) => (
+                                                                <motion.div
+                                                                    key={`skel-${n}`}
+                                                                    initial={{ opacity: 0.4 }}
+                                                                    animate={{ opacity: [0.4, 0.85, 0.4] }}
+                                                                    transition={{ repeat: Infinity, duration: 1.4, delay: n * 0.08 }}
+                                                                    className="file-card"
+                                                                    style={{
+                                                                        background: 'var(--bg-surface-0, #ffffff)',
+                                                                        border: '1px solid var(--border-subtle)',
+                                                                        borderRadius: '16px',
+                                                                        padding: '24px 16px',
+                                                                        display: 'flex',
+                                                                        flexDirection: 'column',
+                                                                        alignItems: 'center',
+                                                                        justifyContent: 'center',
+                                                                        minHeight: '160px',
+                                                                        boxShadow: '0 4px 16px rgba(0,0,0,0.03)'
+                                                                    }}
+                                                                >
+                                                                    <div
+                                                                        style={{
+                                                                            width: '56px',
+                                                                            height: '46px',
+                                                                            borderRadius: '12px',
+                                                                            background: 'rgba(255, 170, 0, 0.12)',
+                                                                            marginBottom: '16px'
+                                                                        }}
+                                                                    />
+                                                                    <div
+                                                                        style={{
+                                                                            width: '65%',
+                                                                            height: '14px',
+                                                                            borderRadius: '6px',
+                                                                            background: 'var(--bg-surface-2, rgba(0,0,0,0.06))',
+                                                                            marginBottom: '8px'
+                                                                        }}
+                                                                    />
+                                                                    <div
+                                                                        style={{
+                                                                            width: '40%',
+                                                                            height: '10px',
+                                                                            borderRadius: '4px',
+                                                                            background: 'var(--bg-surface-2, rgba(0,0,0,0.04))'
+                                                                        }}
+                                                                    />
+                                                                </motion.div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
                                             ) : (
                                                 <>
                                                 {viewMode === 'list' && files.length > 0 && (
@@ -3039,7 +3130,7 @@ function App() {
                                                         )}
                                                     </>
                                                 )}
-                                                {files.length === 0 && (
+                                                {files.length === 0 && !loading && (
                                                     <div style={{ padding: '60px', textAlign: 'center', opacity: 0.3, gridColumn: '1/-1' }}>
                                                         <Folder size={48} />
                                                         <p>This folder is empty</p>
