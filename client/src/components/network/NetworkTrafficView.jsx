@@ -441,7 +441,11 @@ const NetworkTrafficView = ({ showToast }) => {
                 {graphMode === 'velocity' && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                         <div style={{ height: '180px', width: '100%', position: 'relative' }}>
-                            <svg style={{ width: '100%', height: '100%', overflow: 'visible' }}>
+                            <svg 
+                                viewBox="0 0 1000 160" 
+                                preserveAspectRatio="none" 
+                                style={{ width: '100%', height: '100%', overflow: 'visible' }}
+                            >
                                 <defs>
                                     <linearGradient id="trafficGradient" x1="0%" y1="0%" x2="0%" y2="100%">
                                         <stop offset="0%" stopColor="var(--primary)" stopOpacity="0.45" />
@@ -458,9 +462,9 @@ const NetworkTrafficView = ({ showToast }) => {
                                     <line
                                         key={i}
                                         x1="0"
-                                        y1={`${ratio * 150 + 10}`}
-                                        x2="100%"
-                                        y2={`${ratio * 150 + 10}`}
+                                        y1={`${ratio * 140 + 10}`}
+                                        x2="1000"
+                                        y2={`${ratio * 140 + 10}`}
                                         stroke="var(--border-subtle)"
                                         strokeDasharray="4 4"
                                     />
@@ -468,35 +472,33 @@ const NetworkTrafficView = ({ showToast }) => {
 
                                 {/* Area Path & Line */}
                                 {timeSeries.length > 1 && (() => {
-                                    const width = 100 / (timeSeries.length - 1);
-                                    const points = timeSeries.map((p, i) => {
-                                        const x = i * width;
-                                        const y = 160 - Math.min(150, ((p.requests || 0) / maxTimeSeriesReq) * 140);
-                                        return `${x}%,${y}`;
+                                    const width = 1000 / (timeSeries.length - 1);
+                                    const coords = timeSeries.map((p, i) => {
+                                        const x = (i * width).toFixed(1);
+                                        const y = (150 - Math.min(135, ((p.requests || 0) / maxTimeSeriesReq) * 125)).toFixed(1);
+                                        return { x, y, requests: p.requests || 0, time: p.time };
                                     });
 
-                                    const linePath = `M ${points[0]} ` + points.slice(1).map(p => `L ${p}`).join(' ');
-                                    const areaPath = `${linePath} L 100%,160 L 0%,160 Z`;
+                                    const linePath = `M ${coords[0].x} ${coords[0].y} ` + coords.slice(1).map(p => `L ${p.x} ${p.y}`).join(' ');
+                                    const areaPath = `${linePath} L 1000 160 L 0 160 Z`;
 
                                     return (
                                         <>
                                             <path d={areaPath} fill="url(#trafficGradient)" />
                                             <path d={linePath} fill="none" stroke="url(#lineGradient)" strokeWidth="2.5" strokeLinecap="round" />
-                                            {timeSeries.map((p, i) => {
-                                                const x = `${i * width}%`;
-                                                const y = 160 - Math.min(150, ((p.requests || 0) / maxTimeSeriesReq) * 140);
-                                                return (
-                                                    <circle
-                                                        key={i}
-                                                        cx={x}
-                                                        cy={y}
-                                                        r={p.requests > 0 ? "4" : "2"}
-                                                        fill="var(--primary)"
-                                                        stroke="#ffffff"
-                                                        strokeWidth="1.5"
-                                                    />
-                                                );
-                                            })}
+                                            {coords.map((p, i) => (
+                                                <circle
+                                                    key={i}
+                                                    cx={p.x}
+                                                    cy={p.y}
+                                                    r={p.requests > 0 ? "4.5" : "2"}
+                                                    fill="var(--primary)"
+                                                    stroke="#ffffff"
+                                                    strokeWidth="1.5"
+                                                >
+                                                    <title>{`${p.time}: ${p.requests} reqs`}</title>
+                                                </circle>
+                                            ))}
                                         </>
                                     );
                                 })()}
