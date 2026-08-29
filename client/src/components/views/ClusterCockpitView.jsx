@@ -28,7 +28,7 @@ const CyberRadialGauge = ({
     value, 
     unit = '%', 
     colorGradient = ['#00f2ff', '#0072ff'], 
-    glowColor = 'rgba(0, 242, 255, 0.25)', 
+    glowColor = 'rgba(0, 242, 255, 0.35)', 
     statusText,
     icon: Icon 
 }) => {
@@ -41,39 +41,55 @@ const CyberRadialGauge = ({
     return (
         <motion.div 
             className="st-card shadow-premium" 
-            whileHover={{ scale: 1.02, y: -2, boxShadow: `0 8px 30px ${glowColor}` }} 
+            whileHover={{ scale: 1.03, y: -3, boxShadow: `0 12px 36px ${glowColor}` }} 
             transition={{ duration: 0.25 }}
             style={{ 
-                background: 'var(--bg-surface-1)', 
-                backdropFilter: 'blur(24px)',
-                border: '1px solid var(--border-subtle)', 
-                borderRadius: '16px', 
+                background: 'linear-gradient(145deg, rgba(15, 23, 42, 0.92), rgba(8, 13, 25, 0.98))', 
+                backdropFilter: 'blur(30px)',
+                border: `1px solid ${colorGradient[0]}33`, 
+                borderRadius: '18px', 
                 padding: '18px 20px', 
                 display: 'flex', 
                 flexDirection: 'column', 
                 justifyContent: 'space-between',
                 position: 'relative',
-                overflow: 'hidden'
+                overflow: 'hidden',
+                boxShadow: `0 8px 24px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1)`
             }}
         >
+            {/* Ambient Spot Lamp Background Glow */}
+            <div style={{
+                position: 'absolute',
+                top: '-20px',
+                right: '-20px',
+                width: '100px',
+                height: '100px',
+                borderRadius: '50%',
+                background: `radial-gradient(circle, ${glowColor} 0%, transparent 70%)`,
+                pointerEvents: 'none',
+                filter: 'blur(20px)',
+                opacity: 0.6
+            }} />
+
             {/* Top Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginBottom: '8px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginBottom: '8px', position: 'relative', zIndex: 1 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     {Icon && (
                         <div style={{ 
                             width: '28px', 
                             height: '28px', 
                             borderRadius: '8px', 
-                            background: `linear-gradient(135deg, ${colorGradient[0]}22, ${colorGradient[1]}11)`, 
+                            background: `linear-gradient(135deg, ${colorGradient[0]}25, ${colorGradient[1]}15)`, 
                             display: 'flex', 
                             alignItems: 'center', 
                             justifyContent: 'center',
-                            border: `1px solid ${colorGradient[0]}33`
+                            border: `1px solid ${colorGradient[0]}44`,
+                            boxShadow: `0 0 12px ${colorGradient[0]}22`
                         }}>
                             <Icon size={14} color={colorGradient[0]} />
                         </div>
                     )}
-                    <span style={{ fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.8px', color: 'var(--text-secondary)' }}>
+                    <span style={{ fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.8px', color: '#94a3b8' }}>
                         {label}
                     </span>
                 </div>
@@ -81,11 +97,13 @@ const CyberRadialGauge = ({
                     <span style={{ 
                         fontSize: '9.5px', 
                         fontWeight: '800', 
-                        padding: '2px 7px', 
+                        padding: '2px 8px', 
                         borderRadius: '6px', 
-                        background: clamped > 85 ? 'rgba(248, 81, 73, 0.15)' : `${colorGradient[0]}18`, 
+                        background: clamped > 85 ? 'rgba(248, 81, 73, 0.2)' : `${colorGradient[0]}20`, 
                         color: clamped > 85 ? '#f85149' : colorGradient[0],
-                        border: `1px solid ${clamped > 85 ? '#f8514933' : colorGradient[0] + '33'}`
+                        border: `1px solid ${clamped > 85 ? '#f8514944' : colorGradient[0] + '44'}`,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.4px'
                     }}>
                         {statusText}
                     </span>
@@ -93,15 +111,15 @@ const CyberRadialGauge = ({
             </div>
 
             {/* Gauge Dial */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', margin: '6px 0' }}>
-                <svg width="104" height="104" viewBox="0 0 104 104" style={{ transform: 'rotate(-90deg)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', margin: '6px 0', zIndex: 1 }}>
+                <svg width="106" height="106" viewBox="0 0 106 106" style={{ transform: 'rotate(-90deg)' }}>
                     <defs>
                         <linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="100%">
                             <stop offset="0%" stopColor={colorGradient[0]} />
                             <stop offset="100%" stopColor={colorGradient[1]} />
                         </linearGradient>
-                        <filter id={`glow-${gradientId}`}>
-                            <feGaussianBlur stdDeviation="2.5" result="coloredBlur"/>
+                        <filter id={`glow-${gradientId}`} x="-20%" y="-20%" width="140%" height="140%">
+                            <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
                             <feMerge>
                                 <feMergeNode in="coloredBlur"/>
                                 <feMergeNode in="SourceGraphic"/>
@@ -111,22 +129,22 @@ const CyberRadialGauge = ({
                     
                     {/* Background Track */}
                     <circle 
-                        cx="52" 
-                        cy="52" 
+                        cx="53" 
+                        cy="53" 
                         r={radius} 
                         fill="transparent" 
-                        stroke="rgba(255, 255, 255, 0.05)" 
-                        strokeWidth="7" 
+                        stroke="rgba(255, 255, 255, 0.07)" 
+                        strokeWidth="8" 
                     />
                     
                     {/* Progress Track */}
                     <motion.circle 
-                        cx="52" 
-                        cy="52" 
+                        cx="53" 
+                        cy="53" 
                         r={radius} 
                         fill="transparent" 
                         stroke={`url(#${gradientId})`} 
-                        strokeWidth="7" 
+                        strokeWidth="8" 
                         strokeDasharray={circumference}
                         initial={{ strokeDashoffset: circumference }}
                         animate={{ strokeDashoffset }}
@@ -138,15 +156,15 @@ const CyberRadialGauge = ({
 
                 {/* Inner Centered Value */}
                 <div style={{ position: 'absolute', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
-                    <span style={{ fontSize: '20px', fontWeight: '900', color: 'var(--text-primary)', letterSpacing: '-0.5px' }}>
+                    <span style={{ fontSize: '21px', fontWeight: '900', color: '#f8fafc', letterSpacing: '-0.5px', textShadow: `0 0 12px ${colorGradient[0]}66` }}>
                         {clamped}
-                        <span style={{ fontSize: '11px', fontWeight: '700', color: colorGradient[0], marginLeft: '1px' }}>{unit}</span>
+                        <span style={{ fontSize: '11px', fontWeight: '750', color: colorGradient[0], marginLeft: '1px' }}>{unit}</span>
                     </span>
                 </div>
             </div>
 
             {/* Bottom Subtitle */}
-            <div style={{ textAlign: 'center', fontSize: '10.5px', fontWeight: '600', color: 'var(--text-secondary)', marginTop: '4px' }}>
+            <div style={{ textAlign: 'center', fontSize: '11px', fontWeight: '600', color: '#94a3b8', marginTop: '4px', zIndex: 1 }}>
                 {sublabel}
             </div>
         </motion.div>
@@ -481,64 +499,114 @@ export default function ClusterCockpitView({
                     <div 
                         className="st-card shadow-premium"
                         style={{
-                            background: 'var(--bg-surface-1)',
-                            backdropFilter: 'blur(24px)',
-                            border: '1px solid var(--border-subtle)',
-                            borderRadius: '16px',
-                            padding: '20px 24px',
+                            background: 'linear-gradient(145deg, rgba(15, 23, 42, 0.92), rgba(8, 13, 25, 0.98))',
+                            backdropFilter: 'blur(30px)',
+                            border: '1px solid rgba(0, 242, 255, 0.25)',
+                            borderRadius: '18px',
+                            padding: '22px 24px',
                             display: 'flex',
                             flexDirection: 'column',
-                            gap: '14px',
-                            position: 'relative'
+                            gap: '16px',
+                            position: 'relative',
+                            overflow: 'hidden',
+                            boxShadow: '0 12px 36px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1)'
                         }}
                     >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+                        {/* Ambient Cyan Backdrop Glow */}
+                        <div style={{
+                            position: 'absolute',
+                            top: '-30px',
+                            left: '30%',
+                            width: '240px',
+                            height: '120px',
+                            borderRadius: '50%',
+                            background: 'radial-gradient(ellipse, rgba(0, 242, 255, 0.15) 0%, transparent 70%)',
+                            pointerEvents: 'none',
+                            filter: 'blur(30px)'
+                        }} />
+
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', position: 'relative', zIndex: 1 }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                                 <div style={{ 
-                                    width: '32px', 
-                                    height: '32px', 
-                                    borderRadius: '8px', 
-                                    background: 'rgba(0, 242, 255, 0.1)', 
+                                    width: '34px', 
+                                    height: '34px', 
+                                    borderRadius: '9px', 
+                                    background: 'linear-gradient(135deg, rgba(0, 242, 255, 0.2), rgba(0, 114, 255, 0.1))', 
                                     display: 'flex', 
                                     alignItems: 'center', 
                                     justifyContent: 'center',
-                                    border: '1px solid rgba(0, 242, 255, 0.25)'
+                                    border: '1px solid rgba(0, 242, 255, 0.35)',
+                                    boxShadow: '0 0 16px rgba(0, 242, 255, 0.25)'
                                 }}>
-                                    <Activity size={16} color="var(--accent-cyan)" />
+                                    <Activity size={17} color="#00f2ff" />
                                 </div>
                                 <div>
-                                    <span style={{ fontSize: '15px', fontWeight: '850', color: 'var(--text-primary)', letterSpacing: '-0.3px' }}>
-                                        Real-Time I/O & Network Throughput
-                                    </span>
-                                    <p style={{ margin: 0, fontSize: '11px', color: 'var(--text-secondary)' }}>Live cluster socket bandwidth and DMA throughput stream</p>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                        <span style={{ fontSize: '15px', fontWeight: '850', color: '#f8fafc', letterSpacing: '-0.3px' }}>
+                                            Real-Time I/O & Network Throughput
+                                        </span>
+                                        <span style={{
+                                            fontSize: '9px',
+                                            fontWeight: '800',
+                                            padding: '2px 6px',
+                                            borderRadius: '4px',
+                                            background: 'rgba(0, 242, 255, 0.15)',
+                                            color: '#00f2ff',
+                                            border: '1px solid rgba(0, 242, 255, 0.3)'
+                                        }}>
+                                            60S BUFFER
+                                        </span>
+                                    </div>
+                                    <p style={{ margin: '2px 0 0', fontSize: '11px', color: '#94a3b8' }}>Live cluster socket bandwidth and DMA throughput stream</p>
                                 </div>
                             </div>
 
-                            <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11.5px', fontWeight: '700' }}>
-                                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--accent-cyan)', boxShadow: '0 0 8px var(--accent-cyan)' }} />
-                                    <span style={{ color: 'var(--text-secondary)' }}>Down:</span>
-                                    <strong style={{ color: 'var(--text-primary)' }}>{(netHistory[netHistory.length - 1]?.rx || 0.0).toFixed(1)} MB/s</strong>
+                            <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                                <div style={{ 
+                                    display: 'flex', 
+                                    alignItems: 'center', 
+                                    gap: '8px', 
+                                    fontSize: '11.5px', 
+                                    fontWeight: '700',
+                                    background: 'rgba(0, 242, 255, 0.08)',
+                                    padding: '5px 12px',
+                                    borderRadius: '8px',
+                                    border: '1px solid rgba(0, 242, 255, 0.2)'
+                                }}>
+                                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#00f2ff', boxShadow: '0 0 10px #00f2ff' }} />
+                                    <span style={{ color: '#94a3b8' }}>Down:</span>
+                                    <strong style={{ color: '#f8fafc' }}>{(netHistory[netHistory.length - 1]?.rx || 0.0).toFixed(1)} MB/s</strong>
                                 </div>
 
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11.5px', fontWeight: '700' }}>
-                                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--accent-gold)', boxShadow: '0 0 8px var(--accent-gold)' }} />
-                                    <span style={{ color: 'var(--text-secondary)' }}>Up:</span>
-                                    <strong style={{ color: 'var(--text-primary)' }}>{(netHistory[netHistory.length - 1]?.tx || 0.0).toFixed(1)} MB/s</strong>
+                                <div style={{ 
+                                    display: 'flex', 
+                                    alignItems: 'center', 
+                                    gap: '8px', 
+                                    fontSize: '11.5px', 
+                                    fontWeight: '700',
+                                    background: 'rgba(242, 201, 76, 0.08)',
+                                    padding: '5px 12px',
+                                    borderRadius: '8px',
+                                    border: '1px solid rgba(242, 201, 76, 0.2)'
+                                }}>
+                                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#f2c94c', boxShadow: '0 0 10px #f2c94c' }} />
+                                    <span style={{ color: '#94a3b8' }}>Up:</span>
+                                    <strong style={{ color: '#f8fafc' }}>{(netHistory[netHistory.length - 1]?.tx || 0.0).toFixed(1)} MB/s</strong>
                                 </div>
                             </div>
                         </div>
 
-                        {/* Interactive Wave SVG */}
+                        {/* Interactive Cyber Wave SVG Canvas */}
                         <div 
                             style={{ 
                                 position: 'relative', 
                                 width: '100%', 
-                                height: `${svgHeight}px`, 
-                                background: 'rgba(0, 0, 0, 0.25)', 
-                                borderRadius: '12px', 
+                                height: `${svgHeight + 20}px`, 
+                                background: 'radial-gradient(ellipse at 50% 0%, #0d1527 0%, #050811 100%)', 
+                                borderRadius: '14px', 
                                 overflow: 'hidden', 
-                                border: '1px solid var(--border-subtle)' 
+                                border: '1px solid rgba(0, 242, 255, 0.2)',
+                                boxShadow: 'inset 0 0 30px rgba(0, 0, 0, 0.8), 0 4px 20px rgba(0, 0, 0, 0.5)'
                             }}
                             onMouseMove={(e) => {
                                 const rect = e.currentTarget.getBoundingClientRect();
@@ -549,52 +617,106 @@ export default function ClusterCockpitView({
                             }}
                             onMouseLeave={() => setHoveredDataPoint(null)}
                         >
-                            <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} preserveAspectRatio="none" style={{ width: '100%', height: '100%', display: 'block' }}>
+                            {/* Scanning Laser Beam */}
+                            <motion.div
+                                style={{
+                                    position: 'absolute',
+                                    top: 0,
+                                    bottom: 0,
+                                    width: '2px',
+                                    background: 'linear-gradient(to bottom, transparent, #00f2ff 50%, transparent)',
+                                    boxShadow: '0 0 10px #00f2ff, 0 0 20px #00f2ff',
+                                    pointerEvents: 'none',
+                                    zIndex: 3
+                                }}
+                                animate={{ left: ['0%', '100%'] }}
+                                transition={{ duration: 4.5, repeat: Infinity, ease: 'linear' }}
+                            />
+
+                            <svg viewBox={`0 0 ${svgWidth} ${svgHeight + 20}`} preserveAspectRatio="none" style={{ width: '100%', height: '100%', display: 'block', position: 'relative', zIndex: 2 }}>
                                 <defs>
+                                    {/* Matrix Dot Pattern */}
+                                    <pattern id="cyberMatrixDots" width="18" height="18" patternUnits="userSpaceOnUse">
+                                        <circle cx="2" cy="2" r="0.85" fill="rgba(0, 242, 255, 0.18)" />
+                                    </pattern>
+
+                                    {/* Neon Gradients */}
                                     <linearGradient id="cyberRxGrad" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="0%" stopColor="#00f2ff" stopOpacity="0.3" />
-                                        <stop offset="100%" stopColor="#00f2ff" stopOpacity="0.0" />
+                                        <stop offset="0%" stopColor="#00f2ff" stopOpacity="0.45" />
+                                        <stop offset="60%" stopColor="#0072ff" stopOpacity="0.15" />
+                                        <stop offset="100%" stopColor="#0072ff" stopOpacity="0.0" />
                                     </linearGradient>
                                     <linearGradient id="cyberTxGrad" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="0%" stopColor="#f2c94c" stopOpacity="0.3" />
-                                        <stop offset="100%" stopColor="#f2c94c" stopOpacity="0.0" />
+                                        <stop offset="0%" stopColor="#f2c94c" stopOpacity="0.45" />
+                                        <stop offset="60%" stopColor="#ff8c00" stopOpacity="0.15" />
+                                        <stop offset="100%" stopColor="#ff8c00" stopOpacity="0.0" />
                                     </linearGradient>
+
+                                    {/* Drop Shadow Glow Filters */}
+                                    <filter id="neonRxGlow" x="-20%" y="-20%" width="140%" height="140%">
+                                        <feDropShadow dx="0" dy="0" stdDeviation="3.5" floodColor="#00f2ff" floodOpacity="0.8" />
+                                    </filter>
+                                    <filter id="neonTxGlow" x="-20%" y="-20%" width="140%" height="140%">
+                                        <feDropShadow dx="0" dy="0" stdDeviation="3.5" floodColor="#f2c94c" floodOpacity="0.8" />
+                                    </filter>
                                 </defs>
 
+                                {/* Background Matrix Grid Pattern */}
+                                <rect width={svgWidth} height={svgHeight + 20} fill="url(#cyberMatrixDots)" />
+
                                 {/* Grid Lines */}
-                                <line x1="0" y1={svgHeight - padBot} x2={svgWidth} y2={svgHeight - padBot} stroke="rgba(255,255,255,0.06)" strokeWidth="1" />
-                                <line x1="0" y1={svgHeight / 2} x2={svgWidth} y2={svgHeight / 2} stroke="rgba(255,255,255,0.04)" strokeWidth="1" strokeDasharray="4,4" />
-                                <line x1="0" y1={padTop} x2={svgWidth} y2={padTop} stroke="rgba(255,255,255,0.04)" strokeWidth="1" strokeDasharray="4,4" />
+                                <line x1="0" y1={svgHeight + 20 - padBot} x2={svgWidth} y2={svgHeight + 20 - padBot} stroke="rgba(0, 242, 255, 0.2)" strokeWidth="1" />
+                                <line x1="0" y1={(svgHeight + 20) / 2} x2={svgWidth} y2={(svgHeight + 20) / 2} stroke="rgba(255, 255, 255, 0.08)" strokeWidth="1" strokeDasharray="4,4" />
+                                <line x1="0" y1={padTop} x2={svgWidth} y2={padTop} stroke="rgba(255, 255, 255, 0.08)" strokeWidth="1" strokeDasharray="4,4" />
 
                                 {/* Area Fills */}
                                 <motion.path d={rxArea} fill="url(#cyberRxGrad)" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.5 }} />
                                 <motion.path d={txArea} fill="url(#cyberTxGrad)" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.5 }} />
 
-                                {/* Bezier Curves */}
-                                <motion.path d={rxLine} fill="none" stroke="#00f2ff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-                                <motion.path d={txLine} fill="none" stroke="#f2c94c" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                                {/* Bezier Curves with Glowing Drop Shadow */}
+                                <motion.path d={rxLine} fill="none" stroke="#00f2ff" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" filter="url(#neonRxGlow)" />
+                                <motion.path d={txLine} fill="none" stroke="#f2c94c" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" filter="url(#neonTxGlow)" />
+
+                                {/* Latest Data Point Beacon Pulse */}
+                                {rxPoints.length > 0 && (
+                                    <>
+                                        <circle cx={rxPoints[rxPoints.length - 1].x} cy={rxPoints[rxPoints.length - 1].y} r="4.5" fill="#00f2ff" filter="url(#neonRxGlow)" />
+                                        <circle cx={rxPoints[rxPoints.length - 1].x} cy={rxPoints[rxPoints.length - 1].y} r="8" fill="none" stroke="#00f2ff" strokeWidth="1.2" opacity="0.6" />
+                                    </>
+                                )}
+                                {txPoints.length > 0 && (
+                                    <>
+                                        <circle cx={txPoints[txPoints.length - 1].x} cy={txPoints[txPoints.length - 1].y} r="4.5" fill="#f2c94c" filter="url(#neonTxGlow)" />
+                                        <circle cx={txPoints[txPoints.length - 1].x} cy={txPoints[txPoints.length - 1].y} r="8" fill="none" stroke="#f2c94c" strokeWidth="1.2" opacity="0.6" />
+                                    </>
+                                )}
                             </svg>
 
                             {/* Scrubber Tooltip */}
                             {hoveredDataPoint && (
                                 <div style={{
                                     position: 'absolute',
-                                    top: '10px',
-                                    right: '14px',
-                                    background: 'rgba(15, 23, 42, 0.85)',
-                                    backdropFilter: 'blur(12px)',
-                                    border: '1px solid rgba(255, 255, 255, 0.12)',
-                                    borderRadius: '8px',
-                                    padding: '6px 12px',
+                                    top: '12px',
+                                    right: '16px',
+                                    background: 'rgba(15, 23, 42, 0.95)',
+                                    backdropFilter: 'blur(16px)',
+                                    border: '1px solid rgba(0, 242, 255, 0.3)',
+                                    borderRadius: '10px',
+                                    padding: '8px 14px',
                                     fontSize: '11px',
-                                    fontWeight: '700',
+                                    fontWeight: '800',
                                     display: 'flex',
-                                    gap: '12px',
-                                    boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
-                                    pointerEvents: 'none'
+                                    gap: '14px',
+                                    boxShadow: '0 8px 24px rgba(0,0,0,0.8), 0 0 12px rgba(0, 242, 255, 0.2)',
+                                    pointerEvents: 'none',
+                                    zIndex: 10
                                 }}>
-                                    <span style={{ color: '#00f2ff' }}>↓ {hoveredDataPoint.rx.toFixed(2)} MB/s</span>
-                                    <span style={{ color: '#f2c94c' }}>↑ {hoveredDataPoint.tx.toFixed(2)} MB/s</span>
+                                    <span style={{ color: '#00f2ff', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                        ↓ {hoveredDataPoint.rx.toFixed(2)} MB/s
+                                    </span>
+                                    <span style={{ color: '#f2c94c', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                        ↑ {hoveredDataPoint.tx.toFixed(2)} MB/s
+                                    </span>
                                 </div>
                             )}
                         </div>
