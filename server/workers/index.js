@@ -620,10 +620,21 @@ function initWorkers() {
                 for (const srcFile of sourceFiles) {
                     const targetRelPath = task.sanitize_media ? sanitizeRelPath(srcFile.relPath) : srcFile.relPath;
                     const destFile = destFilesMap.get(targetRelPath);
-                    if (!destFile || srcFile.size !== destFile.size || Math.abs(srcFile.modified - destFile.modified) > 2000) {
+                    
+                    let needsCopy = false;
+                    if (!destFile) {
+                        needsCopy = true; // New file not present on destination
+                    } else if (srcFile.size !== destFile.size) {
+                        needsCopy = true; // Content size changed
+                    } else if (srcFile.modified > (destFile.modified + 2000)) {
+                        needsCopy = true; // Source was updated after destination
+                    }
+
+                    if (needsCopy) {
                         filesToCopy.push(srcFile);
                     }
                 }
+
 
                 const filesToDelete = [];
                 if (task.mode === 'mirror') {
