@@ -83,9 +83,10 @@ class UpdateService {
                 return this.getFallbackManifest(channel);
             }
 
-            const rawTag = targetRelease.tag_name || 'v2.4.0';
+            const rawTag = targetRelease.tag_name || `v${CURRENT_VERSION}`;
             const cleanVersion = rawTag.replace(/^v/, '');
             const isUpdateAvailable = this.compareVersions(cleanVersion, CURRENT_VERSION) > 0;
+            const effectiveLatestVersion = isUpdateAvailable ? cleanVersion : CURRENT_VERSION;
 
             // Find zip / tarball release asset
             const zipAsset = targetRelease.assets?.find(a => a.name.endsWith('.zip')) ||
@@ -114,8 +115,8 @@ class UpdateService {
 
             const manifest = {
                 currentVersion: CURRENT_VERSION,
-                latestVersion: cleanVersion,
-                rawTag,
+                latestVersion: effectiveLatestVersion,
+                rawTag: isUpdateAvailable ? rawTag : `v${CURRENT_VERSION}`,
                 channel,
                 updateAvailable: isUpdateAvailable,
                 releaseDate: targetRelease.published_at ? targetRelease.published_at.split('T')[0] : new Date().toISOString().split('T')[0],
@@ -171,6 +172,9 @@ class UpdateService {
     // Fetch Cluster-Wide Version Matrix across Master and all Nodes/Sites
     async getClusterVersionMatrix() {
         const matrix = [];
+        const effectiveTarget = (this.latestManifest && this.compareVersions(this.latestManifest.latestVersion, CURRENT_VERSION) > 0)
+            ? this.latestManifest.latestVersion
+            : CURRENT_VERSION;
 
         // 1. Master Node
         matrix.push({
@@ -179,7 +183,7 @@ class UpdateService {
             type: 'master',
             location: 'Primary Site',
             installedVersion: CURRENT_VERSION,
-            latestVersion: this.latestManifest?.latestVersion || CURRENT_VERSION,
+            latestVersion: effectiveTarget,
             status: 'online',
             updateStatus: this.updateInProgress ? 'updating' : 'ready',
             os: `${process.platform} (${process.arch})`,
@@ -197,7 +201,7 @@ class UpdateService {
                     type: 'agent',
                     location: 'Local Cluster',
                     installedVersion: liveAgent ? (liveAgent.version || CURRENT_VERSION) : CURRENT_VERSION,
-                    latestVersion: this.latestManifest?.latestVersion || CURRENT_VERSION,
+                    latestVersion: effectiveTarget,
                     status: liveAgent && liveAgent.status === 'approved' ? 'online' : 'offline',
                     updateStatus: 'ready',
                     os: liveAgent ? (liveAgent.os || 'Linux') : 'Unknown',
@@ -219,7 +223,7 @@ class UpdateService {
                     type: 'site',
                     location: site.location,
                     installedVersion: CURRENT_VERSION,
-                    latestVersion: this.latestManifest?.latestVersion || CURRENT_VERSION,
+                    latestVersion: effectiveTarget,
                     status: site.status,
                     updateStatus: 'ready',
                     os: 'Enterprise Linux / Container',

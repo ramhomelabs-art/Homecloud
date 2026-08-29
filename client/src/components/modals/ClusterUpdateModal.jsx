@@ -139,13 +139,13 @@ const ClusterUpdateModal = ({ show, onClose, showToast }) => {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                         <div>
                             <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '700' }}>CURRENT RUNNING VERSION</div>
-                            <div style={{ fontSize: '16px', fontWeight: '800', color: 'var(--text-primary)', marginTop: '2px' }}>v{manifest?.currentVersion || '2.4.0'}</div>
+                            <div style={{ fontSize: '16px', fontWeight: '800', color: 'var(--text-primary)', marginTop: '2px' }}>v{manifest?.currentVersion || '2.4.2'}</div>
                         </div>
                         <div style={{ width: '1px', height: '32px', background: 'var(--border-subtle)' }} />
                         <div>
                             <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '700' }}>LATEST AVAILABLE RELEASE</div>
                             <div style={{ fontSize: '16px', fontWeight: '800', color: isUpdateAvailable ? '#38bdf8' : '#10b981', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                v{manifest?.latestVersion || '2.4.0'} ({channel.toUpperCase()})
+                                v{manifest?.latestVersion || manifest?.currentVersion || '2.4.2'} ({channel.toUpperCase()})
                                 <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: isUpdateAvailable ? 'rgba(56, 189, 248, 0.15)' : 'rgba(16, 185, 129, 0.15)', color: isUpdateAvailable ? '#38bdf8' : '#10b981', fontWeight: '800' }}>
                                     {loading ? 'CHECKING...' : (isUpdateAvailable ? 'UPDATE AVAILABLE' : 'UP TO DATE')}
                                 </span>
@@ -257,7 +257,7 @@ const ClusterUpdateModal = ({ show, onClose, showToast }) => {
                                 disabled={updating}
                                 style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '11px', textDecoration: 'underline', cursor: updating ? 'not-allowed' : 'pointer', padding: 0 }}
                             >
-                                Force Re-deploy (v{manifest?.currentVersion || '2.4.0'})
+                                Force Re-deploy (v{manifest?.currentVersion || '2.4.2'})
                             </button>
                         )}
                     </div>
@@ -298,7 +298,7 @@ const ClusterUpdateModal = ({ show, onClose, showToast }) => {
                                 </>
                             ) : (
                                 <>
-                                    <CheckCircle2 size={14} color="#10b981" /> System Up to Date (v{manifest?.currentVersion || '2.4.0'})
+                                    <CheckCircle2 size={14} color="#10b981" /> System Up to Date (v{manifest?.currentVersion || '2.4.2'})
                                 </>
                             )}
                         </button>
@@ -313,9 +313,9 @@ const ClusterUpdateModal = ({ show, onClose, showToast }) => {
                 message={
                     isUpdateAvailable
                         ? `Are you sure you want to deploy NexaDisk v${manifest?.latestVersion} across all master and agent nodes? A pre-flight backup snapshot will be automatically created before extracting files.`
-                        : `NexaDisk v${manifest?.currentVersion || '2.4.0'} is currently up to date. Do you want to run a forced integrity re-deployment and package synchronization?`
+                        : `NexaDisk v${manifest?.currentVersion || '2.4.2'} is currently up to date. Do you want to run a forced integrity re-deployment and package synchronization?`
                 }
-                confirmText={isUpdateAvailable ? `Deploy v${manifest?.latestVersion}` : `Re-Deploy v${manifest?.currentVersion || '2.4.0'}`}
+                confirmText={isUpdateAvailable ? `Deploy v${manifest?.latestVersion}` : `Re-Deploy v${manifest?.currentVersion || '2.4.2'}`}
                 cancelText="Cancel"
                 type="primary"
                 onConfirm={() => handleDeployUpdate(!isUpdateAvailable)}
