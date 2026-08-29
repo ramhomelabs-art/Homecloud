@@ -1741,6 +1741,29 @@ router.get('/download/prepared/:opId', async (req, res) => {
     });
 });
 
+const getMediaMimeType = (filePath) => {
+    const ext = path.extname(filePath || '').toLowerCase();
+    switch (ext) {
+        case '.mp4': case '.m4v': return 'video/mp4';
+        case '.webm': return 'video/webm';
+        case '.mkv': return 'video/x-matroska';
+        case '.mov': return 'video/quicktime';
+        case '.avi': return 'video/x-msvideo';
+        case '.mp3': return 'audio/mpeg';
+        case '.wav': return 'audio/wav';
+        case '.ogg': case '.oga': return 'audio/ogg';
+        case '.flac': return 'audio/flac';
+        case '.m4a': case '.aac': return 'audio/mp4';
+        case '.pdf': return 'application/pdf';
+        case '.png': return 'image/png';
+        case '.jpg': case '.jpeg': return 'image/jpeg';
+        case '.gif': return 'image/gif';
+        case '.webp': return 'image/webp';
+        case '.svg': return 'image/svg+xml';
+        default: return 'application/octet-stream';
+    }
+};
+
 // ── GET /api/v1/files/download ────────────────────────────────────────────────
 router.get('/download', async (req, res) => {
     const { path: filePath, agentId } = req.query;
@@ -1779,8 +1802,10 @@ router.get('/download', async (req, res) => {
             }
 
             const fileName = path.basename(filePath.replace(/\\/g, '/'));
+            const mimeType = getMediaMimeType(fileName);
             res.setHeader('Content-Disposition', req.query.intent === 'stream' ? 'inline' : `attachment; filename="${fileName}"`);
-            res.setHeader('Content-Type', 'application/octet-stream');
+            res.setHeader('Content-Type', mimeType);
+            res.setHeader('Accept-Ranges', 'bytes');
 
             const env = { ...process.env, PASSWD: pass || '' };
             const safeUser = (user || '').replace(/[;&|`$<>\\"']/g, '');
@@ -1813,6 +1838,7 @@ router.get('/download', async (req, res) => {
             });
             if (resp.headers['content-type']) res.setHeader('Content-Type', resp.headers['content-type']);
             if (resp.headers['content-disposition']) res.setHeader('Content-Disposition', resp.headers['content-disposition']);
+            res.setHeader('Accept-Ranges', 'bytes');
             
             if (req.query.intent !== 'stream') {
                 notificationService.sendInAppAlert(
@@ -1856,11 +1882,6 @@ router.get('/download', async (req, res) => {
             
             // Decrypt stream file download
             const virtualSize = stats.size > 16 ? stats.size - 16 : 0;
-            res.set({
-                'Content-Type': 'application/octet-stream',
-                'Content-Disposition': `attachment; filename="${path.basename(filePath)}"`,
-                'Content-Length': virtualSize
-            });
             
             if (req.query.intent !== 'stream') {
                 notificationService.sendInAppAlert(

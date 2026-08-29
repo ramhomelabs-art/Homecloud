@@ -3,11 +3,25 @@ import axios from 'axios';
 import {
     Image as ImageIcon, Video, File, ZoomOut, ZoomIn, Save, Download, X,
     ChevronLeft, ChevronRight, RefreshCw, FileText, ExternalLink, Printer,
-    RotateCw, BookOpen, Eye, Music
+    RotateCw, BookOpen, Eye, Music, Play, Pause, RotateCcw, Volume2, VolumeX,
+    Maximize, SkipBack, SkipForward
 } from 'lucide-react';
 import ConfirmModal from './ConfirmModal';
 
 const API_BASE = '/api';
+
+const formatTime = (secs) => {
+    if (!secs || isNaN(secs)) return '00:00';
+    const m = Math.floor(secs / 60);
+    const s = Math.floor(secs % 60);
+    const pad = (n) => String(n).padStart(2, '0');
+    if (m >= 60) {
+        const h = Math.floor(m / 60);
+        const remM = m % 60;
+        return `${pad(h)}:${pad(remM)}:${pad(s)}`;
+    }
+    return `${pad(m)}:${pad(s)}`;
+};
 
 const MediaPreviewModal = ({ media, onClose, onDownload, onNext, onPrev, showToast, shareId }) => {
     const [zoom, setZoom] = useState(1);
@@ -28,6 +42,15 @@ const MediaPreviewModal = ({ media, onClose, onDownload, onNext, onPrev, showToa
     const [pdfLoading, setPdfLoading] = useState(false);
     const [pdfError, setPdfError] = useState(null);
 
+    // Video Player State
+    const videoRef = useRef(null);
+    const [isPlaying, setIsPlaying] = useState(true);
+    const [currentTime, setCurrentTime] = useState(0);
+    const [duration, setDuration] = useState(0);
+    const [volume, setVolume] = useState(1);
+    const [isMuted, setIsMuted] = useState(false);
+    const [playbackRate, setPlaybackRate] = useState(1);
+
     const lineCounterRef = useRef(null);
     const textareaRef = useRef(null);
     const pdfFrameRef = useRef(null);
@@ -36,6 +59,9 @@ const MediaPreviewModal = ({ media, onClose, onDownload, onNext, onPrev, showToa
     useEffect(() => {
         setZoom(1);
         setOffset({ x: 0, y: 0 });
+        setCurrentTime(0);
+        setDuration(0);
+        setIsPlaying(true);
     }, [media?.path]);
 
     // Reset offset when zoom is reset to 1
@@ -53,6 +79,65 @@ const MediaPreviewModal = ({ media, onClose, onDownload, onNext, onPrev, showToa
     }
 
     const isPdf = media?.type === 'pdf' || (media?.name && media.name.toLowerCase().endsWith('.pdf'));
+
+    const togglePlay = () => {
+        if (!videoRef.current) return;
+        if (videoRef.current.paused) {
+            videoRef.current.play();
+            setIsPlaying(true);
+        } else {
+            videoRef.current.pause();
+            setIsPlaying(false);
+        }
+    };
+
+    const handleSeek = (e) => {
+        const newTime = parseFloat(e.target.value);
+        setCurrentTime(newTime);
+        if (videoRef.current) {
+            videoRef.current.currentTime = newTime;
+        }
+    };
+
+    const handleSkip = (seconds) => {
+        if (!videoRef.current) return;
+        const newTime = Math.max(0, Math.min(duration || 999999, videoRef.current.currentTime + seconds));
+        videoRef.current.currentTime = newTime;
+        setCurrentTime(newTime);
+    };
+
+    const handleVolumeChange = (e) => {
+        const newVol = parseFloat(e.target.value);
+        setVolume(newVol);
+        setIsMuted(newVol === 0);
+        if (videoRef.current) {
+            videoRef.current.volume = newVol;
+            videoRef.current.muted = newVol === 0;
+        }
+    };
+
+    const toggleMute = () => {
+        if (!videoRef.current) return;
+        const nextMuted = !isMuted;
+        setIsMuted(nextMuted);
+        videoRef.current.muted = nextMuted;
+    };
+
+    const changePlaybackRate = (rate) => {
+        setPlaybackRate(rate);
+        if (videoRef.current) {
+            videoRef.current.playbackRate = rate;
+        }
+    };
+
+    const toggleFullscreen = () => {
+        if (!videoRef.current) return;
+        if (!document.fullscreenElement) {
+            videoRef.current.requestFullscreen?.() || videoRef.current.webkitRequestFullscreen?.();
+        } else {
+            document.exitFullscreen?.();
+        }
+    };
 
     // Fetch PDF as blob for secure and CSP-free iframe viewing
     useEffect(() => {
@@ -445,12 +530,161 @@ const MediaPreviewModal = ({ media, onClose, onDownload, onNext, onPrev, showToa
                                 }}
                             />
                         ) : media?.type === 'video' ? (
-                            <video
-                                src={mediaUrl}
-                                controls
-                                autoPlay
-                                style={{ maxHeight: '100%', maxWidth: '100%', pointerEvents: 'auto' }}
-                            />
+                            <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#090d16', position: 'relative', overflow: 'hidden' }}>
+                                <video
+                                    ref={videoRef}
+                                    src={mediaUrl}
+                                    autoPlay
+                                    playsInline
+                                    onTimeUpdate={() => {
+                                        if (videoRef.current) {
+                                            setCurrentTime(videoRef.current.currentTime);
+                                            if (videoRef.current.duration) setDuration(videoRef.current.duration);
+                                        }
+                                    }}
+                                    onLoadedMetadata={() => {
+                                        if (videoRef.current && videoRef.current.duration) {
+                                            setDuration(videoRef.current.duration);
+                                        }
+                                    }}
+                                    onPlay={() => setIsPlaying(true)}
+                                    onPause={() => setIsPlaying(false)}
+                                    onClick={togglePlay}
+                                    style={{ maxHeight: 'calc(100% - 64px)', maxWidth: '100%', objectFit: 'contain', cursor: 'pointer' }}
+                                />
+                                
+                                {/* Precision Playback & Seek Toolbar */}
+                                <div style={{
+                                    width: 'calc(100% - 32px)',
+                                    maxWidth: '840px',
+                                    padding: '10px 16px',
+                                    background: 'rgba(15, 23, 42, 0.88)',
+                                    backdropFilter: 'blur(12px)',
+                                    borderRadius: '14px',
+                                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: '8px',
+                                    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
+                                    position: 'absolute',
+                                    bottom: '12px',
+                                    zIndex: 20
+                                }}>
+                                    {/* Seek Timeline */}
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                        <span style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', minWidth: '45px' }}>
+                                            {formatTime(currentTime)}
+                                        </span>
+                                        <input
+                                            type="range"
+                                            min={0}
+                                            max={duration || 100}
+                                            step="0.1"
+                                            value={currentTime}
+                                            onChange={handleSeek}
+                                            style={{
+                                                flex: 1,
+                                                accentColor: 'var(--primary)',
+                                                cursor: 'pointer',
+                                                height: '5px',
+                                                borderRadius: '4px'
+                                            }}
+                                        />
+                                        <span style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', minWidth: '45px', textAlign: 'right' }}>
+                                            {formatTime(duration)}
+                                        </span>
+                                    </div>
+
+                                    {/* Action Buttons Row */}
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                            <button
+                                                type="button"
+                                                onClick={togglePlay}
+                                                style={{ background: 'var(--primary)', border: 'none', borderRadius: '8px', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', cursor: 'pointer' }}
+                                                title={isPlaying ? 'Pause' : 'Play'}
+                                            >
+                                                {isPlaying ? <Pause size={16} /> : <Play size={16} />}
+                                            </button>
+
+                                            <button
+                                                type="button"
+                                                onClick={() => handleSkip(-10)}
+                                                style={{ background: 'rgba(255, 255, 255, 0.08)', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '8px', padding: '6px 10px', display: 'flex', alignItems: 'center', gap: '4px', color: '#f8fafc', fontSize: '11px', fontWeight: '700', cursor: 'pointer' }}
+                                                title="Skip back 10 seconds"
+                                            >
+                                                <SkipBack size={13} /> -10s
+                                            </button>
+
+                                            <button
+                                                type="button"
+                                                onClick={() => handleSkip(10)}
+                                                style={{ background: 'rgba(255, 255, 255, 0.08)', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '8px', padding: '6px 10px', display: 'flex', alignItems: 'center', gap: '4px', color: '#f8fafc', fontSize: '11px', fontWeight: '700', cursor: 'pointer' }}
+                                                title="Skip forward 10 seconds"
+                                            >
+                                                +10s <SkipForward size={13} />
+                                            </button>
+                                        </div>
+
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                                            {/* Volume Control */}
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                <button
+                                                    type="button"
+                                                    onClick={toggleMute}
+                                                    style={{ background: 'transparent', border: 'none', color: '#cbd5e1', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                                                    title={isMuted ? 'Unmute' : 'Mute'}
+                                                >
+                                                    {isMuted || volume === 0 ? <VolumeX size={16} /> : <Volume2 size={16} />}
+                                                </button>
+                                                <input
+                                                    type="range"
+                                                    min="0"
+                                                    max="1"
+                                                    step="0.05"
+                                                    value={isMuted ? 0 : volume}
+                                                    onChange={handleVolumeChange}
+                                                    style={{ width: '60px', accentColor: 'var(--primary)', cursor: 'pointer', height: '4px' }}
+                                                />
+                                            </div>
+
+                                            {/* Speed Selector */}
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                {[1, 1.25, 1.5, 2].map((rate) => (
+                                                    <button
+                                                        key={rate}
+                                                        type="button"
+                                                        onClick={() => changePlaybackRate(rate)}
+                                                        style={{
+                                                            background: playbackRate === rate ? 'var(--primary)' : 'rgba(255, 255, 255, 0.06)',
+                                                            border: 'none',
+                                                            borderRadius: '6px',
+                                                            padding: '3px 6px',
+                                                            fontSize: '10.5px',
+                                                            fontWeight: '700',
+                                                            color: '#f8fafc',
+                                                            cursor: 'pointer'
+                                                        }}
+                                                    >
+                                                        {rate}x
+                                                    </button>
+                                                ))}
+                                            </div>
+
+                                            {/* Fullscreen */}
+                                            <button
+                                                type="button"
+                                                onClick={toggleFullscreen}
+                                                style={{ background: 'rgba(255, 255, 255, 0.08)', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '6px', width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#cbd5e1', cursor: 'pointer' }}
+                                                title="Fullscreen"
+                                            >
+                                                <Maximize size={14} />
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
                         ) : media?.type === 'audio' ? (
                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '24px', padding: '40px', background: 'var(--bg-surface-0)', borderRadius: '16px', border: '1px solid var(--border-subtle)', boxShadow: 'var(--shadow-md)' }}>
                                 <div style={{ width: '64px', height: '64px', borderRadius: '50%', background: 'rgba(16, 185, 129, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(16, 185, 129, 0.25)' }}>
