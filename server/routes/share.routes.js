@@ -78,14 +78,37 @@ const resolveSharedPath = (p) => {
         }
     } catch {}
 
-    // 4. LocalBase with stripped drive letter / leading slashes
+    // 4. Linux Mount Base check (/opt/nexadisk/mnt, ~/.nexadisk/mnt, ../mnt)
+    try {
+        const mntCandidates = [
+            process.env.MNT_BASE,
+            '/opt/nexadisk/mnt',
+            path.join(os.homedir(), '.nexadisk', 'mnt'),
+            path.join(__dirname, '..', 'mnt')
+        ];
+        const cleanP = p.replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
+        const pParts = cleanP.split('/');
+        for (const base of mntCandidates) {
+            if (!base) continue;
+            if (pParts.length >= 2) {
+                const subCandidate = path.resolve(base, pParts.slice(1).join('/'));
+                if (fs.existsSync(subCandidate)) return subCandidate;
+            }
+            const lastCandidate = path.resolve(base, pParts[pParts.length - 1]);
+            if (fs.existsSync(lastCandidate)) return lastCandidate;
+            const fullCandidate = path.resolve(base, cleanP);
+            if (fs.existsSync(fullCandidate)) return fullCandidate;
+        }
+    } catch {}
+
+    // 5. LocalBase with stripped drive letter / leading slashes
     try {
         const stripped = p.replace(/^[a-zA-Z]:[\\\/]/, '').replace(/^[\\\/]+/, '');
         const localCandidate = path.resolve(storageProvider.localBase, stripped);
         if (fs.existsSync(localCandidate)) return localCandidate;
     } catch {}
 
-    // 5. LocalBase basename match
+    // 6. LocalBase basename match
     try {
         const baseCandidate = path.resolve(storageProvider.localBase, path.basename(p));
         if (fs.existsSync(baseCandidate)) return baseCandidate;
@@ -97,6 +120,86 @@ const resolveSharedPath = (p) => {
     } catch {
         return path.resolve(p);
     }
+};
+
+const listShareSmbFiles = async (sharePath, subPath = '') => {
+    const sharesRes = await db.query('SELECT * FROM network_shares');
+    let clean = (sharePath || '').trim().replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
+    const parts = clean.split('/');
+    const host = parts[0];
+    const shareName = parts[1] || '';
+    const uncShare = `//${host}/${shareName}`;
+
+    let internalSub = (subPath || '').replace(/^[\\\/]+/, '').replace(/\\/g, '/');
+    if (parts.length > 2) {
+        const extraPath = parts.slice(2).join('/');
+        internalSub = internalSub ? `${extraPath}/${internalSub}` : extraPath;
+    }
+
+    const matchedShare = sharesRes.rows.find(row => {
+        let cleanRow = (row.path || '').replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
+        const rowParts = cleanRow.split('/');
+        return rowParts[0]?.toLowerCase() === host.toLowerCase() && 
+               (rowParts[1] || '').toLowerCase() === shareName.toLowerCase();
+    });
+
+    const user = matchedShare?.username || '';
+    let pass = '';
+    if (matchedShare?.password) {
+        try { pass = cryptoHelper.decrypt(matchedShare.password); } catch (e) { pass = matchedShare.password; }
+    }
+
+    const cdCmd = internalSub ? `cd "${internalSub.replace(/"/g, '')}"; ` : '';
+    const listCmd = `${cdCmd}ls`;
+
+    const env = { ...process.env, PASSWD: pass || '' };
+    const safeUser = (user || '').replace(/[;&|`$<>\\"']/g, '');
+    const safeShare = uncShare.replace(/[;&|`$<>\\"']/g, '');
+
+    const cmd = safeUser
+        ? `smbclient "${safeShare}" -U "${safeUser}" -t 10 -c '${listCmd}'`
+        : `smbclient "${safeShare}" -N -t 10 -c '${listCmd}'`;
+
+    const { exec } = require('child_process');
+    return new Promise((resolve, reject) => {
+        exec(cmd, { env, timeout: 15000 }, (err, stdout, stderr) => {
+            if (err) {
+                const errMsg = (stderr || stdout || err.message || '').trim();
+                return reject(new Error(`Failed to browse SMB files: ${errMsg}`));
+            }
+
+            const lines = stdout.split('\n');
+            const files = [];
+
+            for (let line of lines) {
+                line = line.trim();
+                if (!line || line.startsWith('Domain=') || line.startsWith('OS=') || line.startsWith('Server=')) continue;
+
+                const match = line.match(/^(.+?)\s+([DAHRSVN]+)\s+(\d+)\s+([A-Za-z0-9:\s]+)$/);
+                if (match) {
+                    const name = match[1].trim();
+                    const attr = match[2].trim();
+                    const size = parseInt(match[3], 10) || 0;
+                    const dateStr = match[4].trim();
+
+                    if (name === '.' || name === '..') continue;
+
+                    const isDir = attr.includes('D');
+                    const itemRelPath = subPath ? path.join(subPath, name).replace(/\\/g, '/') : name;
+
+                    files.push({
+                        name,
+                        path: itemRelPath,
+                        isDirectory: isDir,
+                        size: isDir ? 0 : size,
+                        modified: new Date(dateStr) || new Date(),
+                        extension: isDir ? '' : path.extname(name).slice(1).toLowerCase()
+                    });
+                }
+            }
+            resolve(files);
+        });
+    });
 };
 
 // Strict path boundary validation (immune to substring prefix traversal)
@@ -419,6 +522,17 @@ router.get('/files/:token', async (req, res) => {
         }
 
         if (!fs.existsSync(resolved)) {
+            // Check if share.path is an SMB/Network share
+            const isSmb = (share.path || '').startsWith('\\\\') || (share.path || '').startsWith('//') || (share.path || '').startsWith('smb://');
+            if (isSmb) {
+                try {
+                    const smbEntries = await listShareSmbFiles(share.path, req.query.path || '');
+                    return res.json(smbEntries);
+                } catch (smbErr) {
+                    logger.warn(`[Share Files SMB Fallback Failed] ${smbErr.message}`);
+                }
+            }
+
             logger.warn(`[Share Files] Path does not exist: "${resolved}" for share token "${req.params.token}"`);
             return res.status(404).json({ error: 'Shared file or directory not found on disk' });
         }

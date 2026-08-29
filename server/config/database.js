@@ -83,6 +83,45 @@ async function initDatabase() {
             )
         `);
         await client.query('CREATE INDEX IF NOT EXISTS idx_share_links_token ON share_links(token)');
+        await client.query('ALTER TABLE share_links ADD COLUMN IF NOT EXISTS title VARCHAR(255)');
+        await client.query('ALTER TABLE share_links ADD COLUMN IF NOT EXISTS description TEXT');
+
+        // 2b. Legacy SHARES table compatibility
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS shares (
+                id VARCHAR(100) PRIMARY KEY,
+                name VARCHAR(255),
+                path TEXT,
+                password_hash VARCHAR(255),
+                email VARCHAR(255),
+                max_views INTEGER DEFAULT -1,
+                view_count INTEGER DEFAULT 0,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                expiry TIMESTAMP WITH TIME ZONE
+            )
+        `);
+        await client.query('ALTER TABLE shares ADD COLUMN IF NOT EXISTS name VARCHAR(255)');
+        await client.query('ALTER TABLE shares ADD COLUMN IF NOT EXISTS path TEXT');
+        await client.query('ALTER TABLE shares ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255)');
+        await client.query('ALTER TABLE shares ADD COLUMN IF NOT EXISTS email VARCHAR(255)');
+        await client.query('ALTER TABLE shares ADD COLUMN IF NOT EXISTS max_views INTEGER DEFAULT -1');
+        await client.query('ALTER TABLE shares ADD COLUMN IF NOT EXISTS view_count INTEGER DEFAULT 0');
+        await client.query('ALTER TABLE shares ADD COLUMN IF NOT EXISTS expiry TIMESTAMP WITH TIME ZONE');
+
+        // 2c. Legacy GUEST_SESSIONS table compatibility
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS guest_sessions (
+                id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                share_id VARCHAR(100),
+                email VARCHAR(255),
+                otp_code VARCHAR(10),
+                otp_expires_at TIMESTAMP WITH TIME ZONE
+            )
+        `);
+        await client.query('ALTER TABLE guest_sessions ADD COLUMN IF NOT EXISTS share_id VARCHAR(100)');
+        await client.query('ALTER TABLE guest_sessions ADD COLUMN IF NOT EXISTS email VARCHAR(255)');
+        await client.query('ALTER TABLE guest_sessions ADD COLUMN IF NOT EXISTS otp_code VARCHAR(10)');
+        await client.query('ALTER TABLE guest_sessions ADD COLUMN IF NOT EXISTS otp_expires_at TIMESTAMP WITH TIME ZONE');
 
         // 3. Create PERSISTENT_AGENTS table
         await client.query(`
