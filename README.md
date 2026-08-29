@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-2.4.3-blue.svg?style=for-the-badge&logo=semver" alt="Version 2.4.3" />
+  <img src="https://img.shields.io/badge/version-2.4.4-blue.svg?style=for-the-badge&logo=semver" alt="Version 2.4.4" />
   <img src="https://img.shields.io/badge/node->=18.0.0-green.svg?style=for-the-badge&logo=node.js" alt="Node.js" />
   <img src="https://img.shields.io/badge/database-PostgreSQL%2014+-336791.svg?style=for-the-badge&logo=postgresql" alt="PostgreSQL" />
   <img src="https://img.shields.io/badge/ui-React%2018%20%7C%20Vite-61DAFB.svg?style=for-the-badge&logo=react" alt="React & Vite" />

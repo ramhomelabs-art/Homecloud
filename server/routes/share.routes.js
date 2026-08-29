@@ -42,14 +42,34 @@ const getCookie = (req, name) => {
 const isShareAuthorized = (req, share) => {
     if (!share) return false;
     if (!share.password_hash && !share.email_verification) return true;
-    const cookieToken = getCookie(req, `share_auth_${share.id}`);
-    if (!cookieToken) return false;
-    try {
-        const decoded = jwt.verify(cookieToken, process.env.JWT_SECRET);
-        return decoded && decoded.shareId === share.id && decoded.authorized === true;
-    } catch (e) {
-        return false;
+
+    // 1. Check Authorization header (Bearer token)
+    const authHeader = req.headers['authorization'];
+    const bearerToken = (authHeader && authHeader.startsWith('Bearer ')) ? authHeader.split(' ')[1] : null;
+    if (bearerToken) {
+        if (bearerToken === share.token || bearerToken === share.id) return true;
+        try {
+            const decoded = jwt.verify(bearerToken, process.env.JWT_SECRET);
+            if (decoded && (decoded.shareId === share.id || decoded.shareId === share.token || decoded.token === share.token)) return true;
+        } catch (_) {}
     }
+
+    // 2. Check query token
+    if (req.query.token && (req.query.token === share.token || req.query.token === share.id)) return true;
+
+    // 3. Check cookie token
+    const cookieToken = getCookie(req, `share_auth_${share.id}`) || 
+                        getCookie(req, `share_auth_${share.token}`) || 
+                        getCookie(req, `share_auth_${(share.id || '').replace(/-/g, '')}`);
+    if (cookieToken) {
+        if (cookieToken === 'true' || cookieToken === share.token || cookieToken === share.id) return true;
+        try {
+            const decoded = jwt.verify(cookieToken, process.env.JWT_SECRET);
+            if (decoded && (decoded.shareId === share.id || decoded.shareId === share.token) && decoded.authorized === true) return true;
+        } catch (_) {}
+    }
+
+    return false;
 };
 
 // Resolve paths across Windows UNC, drive letters, Linux mounts, and StorageProvider uploads
@@ -617,9 +637,26 @@ router.get('/files/:token', async (req, res) => {
             if (isSmb) {
                 try {
                     const smbEntries = await listShareSmbFiles(share.path, req.query.path || '');
-                    return res.json(smbEntries);
+                    if (smbEntries && smbEntries.length > 0) {
+                        return res.json(smbEntries);
+                    }
                 } catch (smbErr) {
                     logger.warn(`[Share Files SMB Fallback Failed] ${smbErr.message}`);
+                }
+
+                // If listShareSmbFiles was empty or threw, but share.path is a single file with an extension:
+                const cleanSmbPath = (share.path || '').replace(/\\/g, '/');
+                const smbFileName = path.basename(cleanSmbPath);
+                const hasExt = path.extname(smbFileName).length > 0;
+                if (hasExt && !req.query.path) {
+                    return res.json([{
+                        name: smbFileName,
+                        path: '',
+                        isDirectory: false,
+                        size: 0,
+                        modified: new Date(),
+                        extension: path.extname(smbFileName).slice(1).toLowerCase()
+                    }]);
                 }
             }
 

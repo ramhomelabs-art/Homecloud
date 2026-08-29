@@ -1,6 +1,6 @@
 {
   "name": "nexadisk-v2-server",
-  "version": "2.4.3",
+  "version": "2.4.4",
   "description": "NexaDisk Core Enterprise Backend Server",
   "main": "index.js",
   "scripts": {

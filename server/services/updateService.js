@@ -10,7 +10,7 @@ const logger = require('../utils/logger');
 const clusterService = require('./clusterService');
 const siteMeshService = require('./siteMeshService');
 
-const CURRENT_VERSION = '2.4.3';
+const CURRENT_VERSION = '2.4.4';
 const DEFAULT_REPO = 'ramhomelabs-art/Homecloud';
 
 class UpdateService {

@@ -148,7 +148,10 @@ const GuestPortal = ({ shareId, showToast }) => {
     const loadFiles = async (subPath) => {
         setFilesLoading(true);
         try {
-            const r = await axios.get(`/api/share/files/${shareId}`, { params: { path: subPath } });
+            const headers = {};
+            const guestTok = localStorage.getItem('guestToken');
+            if (guestTok) headers['Authorization'] = `Bearer ${guestTok}`;
+            const r = await axios.get(`/api/share/files/${shareId}`, { params: { path: subPath }, headers });
             setFiles(r.data);
             setCurPath(subPath);
         } catch (e) {
