@@ -1,9 +1,23 @@
-import React, { useLayoutEffect, useState, useRef } from 'react';
+import React, { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import {
-    FolderOpen, Eye, Download, Copy, Scissors, Trash2, Box, Edit, Share2, Info, Plus, RefreshCw, Star, FileCode, Upload, History, PieChart, FolderSync, MessageSquare
+    FolderOpen, Eye, Download, Copy, Scissors, Trash2, Box, Edit, Share2, Info, Plus, RefreshCw, Star, FileCode, Upload, History, PieChart, FolderSync, MessageSquare, Clipboard
 } from 'lucide-react';
 
-const ContextMenu = ({ data, onAction, onPaste, hasClipboard, onCreateFolder, onRefresh, selectedCount, isGuest, guestPermissions }) => {
+const ContextMenu = ({ 
+    data, 
+    onAction, 
+    onPaste, 
+    onClose,
+    hasClipboard, 
+    clipboardCount = 0,
+    clipboardType = 'copy',
+    onCreateFolder, 
+    onUploadClick,
+    onRefresh, 
+    selectedCount, 
+    isGuest, 
+    guestPermissions 
+}) => {
     if (!data) return null;
     const isFile = !!data.file;
     const isBulk = selectedCount > 1;
@@ -13,6 +27,28 @@ const ContextMenu = ({ data, onAction, onPaste, hasClipboard, onCreateFolder, on
 
     const menuRef = useRef(null);
     const [pos, setPos] = useState({ top: data.y, left: data.x });
+
+    useEffect(() => {
+        const handleClickOutside = (e) => {
+            if (menuRef.current && !menuRef.current.contains(e.target)) {
+                if (onClose) onClose();
+            }
+        };
+        const handleScroll = (e) => {
+            if (menuRef.current && !menuRef.current.contains(e.target)) {
+                if (onClose) onClose();
+            }
+        };
+
+        window.addEventListener('mousedown', handleClickOutside);
+        window.addEventListener('scroll', handleScroll, true);
+        window.addEventListener('resize', handleClickOutside);
+        return () => {
+            window.removeEventListener('mousedown', handleClickOutside);
+            window.removeEventListener('scroll', handleScroll, true);
+            window.removeEventListener('resize', handleClickOutside);
+        };
+    }, [onClose]);
 
     useLayoutEffect(() => {
         if (!menuRef.current) return;
@@ -39,17 +75,17 @@ const ContextMenu = ({ data, onAction, onPaste, hasClipboard, onCreateFolder, on
     return (
         <div 
             ref={menuRef} 
-            className="context-menu glass custom-scrollbar" 
+            className="context-menu glass custom-scrollbar animate-scale-in" 
             style={{
                 position: 'fixed',
                 top: `${pos.top}px`,
                 left: `${pos.left}px`,
-                zIndex: 2000,
-                width: '220px',
+                zIndex: 2100,
+                width: '230px',
                 maxHeight: 'calc(100vh - 24px)',
                 overflowY: 'auto',
-                boxShadow: '0 10px 30px rgba(0,0,0,0.4)',
-                borderRadius: '8px'
+                boxShadow: '0 12px 36px rgba(0,0,0,0.5), 0 0 0 1px var(--border-subtle)',
+                borderRadius: '10px'
             }}
         >
 
@@ -57,7 +93,7 @@ const ContextMenu = ({ data, onAction, onPaste, hasClipboard, onCreateFolder, on
                 <>
                     {data.file.isDirectory ? (
                         <div className="cm-item" onClick={() => onAction('open', data.file)}>
-                            <FolderOpen size={16} /> Open
+                            <FolderOpen size={16} color="var(--accent-gold)" /> Open Folder
                         </div>
                     ) : (
                         <>
@@ -166,12 +202,35 @@ const ContextMenu = ({ data, onAction, onPaste, hasClipboard, onCreateFolder, on
                 </>
             ) : (
                 <>
-                    {canEdit && <div className="cm-item" onClick={onCreateFolder}><Plus size={16} /> New Folder</div>}
-                    {canEdit && hasClipboard && <div className="cm-item" onClick={onPaste}><Edit size={16} /> Paste</div>}
-                    <div className="cm-item" onClick={() => onAction('diskHeatmap', null)}><PieChart size={16} color="var(--accent-cyan)" /> Disk Heatmap...</div>
-                    <div className="cm-item" onClick={() => onAction('deduplicate', null)}><FolderSync size={16} color="var(--accent-gold)" /> Deduplicate...</div>
-                    {(canEdit || hasClipboard) && <div className="cm-divider"></div>}
-                    <div className="cm-item" onClick={onRefresh}><RefreshCw size={16} /> Refresh</div>
+                    {canEdit && (
+                        <div className="cm-item" onClick={onCreateFolder}>
+                            <Plus size={16} color="var(--accent-gold)" />
+                            <span>New Folder</span>
+                        </div>
+                    )}
+                    {canEdit && onUploadClick && (
+                        <div className="cm-item" onClick={onUploadClick}>
+                            <Upload size={16} color="var(--accent-cyan)" />
+                            <span>Upload Files</span>
+                        </div>
+                    )}
+                    {canEdit && hasClipboard && (
+                        <div className="cm-item" onClick={onPaste} style={{ color: 'var(--primary-light, #818cf8)' }}>
+                            <Clipboard size={16} />
+                            <span>Paste {clipboardCount > 1 ? `(${clipboardCount} items)` : ''}</span>
+                        </div>
+                    )}
+                    <div className="cm-divider" />
+                    <div className="cm-item" onClick={() => onAction('diskHeatmap', null)}>
+                        <PieChart size={16} color="var(--accent-cyan)" /> Disk Heatmap...
+                    </div>
+                    <div className="cm-item" onClick={() => onAction('deduplicate', null)}>
+                        <FolderSync size={16} color="var(--accent-gold)" /> Deduplicate...
+                    </div>
+                    <div className="cm-divider" />
+                    <div className="cm-item" onClick={onRefresh}>
+                        <RefreshCw size={16} /> Refresh
+                    </div>
                 </>
             )}
         </div>
@@ -179,3 +238,4 @@ const ContextMenu = ({ data, onAction, onPaste, hasClipboard, onCreateFolder, on
 };
 
 export default ContextMenu;
+

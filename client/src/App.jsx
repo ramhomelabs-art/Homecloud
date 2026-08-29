@@ -1893,20 +1893,16 @@ function App() {
         if (!clipboard) return;
         const destAgentId = selectedDevice?.type === 'Agent' ? selectedDevice.id : undefined;
 
-        if (clipboard.files) {
-            for (const file of clipboard.files) {
-                if (file.agentId !== destAgentId) {
-                    showToast(`Cross-node ${clipboard.type} is not supported yet for ${file.name}`, 'error');
-                    continue;
-                }
-                await executeOperation(clipboard.type, file.path, path, destAgentId);
+        const filesToPaste = clipboard.files || (clipboard.path ? [{ path: clipboard.path, name: clipboard.name, agentId: clipboard.agentId }] : []);
+        if (filesToPaste.length === 0) return;
+
+        for (const file of filesToPaste) {
+            const effectiveAgentId = destAgentId !== undefined ? destAgentId : file.agentId;
+            if (file.agentId && destAgentId && file.agentId !== destAgentId) {
+                showToast(`Cross-node ${clipboard.type} between different machines is not supported yet for ${file.name}. Use Download/Upload instead.`, 'error');
+                continue;
             }
-        } else {
-            if (clipboard.agentId !== destAgentId) {
-                showToast('Cross-node move/copy is not supported yet. Use Download/Upload instead.', 'error');
-                return;
-            }
-            await executeOperation(clipboard.type, clipboard.path, path, destAgentId);
+            await executeOperation(clipboard.type, file.path, path, effectiveAgentId);
         }
         setClipboard(null);
     };
@@ -2868,8 +2864,8 @@ function App() {
                                         onDragOver={handleDragOver}
                                         onDrop={(e) => handleDrop(e)}
                                         onContextMenu={(e) => {
-                                            if (e.target.classList.contains('file-row-grid')) {
-                                                onRightClick(e);
+                                            if (!e.target.closest('.file-card') && !e.target.closest('.file-row-list-item')) {
+                                                onRightClick(e, null);
                                             }
                                         }}>
                                     {explorerMode === 'devices' && (
@@ -3439,10 +3435,20 @@ function App() {
 
             <ContextMenu
                 data={contextMenu}
-                onAction={handleAction}
-                onPaste={handlePaste}
+                onAction={(action, file) => {
+                    setContextMenu(null);
+                    handleAction(action, file);
+                }}
+                onPaste={() => {
+                    setContextMenu(null);
+                    handlePaste();
+                }}
+                onClose={() => setContextMenu(null)}
                 hasClipboard={!!clipboard}
+                clipboardCount={clipboard?.files?.length || (clipboard ? 1 : 0)}
+                clipboardType={clipboard?.type || 'copy'}
                 onCreateFolder={() => { setShowFolderModal(true); setContextMenu(null); }}
+                onUploadClick={() => { fileInputRef.current?.click(); setContextMenu(null); }}
                 onRefresh={() => { fetchFiles(path); setContextMenu(null); }}
                 selectedCount={selectedPaths.size}
                 isGuest={!!guestToken}

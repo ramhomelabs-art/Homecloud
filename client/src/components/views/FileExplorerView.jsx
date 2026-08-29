@@ -531,8 +531,8 @@ export default function FileExplorerView({
                     onDragOver={handleDragOver}
                     onDrop={(e) => handleDrop(e)}
                     onContextMenu={(e) => {
-                        if (e.target.classList.contains('file-row-grid')) {
-                            onRightClick(e);
+                        if (!e.target.closest('.file-card') && !e.target.closest('.file-row-list-item')) {
+                            onRightClick(e, null);
                         }
                     }}
                 >

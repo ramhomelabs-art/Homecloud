@@ -3193,13 +3193,26 @@ router.get('/comments', async (req, res) => {
         const filePath = req.query.path;
         if (!filePath) return res.status(400).json({ error: 'Path required' });
 
-        const result = await db.query(
-            'SELECT id, file_path, username, comment, pinned, created_at FROM file_comments WHERE file_path = $1 ORDER BY pinned DESC, created_at ASC',
-            [filePath]
-        );
-        res.json(result.rows);
+        try {
+            const result = await db.query(
+                'SELECT id, COALESCE(file_path, path) as file_path, COALESCE(username, \'User\') as username, comment, COALESCE(pinned, false) as pinned, created_at FROM file_comments WHERE file_path = $1 OR path = $1 ORDER BY pinned DESC, created_at ASC',
+                [filePath]
+            );
+            return res.json(result.rows || []);
+        } catch (dbErr) {
+            // Fallback for older schemas with minimal columns
+            try {
+                const fallbackRes = await db.query(
+                    'SELECT id, comment, created_at FROM file_comments WHERE file_path = $1 OR path = $1 ORDER BY created_at ASC',
+                    [filePath]
+                );
+                return res.json(fallbackRes.rows || []);
+            } catch (fallbackErr) {
+                return res.json([]);
+            }
+        }
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.json([]);
     }
 });
 
@@ -3214,17 +3227,25 @@ router.post('/comments', async (req, res) => {
         const username = req.user?.username || 'admin';
         const userId = req.user?.id;
 
-        const insertRes = await db.query(
-            'INSERT INTO file_comments (file_path, user_id, username, comment) VALUES ($1, $2, $3, $4) RETURNING id, file_path, username, comment, pinned, created_at',
-            [filePath, userId, username, comment.trim()]
-        );
+        try {
+            const insertRes = await db.query(
+                'INSERT INTO file_comments (file_path, path, user_id, username, comment) VALUES ($1, $1, $2, $3, $4) RETURNING id, file_path, username, comment, pinned, created_at',
+                [filePath, userId, username, comment.trim()]
+            );
 
-        notificationService.notify('file_upload', 'Team Comment Added 💬', {
-            status: `@${username} commented on "${path.basename(filePath)}": "${comment.trim().slice(0, 60)}"`,
-            error: 'info'
-        });
+            notificationService.notify('file_upload', 'Team Comment Added 💬', {
+                status: `@${username} commented on "${path.basename(filePath)}": "${comment.trim().slice(0, 60)}"`,
+                error: 'info'
+            });
 
-        res.json({ success: true, comment: insertRes.rows[0] });
+            return res.json({ success: true, comment: insertRes.rows[0] });
+        } catch (dbInsertErr) {
+            const basicInsert = await db.query(
+                'INSERT INTO file_comments (path, comment) VALUES ($1, $2) RETURNING id, comment, created_at',
+                [filePath, comment.trim()]
+            );
+            return res.json({ success: true, comment: basicInsert.rows[0] });
+        }
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

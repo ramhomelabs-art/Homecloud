@@ -442,15 +442,20 @@ async function initDatabase() {
             CREATE TABLE IF NOT EXISTS file_comments (
                 id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
                 file_path TEXT,
+                path TEXT,
                 user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-                username VARCHAR(100) NOT NULL,
+                username VARCHAR(100) NOT NULL DEFAULT 'admin',
                 comment TEXT NOT NULL,
                 pinned BOOLEAN DEFAULT FALSE,
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             )
         `);
         await client.query('ALTER TABLE file_comments ADD COLUMN IF NOT EXISTS file_path TEXT');
-        await client.query('CREATE INDEX IF NOT EXISTS idx_file_comments_path ON file_comments(file_path)');
+        await client.query('ALTER TABLE file_comments ADD COLUMN IF NOT EXISTS path TEXT');
+        await client.query('ALTER TABLE file_comments ADD COLUMN IF NOT EXISTS username VARCHAR(100) DEFAULT \'admin\'');
+        await client.query('ALTER TABLE file_comments ADD COLUMN IF NOT EXISTS pinned BOOLEAN DEFAULT FALSE');
+        await client.query('CREATE INDEX IF NOT EXISTS idx_file_comments_filepath ON file_comments(file_path)');
+        await client.query('CREATE INDEX IF NOT EXISTS idx_file_comments_path ON file_comments(path)');
 
         // 24. Create ENCRYPTED_SECRETS table
         await client.query(`
