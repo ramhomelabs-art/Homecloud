@@ -167,6 +167,11 @@ const uploadFileToSmb = async (localFilePath, sharePath, fileName) => {
     });
 };
 
+const clearDirSizeCache = () => {
+    if (typeof dirSizeCache !== 'undefined' && dirSizeCache) dirSizeCache.clear();
+    cachedCategories = null;
+};
+
 module.exports = {
     getDirectorySize,
     calculateCategorySizes,
