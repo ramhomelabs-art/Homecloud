@@ -538,8 +538,8 @@ export default function ClusterCockpitView({
             </div>
 
             {/* Main Cockpit Telemetry Grid */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1.45fr 1.05fr', gap: '24px' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.45fr) minmax(0, 1.05fr)', gap: '24px', width: '100%', minWidth: 0 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', minWidth: 0, overflow: 'hidden' }}>
                     
                     {/* 4 Liquid Wave Fluid Metric Cards matching User Reference */}
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '16px' }}>
@@ -1116,6 +1116,9 @@ export default function ClusterCockpitView({
                         display: 'flex', 
                         flexDirection: 'column', 
                         height: 'fit-content',
+                        minWidth: 0,
+                        width: '100%',
+                        overflow: 'hidden',
                         background: 'var(--bg-surface-0, #ffffff)',
                         border: '1px solid var(--border-subtle)',
                         borderRadius: '18px',
@@ -1125,8 +1128,8 @@ export default function ClusterCockpitView({
                     }} 
                 >
                     {/* Header with Live Pulse Badge & Actions */}
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', flexShrink: 0 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', flexShrink: 0, minWidth: 0, gap: '10px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
                             <div style={{
                                 width: '32px',
                                 height: '32px',
@@ -1134,22 +1137,23 @@ export default function ClusterCockpitView({
                                 background: 'rgba(245, 158, 11, 0.12)',
                                 display: 'flex',
                                 alignItems: 'center',
-                                justifyContent: 'center'
+                                justifyContent: 'center',
+                                flexShrink: 0
                             }}>
                                 <Activity size={17} color="var(--accent-gold, #f59e0b)" />
                             </div>
-                            <div>
-                                <h3 style={{ fontSize: '15.5px', fontWeight: '850', margin: 0, color: 'var(--text-primary)', letterSpacing: '-0.3px' }}>
+                            <div style={{ minWidth: 0, overflow: 'hidden' }}>
+                                <h3 style={{ fontSize: '15.5px', fontWeight: '850', margin: 0, color: 'var(--text-primary)', letterSpacing: '-0.3px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                     Fleet Event Stream
                                 </h3>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '1px' }}>
-                                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10b981', display: 'inline-block' }} />
-                                    <span style={{ fontSize: '10.5px', color: 'var(--text-secondary)', fontWeight: '600' }}>Live Cluster Telemetry</span>
+                                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10b981', display: 'inline-block', flexShrink: 0 }} />
+                                    <span style={{ fontSize: '10.5px', color: 'var(--text-secondary)', fontWeight: '600', whiteSpace: 'nowrap' }}>Live Cluster Telemetry</span>
                                 </div>
                             </div>
                         </div>
 
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
                             <button
                                 onClick={() => setShowFleetEventsModal(true)}
                                 style={{
@@ -1163,7 +1167,8 @@ export default function ClusterCockpitView({
                                     borderRadius: '7px',
                                     fontSize: '11px',
                                     fontWeight: '700',
-                                    cursor: 'pointer'
+                                    cursor: 'pointer',
+                                    whiteSpace: 'nowrap'
                                 }}
                                 title="Expand Full Audit Log Modal"
                             >
@@ -1181,7 +1186,8 @@ export default function ClusterCockpitView({
                                     fontWeight: '700',
                                     padding: '5px 9px',
                                     borderRadius: '7px',
-                                    transition: 'all 0.2s ease'
+                                    transition: 'all 0.2s ease',
+                                    whiteSpace: 'nowrap'
                                 }}
                                 title="Clear fleet activity stream"
                             >
@@ -1191,8 +1197,8 @@ export default function ClusterCockpitView({
                     </div>
 
                     {/* Inline Filter Pills and Search */}
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginBottom: '14px', flexWrap: 'wrap' }}>
-                        <div style={{ display: 'flex', gap: '5px', background: 'var(--bg-surface-1, rgba(0,0,0,0.03))', padding: '3px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginBottom: '14px', flexWrap: 'wrap', minWidth: 0 }}>
+                        <div style={{ display: 'flex', gap: '5px', background: 'var(--bg-surface-1, rgba(0,0,0,0.03))', padding: '3px', borderRadius: '8px', border: '1px solid var(--border-subtle)', flexShrink: 0 }}>
                             {[
                                 { id: 'all', label: 'All' },
                                 { id: 'transfers', label: 'Transfers' },
@@ -1218,7 +1224,7 @@ export default function ClusterCockpitView({
                             ))}
                         </div>
 
-                        <div style={{ position: 'relative', minWidth: '140px', flex: '1 1 140px' }}>
+                        <div style={{ position: 'relative', minWidth: '120px', flex: '1 1 120px' }}>
                             <Search size={12} color="var(--text-secondary)" style={{ position: 'absolute', left: '9px', top: '50%', transform: 'translateY(-50%)' }} />
                             <input
                                 type="text"
@@ -1227,6 +1233,7 @@ export default function ClusterCockpitView({
                                 onChange={(e) => setStreamSearch(e.target.value)}
                                 style={{
                                     width: '100%',
+                                    boxSizing: 'border-box',
                                     background: 'var(--bg-surface-1, rgba(0,0,0,0.02))',
                                     border: '1px solid var(--border-subtle)',
                                     borderRadius: '7px',
@@ -1242,11 +1249,14 @@ export default function ClusterCockpitView({
                     {/* Event Rows Scroll Container */}
                     <div style={{ 
                         overflowY: 'auto', 
+                        overflowX: 'hidden',
                         maxHeight: '480px', 
                         paddingRight: '4px',
                         display: 'flex',
                         flexDirection: 'column',
-                        gap: '8px'
+                        gap: '8px',
+                        minWidth: 0,
+                        width: '100%'
                     }}>
                         {(() => {
                             const rawList = [
@@ -1326,11 +1336,15 @@ export default function ClusterCockpitView({
                                             display: 'flex',
                                             flexDirection: 'column',
                                             gap: '5px',
+                                            minWidth: 0,
+                                            width: '100%',
+                                            boxSizing: 'border-box',
+                                            overflow: 'hidden',
                                             transition: 'all 0.15s ease'
                                         }}
                                     >
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
-                                            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '9px', minWidth: 0, flex: 1 }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px', minWidth: 0, width: '100%' }}>
+                                            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '9px', minWidth: 0, flex: 1, overflow: 'hidden' }}>
                                                 <div style={{
                                                     width: '24px',
                                                     height: '24px',
@@ -1350,7 +1364,7 @@ export default function ClusterCockpitView({
                                                         <Activity size={13} color="#10b981" />
                                                     )}
                                                 </div>
-                                                <div style={{ minWidth: 0, flex: 1 }}>
+                                                <div style={{ minWidth: 0, flex: 1, overflow: 'hidden' }}>
                                                     <p 
                                                         style={{ 
                                                             fontSize: '12px', 
@@ -1359,13 +1373,16 @@ export default function ClusterCockpitView({
                                                             color: 'var(--text-primary)', 
                                                             overflow: 'hidden', 
                                                             textOverflow: 'ellipsis', 
-                                                            whiteSpace: 'nowrap' 
+                                                            whiteSpace: 'nowrap',
+                                                            display: 'block',
+                                                            width: '100%',
+                                                            maxWidth: '100%'
                                                         }}
                                                         title={act.name}
                                                     >
                                                         {act.name}
                                                     </p>
-                                                    <p style={{ fontSize: '10px', color: 'var(--text-secondary)', margin: '2px 0 0 0', fontWeight: '500' }}>
+                                                    <p style={{ fontSize: '10px', color: 'var(--text-secondary)', margin: '2px 0 0 0', fontWeight: '500', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                                         {act.type || 'Event'} • {act.timestamp ? new Date(act.timestamp).toLocaleTimeString() : 'Just now'}
                                                     </p>
                                                 </div>
@@ -1384,7 +1401,7 @@ export default function ClusterCockpitView({
                                             </span>
                                         </div>
                                         {act.error && (
-                                            <p style={{ fontSize: '10px', color: badgeColor, margin: '2px 0 0', opacity: 0.9 }}>
+                                            <p style={{ fontSize: '10px', color: badgeColor, margin: '2px 0 0', opacity: 0.9, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                                 {act.error}
                                             </p>
                                         )}
