@@ -259,7 +259,7 @@ export default function FileExplorerView({
                                                 prefix = '';
                                             }
                                             const newPath = prefix + newParts.join(sep);
-                                            navigateTo(newPath, 'files');
+                                            navigateTo(newPath, 'files', selectedDevice);
                                         } else if (selectedDevice?.children) {
                                             navigateTo('/', 'partitions', selectedDevice);
                                         } else {
@@ -302,7 +302,7 @@ export default function FileExplorerView({
                                                 const parts = path.split(/[/\\]/).filter(Boolean);
                                                 const targetParts = parts.slice(0, i + 1).join(path.includes('/') ? '/' : '\\');
                                                 const newPath = isUNC ? `\\\\${targetParts}` : (targetParts.includes(':') ? targetParts : (path.startsWith('/') ? '/' + targetParts : targetParts));
-                                                navigateTo(newPath, 'files');
+                                                navigateTo(newPath, 'files', selectedDevice);
                                             }}
                                         >
                                             {p}

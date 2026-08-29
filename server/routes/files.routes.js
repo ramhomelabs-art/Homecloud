@@ -60,6 +60,23 @@ const upload = multer({
     limits: { fileSize: 1024 * 1024 * 1024 } // 1GB limit
 });
 
+// Helper: Auto-route Windows drive letters (e.g. D:\, C:\) on Linux Master host to online agent
+const resolveAgentId = (agentId, targetPath) => {
+    if (agentId && clusterService.agents[agentId]) return agentId;
+    if (process.platform !== 'win32' && targetPath && /^[a-zA-Z]:/i.test(targetPath)) {
+        const driveLetter = targetPath.substring(0, 2).toUpperCase();
+        const agentsList = Object.values(clusterService.agents || {});
+        const match = agentsList.find(ag => ag.status === 'approved' && ag.online && (ag.disks || []).some(d => (d.mount || '').toUpperCase().startsWith(driveLetter)))
+            || agentsList.find(ag => ag.status === 'approved' && (ag.disks || []).some(d => (d.mount || '').toUpperCase().startsWith(driveLetter)))
+            || agentsList.find(ag => ag.status === 'approved' && ag.online)
+            || agentsList[0];
+        if (match) {
+            return match.id;
+        }
+    }
+    return agentId || null;
+};
+
 // Helper: Resolve file path and check for directory traversal and role isolation
 const resolveFilePath = (req, filePath) => {
     // 1. Guest Users: Strictly jailed to their specific share token's root path
@@ -749,13 +766,21 @@ router.get('/list', async (req, res) => {
         }
     }
 
-    if (agentId && clusterService.agents[agentId]) {
-        const agent = clusterService.agents[agentId];
+    // Agent Proxying (explicit or auto-routed for Windows drive letters on Linux host)
+    const targetAgentId = resolveAgentId(agentId, targetPath);
+
+    if (targetAgentId && clusterService.agents[targetAgentId]) {
+        const agent = clusterService.agents[targetAgentId];
         if (agent.status !== 'approved') return res.status(403).json({ error: 'Agent not approved' });
         try {
-            const resp = await axios.get(`${agent.url}/api/v1/files/list?path=${encodeURIComponent(targetPath || '')}`);
+            const masterKey = process.env.AGENT_KEY || '';
+            const resp = await axios.get(`${agent.url}/api/v1/files/list?path=${encodeURIComponent(targetPath || '')}`, {
+                headers: { Authorization: `Bearer ${masterKey}` },
+                timeout: 10000
+            });
             return res.json(resp.data);
         } catch (e) {
+            logger.warn(`[Files Routes] Failed to proxy agent list from ${agent.url} (${targetPath}): ${e.message}`);
             return res.status(e.response?.status || 502).json({ error: `Agent listing error: ${e.message}` });
         }
     }
@@ -880,11 +905,17 @@ router.get('/metadata', async (req, res) => {
         });
     }
 
-    if (agentId && clusterService.agents[agentId]) {
-        const agent = clusterService.agents[agentId];
+    const targetAgentId = resolveAgentId(agentId, targetPath);
+
+    if (targetAgentId && clusterService.agents[targetAgentId]) {
+        const agent = clusterService.agents[targetAgentId];
         if (agent.status !== 'approved') return res.status(403).json({ error: 'Agent not approved' });
         try {
-            const resp = await axios.get(`${agent.url}/api/v1/files/metadata?path=${encodeURIComponent(targetPath)}`);
+            const masterKey = process.env.AGENT_KEY || '';
+            const resp = await axios.get(`${agent.url}/api/v1/files/metadata?path=${encodeURIComponent(targetPath)}`, {
+                headers: { Authorization: `Bearer ${masterKey}` },
+                timeout: 8000
+            });
             return res.json(resp.data);
         } catch (e) {
             return res.status(e.response?.status || 502).json({ error: e.message });

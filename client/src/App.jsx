@@ -658,7 +658,7 @@ function App() {
     const [loadingMetadata, setLoadingMetadata] = useState(false);
     const [serverPlatform, setServerPlatform] = useState('linux'); // Default to linux, will be synced from server
 
-    const navigateTo = (newPath, newMode, newDevice = null, skipHistory = false) => {
+    const navigateTo = (newPath, newMode, newDevice = undefined, skipHistory = false) => {
         if (!skipHistory) {
             setHistory(prev => [{ path, mode: explorerMode, device: selectedDevice }, ...prev].slice(0, 50));
             setFuture([]);
