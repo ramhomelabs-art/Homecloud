@@ -434,7 +434,9 @@ const GuestPortal = ({ shareId, showToast }) => {
                                 </div>
                                 <div style={{flex:1,minWidth:0}}>
                                     <p style={{margin:0,fontWeight:600,fontSize:'13px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{f.name}</p>
-                                    <p style={{margin:0,fontSize:'11px',color: 'var(--text-secondary)'}}>{f.isDirectory ? 'Folder' : fmt(f.size)}</p>
+                                    <p style={{margin:0,fontSize:'11px',color: 'var(--text-secondary)'}}>
+                                        {f.isDirectory ? 'Folder' : (f.size > 0 ? fmt(f.size) : (f.extension ? `${f.extension.toUpperCase()} File` : '0 B'))}
+                                    </p>
                                 </div>
                                 {!f.isDirectory && (
                                     <button onClick={e=>{e.stopPropagation();downloadItem(f);}} style={dlBtnSmall} disabled={downloading}>
@@ -447,11 +449,17 @@ const GuestPortal = ({ shareId, showToast }) => {
                     </div>
                 )}
 
-                {/* Download all */}
+                {/* Download single / Download all */}
                 <div style={{marginTop:'24px',textAlign:'center'}}>
-                    <button onClick={() => downloadItem({name: info.title, path:'', isDirectory:true})} disabled={downloading} style={dlBtnFull}>
-                        <Download size={18}/> {downloading ? 'Preparing...' : 'Download All as ZIP'}
-                    </button>
+                    {files.length === 1 && !files[0].isDirectory ? (
+                        <button onClick={() => downloadItem(files[0])} disabled={downloading} style={dlBtnFull}>
+                            <Download size={18}/> {downloading ? 'Downloading...' : `Download ${files[0].name}`}
+                        </button>
+                    ) : (
+                        <button onClick={() => downloadItem({name: info.title, path:'', isDirectory:true})} disabled={downloading} style={dlBtnFull}>
+                            <Download size={18}/> {downloading ? 'Preparing...' : 'Download All as ZIP'}
+                        </button>
+                    )}
                 </div>
             </div>
             {previewMedia && (
