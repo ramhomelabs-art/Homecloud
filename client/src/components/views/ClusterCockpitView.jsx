@@ -21,133 +21,190 @@ const formatGB = (gbVal) => {
     return `${gbVal.toFixed(1)} GB`;
 };
 
-// Cyber Circular Radial Gauge Component
-const CyberRadialGauge = ({ 
-    label, 
-    sublabel, 
-    value, 
-    unit = '%', 
-    colorGradient = ['#00f2ff', '#0072ff'], 
-    glowColor = 'rgba(0, 242, 255, 0.25)', 
+// Liquid Wave Metric Card Component matching Screenshot 2
+const LiquidWaveGaugeCard = ({
+    titleLine1,
+    titleLine2,
+    sublabel,
+    value,
     statusText,
-    icon: Icon 
+    theme = 'amber', // 'amber' | 'blue' | 'purple' | 'emerald'
+    icon: Icon
 }) => {
     const clamped = Math.min(100, Math.max(0, value || 0));
-    const radius = 38;
-    const circumference = 2 * Math.PI * radius;
-    const strokeDashoffset = circumference - (circumference * (clamped / 100));
-    const gradientId = `grad-${label.replace(/\s+/g, '-').toLowerCase()}`;
+
+    // Theme definitions matching Screenshot 2
+    const themeConfig = {
+        amber: {
+            iconBg: '#fef3c7',
+            iconColor: '#f59e0b',
+            badgeBg: '#fef3c7',
+            badgeColor: '#d97706',
+            waveFront: 'rgba(253, 224, 71, 0.55)',
+            waveBack: 'rgba(254, 240, 138, 0.45)',
+            waveGradStart: '#fef08a',
+            waveGradEnd: '#fde047',
+            stroke: '#eab308'
+        },
+        blue: {
+            iconBg: '#e0f2fe',
+            iconColor: '#0284c7',
+            badgeBg: '#e0f2fe',
+            badgeColor: '#0284c7',
+            waveFront: 'rgba(56, 189, 248, 0.55)',
+            waveBack: 'rgba(186, 230, 253, 0.45)',
+            waveGradStart: '#bae6fd',
+            waveGradEnd: '#38bdf8',
+            stroke: '#0284c7'
+        },
+        purple: {
+            iconBg: '#f3e8ff',
+            iconColor: '#9333ea',
+            badgeBg: '#f3e8ff',
+            badgeColor: '#7e22ce',
+            waveFront: 'rgba(192, 132, 252, 0.55)',
+            waveBack: 'rgba(233, 213, 255, 0.45)',
+            waveGradStart: '#e9d5ff',
+            waveGradEnd: '#c084fc',
+            stroke: '#9333ea'
+        },
+        emerald: {
+            iconBg: '#d1fae5',
+            iconColor: '#059669',
+            badgeBg: '#fee2e2',
+            badgeColor: '#ef4444',
+            waveFront: 'rgba(52, 211, 153, 0.55)',
+            waveBack: 'rgba(167, 243, 208, 0.45)',
+            waveGradStart: '#a7f3d0',
+            waveGradEnd: '#34d399',
+            stroke: '#10b981'
+        }
+    };
+
+    const cfg = themeConfig[theme] || themeConfig.blue;
+    const waveHeight = Math.max(55, Math.min(105, 45 + (clamped / 100) * 55));
 
     return (
-        <motion.div 
-            className="st-card shadow-premium" 
-            whileHover={{ scale: 1.02, y: -2, boxShadow: `0 8px 30px ${glowColor}` }} 
-            transition={{ duration: 0.25 }}
-            style={{ 
-                background: 'var(--bg-surface-1)', 
-                backdropFilter: 'blur(24px)',
-                border: '1px solid var(--border-subtle)', 
-                borderRadius: '16px', 
-                padding: '18px 20px', 
-                display: 'flex', 
-                flexDirection: 'column', 
+        <motion.div
+            className="st-card shadow-premium"
+            whileHover={{ scale: 1.02, y: -2 }}
+            transition={{ duration: 0.2 }}
+            style={{
+                background: 'var(--bg-surface-0, #ffffff)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: '20px',
+                padding: '20px 20px 16px',
+                display: 'flex',
+                flexDirection: 'column',
                 justifyContent: 'space-between',
                 position: 'relative',
-                overflow: 'hidden'
+                overflow: 'hidden',
+                height: '195px',
+                boxShadow: '0 4px 20px rgba(0, 0, 0, 0.04)'
             }}
         >
             {/* Top Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginBottom: '8px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%', position: 'relative', zIndex: 2 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     {Icon && (
-                        <div style={{ 
-                            width: '28px', 
-                            height: '28px', 
-                            borderRadius: '8px', 
-                            background: `linear-gradient(135deg, ${colorGradient[0]}22, ${colorGradient[1]}11)`, 
-                            display: 'flex', 
-                            alignItems: 'center', 
-                            justifyContent: 'center',
-                            border: `1px solid ${colorGradient[0]}33`
+                        <div style={{
+                            width: '34px',
+                            height: '34px',
+                            borderRadius: '10px',
+                            background: cfg.iconBg,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
                         }}>
-                            <Icon size={14} color={colorGradient[0]} />
+                            <Icon size={17} color={cfg.iconColor} />
                         </div>
                     )}
-                    <span style={{ fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.8px', color: 'var(--text-secondary)' }}>
-                        {label}
-                    </span>
+                    <div style={{ display: 'flex', flexDirection: 'column', lineHeight: '1.15' }}>
+                        <span style={{ fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.6px', color: 'var(--text-primary)' }}>
+                            {titleLine1}
+                        </span>
+                        <span style={{ fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.6px', color: 'var(--text-primary)' }}>
+                            {titleLine2}
+                        </span>
+                    </div>
                 </div>
+
                 {statusText && (
-                    <span style={{ 
-                        fontSize: '9.5px', 
-                        fontWeight: '800', 
-                        padding: '2px 7px', 
-                        borderRadius: '6px', 
-                        background: clamped > 85 ? 'rgba(248, 81, 73, 0.15)' : `${colorGradient[0]}18`, 
-                        color: clamped > 85 ? '#f85149' : colorGradient[0],
-                        border: `1px solid ${clamped > 85 ? '#f8514933' : colorGradient[0] + '33'}`
+                    <span style={{
+                        fontSize: '10px',
+                        fontWeight: '700',
+                        padding: '3px 9px',
+                        borderRadius: '8px',
+                        background: cfg.badgeBg,
+                        color: cfg.badgeColor,
+                        letterSpacing: '0.2px'
                     }}>
                         {statusText}
                     </span>
                 )}
             </div>
 
-            {/* Gauge Dial */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', margin: '6px 0' }}>
-                <svg width="104" height="104" viewBox="0 0 104 104" style={{ transform: 'rotate(-90deg)' }}>
-                    <defs>
-                        <linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="100%">
-                            <stop offset="0%" stopColor={colorGradient[0]} />
-                            <stop offset="100%" stopColor={colorGradient[1]} />
-                        </linearGradient>
-                        <filter id={`glow-${gradientId}`}>
-                            <feGaussianBlur stdDeviation="2.5" result="coloredBlur"/>
-                            <feMerge>
-                                <feMergeNode in="coloredBlur"/>
-                                <feMergeNode in="SourceGraphic"/>
-                            </feMerge>
-                        </filter>
-                    </defs>
-                    
-                    {/* Background Track */}
-                    <circle 
-                        cx="52" 
-                        cy="52" 
-                        r={radius} 
-                        fill="transparent" 
-                        stroke="rgba(255, 255, 255, 0.05)" 
-                        strokeWidth="7" 
-                    />
-                    
-                    {/* Progress Track */}
-                    <motion.circle 
-                        cx="52" 
-                        cy="52" 
-                        r={radius} 
-                        fill="transparent" 
-                        stroke={`url(#${gradientId})`} 
-                        strokeWidth="7" 
-                        strokeDasharray={circumference}
-                        initial={{ strokeDashoffset: circumference }}
-                        animate={{ strokeDashoffset }}
-                        transition={{ duration: 1.2, ease: "easeOut" }}
-                        strokeLinecap="round"
-                        filter={`url(#glow-${gradientId})`}
-                    />
-                </svg>
-
-                {/* Inner Centered Value */}
-                <div style={{ position: 'absolute', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
-                    <span style={{ fontSize: '20px', fontWeight: '900', color: 'var(--text-primary)', letterSpacing: '-0.5px' }}>
-                        {clamped}
-                        <span style={{ fontSize: '11px', fontWeight: '700', color: colorGradient[0], marginLeft: '1px' }}>{unit}</span>
-                    </span>
-                </div>
+            {/* Centered Large Metric */}
+            <div style={{ position: 'relative', zIndex: 2, textAlign: 'center', margin: '4px 0 0' }}>
+                <span style={{ fontSize: '32px', fontWeight: '850', color: 'var(--text-primary)', letterSpacing: '-0.8px' }}>
+                    {clamped}
+                    <span style={{ fontSize: '18px', fontWeight: '700', marginLeft: '2px' }}>%</span>
+                </span>
             </div>
 
-            {/* Bottom Subtitle */}
-            <div style={{ textAlign: 'center', fontSize: '10.5px', fontWeight: '600', color: 'var(--text-secondary)', marginTop: '4px' }}>
+            {/* Bottom Subtitle text on top of wave */}
+            <div style={{ position: 'relative', zIndex: 2, textAlign: 'center', fontSize: '11px', fontWeight: '600', color: 'var(--text-secondary)' }}>
                 {sublabel}
+            </div>
+
+            {/* Animated Flowing Liquid Wave Container */}
+            <div style={{
+                position: 'absolute',
+                bottom: 0,
+                left: 0,
+                right: 0,
+                height: `${waveHeight}px`,
+                overflow: 'hidden',
+                pointerEvents: 'none',
+                zIndex: 1
+            }}>
+                <svg
+                    viewBox="0 0 400 120"
+                    preserveAspectRatio="none"
+                    style={{
+                        position: 'absolute',
+                        bottom: 0,
+                        left: 0,
+                        width: '200%',
+                        height: '100%'
+                    }}
+                >
+                    <defs>
+                        <linearGradient id={`waveGrad-${theme}`} x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor={cfg.waveGradStart} stopOpacity="0.85" />
+                            <stop offset="100%" stopColor={cfg.waveGradEnd} stopOpacity="0.4" />
+                        </linearGradient>
+                    </defs>
+
+                    {/* Back Wave Layer */}
+                    <motion.path
+                        d="M 0,40 Q 50,15 100,40 T 200,40 T 300,40 T 400,40 L 400,120 L 0,120 Z"
+                        fill={cfg.waveBack}
+                        animate={{ x: [0, -200] }}
+                        transition={{ duration: 7, repeat: Infinity, ease: "linear" }}
+                    />
+
+                    {/* Front Wave Layer */}
+                    <motion.path
+                        d="M 0,30 Q 50,55 100,30 T 200,30 T 300,30 T 400,30 L 400,120 L 0,120 Z"
+                        fill={`url(#waveGrad-${theme})`}
+                        stroke={cfg.stroke}
+                        strokeWidth="1"
+                        strokeOpacity="0.4"
+                        animate={{ x: [-200, 0] }}
+                        transition={{ duration: 5, repeat: Infinity, ease: "linear" }}
+                    />
+                </svg>
             </div>
         </motion.div>
     );
@@ -437,42 +494,42 @@ export default function ClusterCockpitView({
             <div style={{ display: 'grid', gridTemplateColumns: '1.55fr 1fr', gap: '24px' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
                     
-                    {/* 4 Cyber Ring Gauges */}
+                    {/* 4 Liquid Wave Fluid Metric Cards matching User Reference */}
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '16px' }}>
-                        <CyberRadialGauge
-                            label="Storage Pool"
+                        <LiquidWaveGaugeCard
+                            titleLine1="STORAGE"
+                            titleLine2="POOL"
                             value={totalPercentage}
                             sublabel={`${formatGB(stats.used / 1e9)} / ${formatGB(stats.total / 1e9)}`}
-                            colorGradient={['#f2c94c', '#ff8c00']}
-                            glowColor="rgba(242, 201, 76, 0.2)"
                             statusText={totalPercentage > 85 ? 'High' : 'Normal'}
+                            theme="amber"
                             icon={HardDrive}
                         />
-                        <CyberRadialGauge
-                            label="Cluster CPU"
+                        <LiquidWaveGaugeCard
+                            titleLine1="CLUSTER"
+                            titleLine2="CPU"
                             value={avgCpu}
                             sublabel={`${onlineApprovedNodes.length} Active Node(s)`}
-                            colorGradient={['#00f2ff', '#0072ff']}
-                            glowColor="rgba(0, 242, 255, 0.2)"
                             statusText={avgCpu > 80 ? 'Heavy' : 'Optimal'}
+                            theme="blue"
                             icon={Cpu}
                         />
-                        <CyberRadialGauge
-                            label="Cluster RAM"
+                        <LiquidWaveGaugeCard
+                            titleLine1="CLUSTER"
+                            titleLine2="RAM"
                             value={avgMemory}
                             sublabel="Telemetry Buffered"
-                            colorGradient={['#a855f7', '#6366f1']}
-                            glowColor="rgba(168, 85, 247, 0.2)"
                             statusText={avgMemory > 85 ? 'Warning' : 'Normal'}
+                            theme="purple"
                             icon={Layers}
                         />
-                        <CyberRadialGauge
-                            label="Node Mesh"
+                        <LiquidWaveGaugeCard
+                            titleLine1="NODE"
+                            titleLine2="MESH"
                             value={filteredNodes.length > 0 ? Math.round((filteredNodes.filter(n => n.online).length / filteredNodes.length) * 100) : 100}
                             sublabel={`${filteredNodes.filter(n => n.online).length} / ${filteredNodes.length} Online`}
-                            colorGradient={['#10b981', '#059669']}
-                            glowColor="rgba(16, 185, 129, 0.2)"
                             statusText="Connected"
+                            theme="emerald"
                             icon={Server}
                         />
                     </div>
