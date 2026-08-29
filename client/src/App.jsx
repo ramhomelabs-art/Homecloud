@@ -42,7 +42,9 @@ import PublicPortal from './components/portals/PublicPortal';
 import UploadPortal from './components/portals/UploadPortal';
 import VaultsView from './components/views/VaultsView';
 import ClusterMonitorView from './components/views/ClusterMonitorView';
+import TransferQueueDrawer from './components/transfers/TransferQueueDrawer';
 import NetworkTrafficView from './components/network/NetworkTrafficView';
+
 
 import CloudMountHubView from './components/network/CloudMountHubView';
 import SystemSettingsView from './components/settings/SystemSettingsView';
