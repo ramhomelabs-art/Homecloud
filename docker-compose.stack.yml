@@ -1,48 +1,96 @@
 version: '3.8'
 
+# ==============================================================================
+#  NEXADISK V2 — ALL-IN-ONE PRODUCTION WAF & MASTER STORAGE CLUSTER STACK
+#  Contains:
+#    1. BunkerWeb (OWASP CRS Web Application Firewall & Streaming Reverse Proxy)
+#    2. NexaDisk Master Node (Zero-Trust Storage Server, SSE Ingestion & Web UI)
+#    3. PostgreSQL 16 (High-Performance Spatial Database & Event Logs)
+#    4. Redis 7 (In-Memory Distributed Token & Lock Cache)
+# ==============================================================================
+
 services:
-  # BunkerWeb OWASP Core Rule Set Reverse Proxy & Web Application Firewall
+  # ----------------------------------------------------------------------------
+  # 1. BunkerWeb OWASP Core Rule Set WAF & Reverse Proxy
+  # ----------------------------------------------------------------------------
   bunkerweb:
     image: bunkerity/bunkerweb:1.5.8
     container_name: nexadisk-waf
     restart: always
     ports:
-      - "80:8080"
-      - "443:8443"
-    env_file:
-      - bunkerweb.env
+      - "80:8080"       # Inbound HTTP (Proxied through BunkerWeb WAF)
+      - "443:8443"     # Inbound HTTPS (SSL / TLS Termination)
     environment:
+      # General Configuration
       - SERVER_NAME=localhost
+      - SERVE_FILES=no
+      - AUTO_LETS_ENCRYPT=no
+      - USE_CUSTOM_CONFIG=no
+      
+      # Reverse Proxy Route to NexaDisk Master
       - REVERSE_PROXY_URL=/
       - REVERSE_PROXY_HOST=http://nexadisk-master:5000
+      - REVERSE_PROXY_HEADERS=X-Forwarded-For,X-Real-IP,X-Forwarded-Proto,Upgrade,Connection
+      - REVERSE_PROXY_WS=yes
+      - REVERSE_PROXY_BUFFERING=no
+
+      # OWASP Core Rule Set & Threat Protection Engine
+      - USE_MODSECURITY=yes
+      - USE_MODSECURITY_CRS=yes
+      - MODSECURITY_BLOCKING=yes
+      - MODSECURITY_CRS_PARANOIA_LEVEL=1
+      - MODSECURITY_INBOUND_ANOMALY_THRESHOLD=5
+      - MODSECURITY_OUTBOUND_ANOMALY_THRESHOLD=4
+
+      # Anti-DDoS & Volumetric Rate Limiting
+      - USE_LIMIT_REQ=yes
+      - LIMIT_REQ_RATE=300r/m
+      - LIMIT_REQ_BURST=100
+
+      # Large File Uploads & High-Speed Media Streaming
+      - MAX_CLIENT_BODY_SIZE=50G
+      - CLIENT_BODY_TIMEOUT=86400s
+      - CLIENT_HEADER_TIMEOUT=60s
+
+      # Anti-Bot & Bad Behavior Detection
+      - USE_BAD_BEHAVIOR=yes
+      - USE_USER_AGENT_CHECK=yes
+
+      # Private Subnet Whitelisting for LAN Nodes
+      - USE_WHITELIST_IP=yes
+      - WHITELIST_IP=127.0.0.1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
     volumes:
       - bw-data:/var/lib/bunkerweb
-      - ./nginx/bunkerweb.conf:/etc/bunkerweb/custom-configs/nexadisk-stream.conf:ro
     depends_on:
       - nexadisk-master
     networks:
       - nexadisk-net
 
-  # NexaDisk Master Storage Server & Web UI (Prebuilt Image Mode)
+  # ----------------------------------------------------------------------------
+  # 2. NexaDisk Master Storage Cluster & Web UI
+  # ----------------------------------------------------------------------------
   nexadisk-master:
     image: ghcr.io/ramhomelabs-art/homecloud:latest
     container_name: nexadisk-master
-    hostname: debian-master
+    hostname: Nexa-Disk-01-blr
     restart: always
     expose:
-      - "5000"
+      - "5000"          # Internal Port (Communicates with BunkerWeb)
     ports:
-      - "5000:5000"
+      - "5000:5000"     # Direct Access Fallback Port
     environment:
       - NODE_ENV=production
       - PORT=5000
       - HOST=0.0.0.0
       - NODE_NAME=${NODE_NAME:-Debian-Storage-Hub}
 
+      # Authentication & Cryptographic Keys (Change in Production)
       - JWT_SECRET=${JWT_SECRET:-nexadisk_enterprise_jwt_secret_change_in_production_64chars_key}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855}
       - AGENT_KEY=${AGENT_KEY:-nexadisk_enterprise_agent_secret_key_change_in_production}
       - HMAC_ENCRYPTION_SECRET=${HMAC_ENCRYPTION_SECRET:-nexadisk_enterprise_hmac_secret_change_in_production}
+
+      # PostgreSQL Database Connection
       - DATABASE_URL=postgres://nexadisk:nexadisk_secret_pass@postgres:5432/nexadisk_db
       - DB_HOST=postgres
       - DB_PORT=5432
@@ -50,8 +98,12 @@ services:
       - DB_NAME=nexadisk_db
       - DB_USER=nexadisk
       - DB_PASSWORD=nexadisk_secret_pass
+
+      # Redis Cache Connection
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+
+      # Storage & Directory Roots
       - STORAGE_ROOT=/var/lib/nexadisk/storage
       - TRASH_STORAGE_ROOT=/var/lib/nexadisk/trash
       - PROFILE_STORAGE_ROOT=/var/lib/nexadisk/profiles
@@ -69,7 +121,9 @@ services:
     networks:
       - nexadisk-net
 
-  # PostgreSQL 16 High-Performance Database
+  # ----------------------------------------------------------------------------
+  # 3. PostgreSQL 16 High-Performance Spatial Database
+  # ----------------------------------------------------------------------------
   postgres:
     image: postgres:16-alpine
     container_name: nexadisk-postgres
@@ -88,7 +142,9 @@ services:
     networks:
       - nexadisk-net
 
-  # Redis In-Memory Cache (for high-speed token & lock management)
+  # ----------------------------------------------------------------------------
+  # 4. Redis 7 In-Memory Cache (Token & Lock Management)
+  # ----------------------------------------------------------------------------
   redis:
     image: redis:7-alpine
     container_name: nexadisk-redis
@@ -98,6 +154,9 @@ services:
     networks:
       - nexadisk-net
 
+# ==============================================================================
+#  VOLUMES & NETWORKS
+# ==============================================================================
 volumes:
   bw-data:
   nexadisk-data:
