@@ -3906,12 +3906,12 @@ const OperationStatus = ({ operations = [], setOperations, onClose, onCancel }) 
                 <div className="command-center-header">
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                         <div className="cc-header-icon-box">
-                            <Activity size={20} color="var(--accent-cyan)" />
+                            <Zap size={20} color="var(--primary)" />
                             {activeOps.length > 0 && <span className="cc-pulse-orb" />}
                         </div>
                         <div>
-                            <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800', color: 'var(--text-primary)', letterSpacing: '-0.3px' }}>Command Center</h3>
-                            <p style={{ margin: '2px 0 0', fontSize: '11px', fontWeight: '600', color: 'var(--text-secondary)' }}>Fleet Operations & Task Queue</p>
+                            <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800', color: 'var(--text-primary)', letterSpacing: '-0.3px' }}>Transfer Engine</h3>
+                            <p style={{ margin: '2px 0 0', fontSize: '11px', fontWeight: '600', color: 'var(--text-secondary)' }}>Live File Transfers, Bandwidth & Operations Queue</p>
                         </div>
                     </div>
 
@@ -3925,7 +3925,7 @@ const OperationStatus = ({ operations = [], setOperations, onClose, onCancel }) 
                                 Clear Finished
                             </button>
                         )}
-                        <button onClick={onClose} className="cc-close-btn" title="Close Command Center">
+                        <button onClick={onClose} className="cc-close-btn" title="Close Transfer Engine">
                             <X size={18} />
                         </button>
                     </div>

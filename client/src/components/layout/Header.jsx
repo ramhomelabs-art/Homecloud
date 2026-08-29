@@ -471,36 +471,37 @@ export default function Header({
                             </button>
                         )}
 
-                        {/* Command Center Quick Trigger */}
+                        {/* Transfer Engine Quick Trigger */}
                         {!guestToken && (
                             <div
                                 onClick={() => setShowOperations && setShowOperations(true)}
-                                title="Open Command Center (Background Operations & Transfers)"
+                                title="Open Transfer Engine (Queue, Speedometer & Background Operations)"
                                 style={{
                                     cursor: 'pointer',
-                                    padding: '6px 12px',
-                                    background: operations?.length > 0 ? 'rgba(99, 102, 241, 0.1)' : 'var(--bg-surface-2)',
-                                    border: `1px solid ${operations?.length > 0 ? 'var(--primary-light)' : 'var(--border-subtle)'}`,
-                                    borderRadius: '8px',
+                                    padding: '6px 14px',
+                                    background: operations?.some(o => o.status !== 'Completed' && o.status !== 'Failed') ? 'rgba(99, 102, 241, 0.15)' : 'var(--bg-surface-2)',
+                                    border: `1px solid ${operations?.some(o => o.status !== 'Completed' && o.status !== 'Failed') ? 'var(--primary)' : 'var(--border-subtle)'}`,
+                                    borderRadius: '10px',
                                     display: 'flex',
                                     alignItems: 'center',
                                     gap: '7px',
                                     transition: 'all 0.15s ease',
                                     height: '36px',
-                                    color: operations?.length > 0 ? 'var(--primary)' : 'var(--text-primary)'
+                                    color: operations?.some(o => o.status !== 'Completed' && o.status !== 'Failed') ? 'var(--primary)' : 'var(--text-primary)',
+                                    boxShadow: operations?.some(o => o.status !== 'Completed' && o.status !== 'Failed') ? '0 0 14px rgba(99, 102, 241, 0.25)' : 'none'
                                 }}
                             >
-                                <Activity 
-                                    size={16} 
-                                    color={operations?.length > 0 ? 'var(--primary)' : 'var(--text-muted)'} 
-                                    style={operations?.some(o => o.status !== 'Completed' && o.status !== 'Failed') ? { animation: 'spin 3s linear infinite' } : {}} 
+                                <Zap 
+                                    size={15} 
+                                    color={operations?.some(o => o.status !== 'Completed' && o.status !== 'Failed') ? 'var(--primary)' : 'var(--text-muted)'} 
+                                    style={operations?.some(o => o.status !== 'Completed' && o.status !== 'Failed') ? { animation: 'pulse 1s infinite' } : {}} 
                                 />
-                                <span style={{ fontSize: '12.5px', fontWeight: '700' }}>
-                                    Command Center
+                                <span style={{ fontSize: '12.5px', fontWeight: '800' }}>
+                                    Transfer Engine
                                 </span>
                                 {operations?.length > 0 && (
-                                    <span style={{ fontSize: '10px', background: 'var(--primary)', color: '#ffffff', padding: '1px 6px', borderRadius: '10px', fontWeight: '800' }}>
-                                        {operations.length}
+                                    <span style={{ fontSize: '10px', background: operations?.some(o => o.status !== 'Completed' && o.status !== 'Failed') ? '#10b981' : 'var(--primary)', color: '#ffffff', padding: '1px 6px', borderRadius: '10px', fontWeight: '900', fontFamily: 'var(--font-mono)' }}>
+                                        {operations.filter(o => o.status !== 'Completed' && o.status !== 'Failed').length || operations.length}
                                     </span>
                                 )}
                             </div>
