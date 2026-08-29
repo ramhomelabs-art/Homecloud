@@ -77,21 +77,29 @@ class SecurityQueue extends EventEmitter {
             } 
             else {
                 // Clean -> Move to destination
-                if (!fs.existsSync(targetDir)) {
-                    fs.mkdirSync(targetDir, { recursive: true });
-                }
-                
-                try {
-                    fs.renameSync(stagedPath, destPath);
-                } catch (renameErr) {
-                    if (renameErr.code === 'EXDEV' || renameErr.code === 'EPERM' || renameErr.code === 'EACCES' || renameErr.code === 'EINVAL') {
-                        fs.copyFileSync(stagedPath, destPath);
-                        fs.unlinkSync(stagedPath);
-                    } else {
-                        throw renameErr;
+                const isSmb = (targetDir || '').startsWith('\\\\') || (targetDir || '').startsWith('//') || (targetDir || '').startsWith('smb://');
+                if (isSmb) {
+                    const { uploadFileToSmb } = require('../utils/fileHelpers');
+                    await uploadFileToSmb(stagedPath, targetDir, originalName);
+                    try { fs.unlinkSync(stagedPath); } catch (_) {}
+                    logger.info(`[SecurityQueue] File ${originalName} is clean. Uploaded directly to SMB destination: ${targetDir}`);
+                } else {
+                    if (!fs.existsSync(targetDir)) {
+                        fs.mkdirSync(targetDir, { recursive: true });
                     }
+                    
+                    try {
+                        fs.renameSync(stagedPath, destPath);
+                    } catch (renameErr) {
+                        if (renameErr.code === 'EXDEV' || renameErr.code === 'EPERM' || renameErr.code === 'EACCES' || renameErr.code === 'EINVAL') {
+                            fs.copyFileSync(stagedPath, destPath);
+                            fs.unlinkSync(stagedPath);
+                        } else {
+                            throw renameErr;
+                        }
+                    }
+                    logger.info(`[SecurityQueue] File ${originalName} is clean. Moved to destination.`);
                 }
-                logger.info(`[SecurityQueue] File ${originalName} is clean. Moved to destination.`);
                 this.emit('fileClean', { originalName, destPath });
 
                 // Clear directory size cache so changes reflect immediately in Explorer

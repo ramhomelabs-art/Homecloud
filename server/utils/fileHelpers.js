@@ -120,13 +120,56 @@ const calculateCategorySizes = (dirPath, totalDiskUsed) => {
     return categories;
 };
 
-const clearDirSizeCache = () => {
-    if (typeof dirSizeCache !== 'undefined') dirSizeCache.clear();
-    cachedCategories = null;
+const uploadFileToSmb = async (localFilePath, sharePath, fileName) => {
+    const db = require('../config/database');
+    const cryptoHelper = require('./crypto');
+    const sharesRes = await db.query('SELECT * FROM network_shares');
+    let clean = (sharePath || '').trim().replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
+    const parts = clean.split('/');
+    const host = parts[0];
+    const shareName = parts[1] || '';
+    const uncShare = `//${host}/${shareName}`;
+    const internalDir = parts.slice(2).join('/');
+
+    const matchedShare = sharesRes.rows.find(row => {
+        let cleanRow = (row.path || '').replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
+        const rowParts = cleanRow.split('/');
+        return (rowParts[0]?.toLowerCase() === host.toLowerCase() && 
+               (rowParts[1] || '').toLowerCase() === shareName.toLowerCase()) ||
+               (row.label && row.label.toLowerCase() === shareName.toLowerCase());
+    });
+
+    const user = matchedShare?.username || '';
+    let pass = '';
+    if (matchedShare?.password) {
+        try { pass = cryptoHelper.decrypt(matchedShare.password); } catch (e) { pass = matchedShare.password; }
+    }
+
+    const env = { ...process.env, PASSWD: pass || '' };
+    const safeUser = (user || '').replace(/[;&|`$<>\\"']/g, '');
+    const safeShare = uncShare.replace(/[;&|`$<>\\"']/g, '');
+
+    const cdCmd = internalDir ? `cd "${internalDir.replace(/"/g, '')}"; ` : '';
+    const putCmd = `${cdCmd}put "${localFilePath.replace(/"/g, '')}" "${fileName.replace(/"/g, '')}"`;
+
+    const { exec } = require('child_process');
+    const cmd = safeUser
+        ? `smbclient "${safeShare}" -U "${safeUser}" -t 30 -c '${putCmd}'`
+        : `smbclient "${safeShare}" -N -t 30 -c '${putCmd}'`;
+
+    return new Promise((resolve, reject) => {
+        exec(cmd, { env, timeout: 30000 }, (err, stdout, stderr) => {
+            if (err) {
+                return reject(new Error(`Failed to upload file to SMB: ${stderr || stdout || err.message}`));
+            }
+            resolve(true);
+        });
+    });
 };
 
 module.exports = {
     getDirectorySize,
     calculateCategorySizes,
-    clearDirSizeCache
+    clearDirSizeCache,
+    uploadFileToSmb
 };

@@ -448,21 +448,30 @@ class SecurityService {
             throw new Error('Quarantined source file no longer exists on disk');
         }
 
-        // Ensure target directory exists
-        const destDir = path.dirname(record.target_path);
-        if (!fs.existsSync(destDir)) {
-            fs.mkdirSync(destDir, { recursive: true });
-        }
-
         // Move from quarantine to final target
-        try {
-            fs.renameSync(record.quarantine_path, record.target_path);
-        } catch (err) {
-            if (err.code === 'EXDEV') {
-                fs.copyFileSync(record.quarantine_path, record.target_path);
-                fs.unlinkSync(record.quarantine_path);
-            } else {
-                throw err;
+        const isSmb = (record.target_path || '').startsWith('\\\\') || (record.target_path || '').startsWith('//') || (record.target_path || '').startsWith('smb://');
+        if (isSmb) {
+            const targetDir = path.dirname(record.target_path.replace(/\\/g, '/'));
+            const { uploadFileToSmb } = require('../utils/fileHelpers');
+            await uploadFileToSmb(record.quarantine_path, targetDir, record.original_name);
+            try { fs.unlinkSync(record.quarantine_path); } catch (_) {}
+            logger.info(`[SecurityService] Quarantined file ${record.original_name} approved and uploaded to SMB destination: ${targetDir}`);
+        } else {
+            // Ensure target directory exists
+            const destDir = path.dirname(record.target_path);
+            if (!fs.existsSync(destDir)) {
+                fs.mkdirSync(destDir, { recursive: true });
+            }
+
+            try {
+                fs.renameSync(record.quarantine_path, record.target_path);
+            } catch (err) {
+                if (err.code === 'EXDEV') {
+                    fs.copyFileSync(record.quarantine_path, record.target_path);
+                    fs.unlinkSync(record.quarantine_path);
+                } else {
+                    throw err;
+                }
             }
         }
 

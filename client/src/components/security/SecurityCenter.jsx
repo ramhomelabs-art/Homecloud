@@ -1,13 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
     Shield, ShieldAlert, ShieldCheck, Activity, AlertTriangle, 
     Play, RefreshCw, XCircle, Folder, Settings, ScrollText, 
     Server, Cpu, CheckCircle2, Sliders, Info, Trash2, Globe,
-    Lock, DownloadCloud, FileCode, Database, Check
+    Lock, DownloadCloud, FileCode, Database, Check,
+    PieChart as PieChartIcon, TrendingUp, BarChart3
 } from 'lucide-react';
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, CartesianGrid } from 'recharts';
+import { 
+    ResponsiveContainer, PieChart, Pie, Cell, Tooltip,
+    AreaChart, Area, XAxis, YAxis, CartesianGrid, Legend 
+} from 'recharts';
 import FolderPickerModal from '../modals/FolderPickerModal';
 import AttackGeoMap from './AttackGeoMap';
 import ConfirmModal from '../modals/ConfirmModal';
@@ -450,11 +454,42 @@ function SecurityCenter({ showToast: externalToast }) {
     const scoreColor = securityScore > 80 ? '#2ea043' : securityScore > 50 ? '#f2c94c' : '#f85149';
 
     const pieData = [
-        { name: 'Clean', value: stats.clean },
-        { name: 'Suspicious', value: stats.suspicious },
-        { name: 'Malicious', value: stats.malicious }
-    ];
-    const COLORS = ['#2ea043', '#f2c94c', '#f85149'];
+        { name: 'Clean', value: Number(stats.clean || 0) },
+        { name: 'Suspicious', value: Number(stats.suspicious || 0) },
+        { name: 'Malicious', value: Number(stats.malicious || 0) },
+        { name: 'Quarantine', value: Number(stats.quarantined || 0) }
+    ].filter(item => item.value > 0);
+
+    const COLORS = ['#10b981', '#f59e0b', '#f43f5e', '#8b5cf6'];
+
+    const trendData = useMemo(() => {
+        const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        const now = new Date();
+        const result = [];
+
+        // Build past 7 days
+        for (let i = 6; i >= 0; i--) {
+            const d = new Date();
+            d.setDate(now.getDate() - i);
+            const dayLabel = `${days[d.getDay()]} ${d.getMonth() + 1}/${d.getDate()}`;
+            const dateStr = d.toISOString().split('T')[0];
+
+            const match = stats?.timeline?.find(t => {
+                const tDate = t.date ? String(t.date).split('T')[0] : '';
+                return tDate === dateStr;
+            });
+
+            const cleanCount = match ? parseInt(match.clean || 0, 10) : (i === 0 ? (stats?.clean || 0) : 0);
+            const threatCount = match ? parseInt(match.infected || 0, 10) : (i === 0 ? (stats?.malicious || 0) : 0);
+
+            result.push({
+                day: dayLabel,
+                'Clean Scans': cleanCount,
+                'Threats Blocked': threatCount
+            });
+        }
+        return result;
+    }, [stats]);
 
     const getEventBadgeColor = (type) => {
         const t = (type || '').toUpperCase();
@@ -662,6 +697,147 @@ function SecurityCenter({ showToast: externalToast }) {
                                     <div style={styles.metricValue}>{m.value}</div>
                                 </motion.div>
                             ))}
+                        </div>
+                    </div>
+
+                    {/* Security Analytics & Threat Visualizer Row */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '20px', marginBottom: '24px' }}>
+                        {/* Donut Chart: Threat Distribution */}
+                        <div className="glass" style={{ padding: '24px', borderRadius: '18px', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-0)', display: 'flex', flexDirection: 'column', boxShadow: 'var(--shadow-sm)' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                                <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <PieChartIcon size={18} color="var(--primary)" /> Threat & Ingestion Distribution
+                                </h3>
+                                <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '600' }}>
+                                    {stats.totalScans || 0} Total Scans
+                                </span>
+                            </div>
+                            <div style={{ width: '100%', height: '220px', position: 'relative' }}>
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <PieChart>
+                                        <Pie
+                                            data={pieData.length > 0 ? pieData : [{ name: 'Protected (Clean)', value: 1 }]}
+                                            cx="50%"
+                                            cy="50%"
+                                            innerRadius={60}
+                                            outerRadius={85}
+                                            paddingAngle={pieData.length > 0 ? 4 : 0}
+                                            dataKey="value"
+                                            stroke="var(--bg-surface-0)"
+                                            strokeWidth={2}
+                                        >
+                                            {pieData.length > 0 ? (
+                                                pieData.map((entry, index) => (
+                                                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                                ))
+                                            ) : (
+                                                <Cell fill="#10b981" />
+                                            )}
+                                        </Pie>
+                                        <Tooltip
+                                            contentStyle={{
+                                                background: 'rgba(15, 23, 42, 0.95)',
+                                                border: '1px solid var(--border-subtle)',
+                                                borderRadius: '10px',
+                                                color: '#fff',
+                                                fontSize: '12px',
+                                                boxShadow: '0 8px 32px rgba(0,0,0,0.5)'
+                                            }}
+                                        />
+                                    </PieChart>
+                                </ResponsiveContainer>
+                                <div style={{
+                                    position: 'absolute',
+                                    top: '50%',
+                                    left: '50%',
+                                    transform: 'translate(-50%, -50%)',
+                                    textAlign: 'center',
+                                    pointerEvents: 'none'
+                                }}>
+                                    <span style={{ fontSize: '20px', fontWeight: '900', color: scoreColor }}>
+                                        {securityScore}%
+                                    </span>
+                                    <span style={{ display: 'block', fontSize: '10px', color: 'var(--text-secondary)', fontWeight: '700', textTransform: 'uppercase' }}>
+                                        Health
+                                    </span>
+                                </div>
+                            </div>
+                            {/* Legend Breakdown */}
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--border-subtle)' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
+                                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10b981' }} />
+                                    <span style={{ color: 'var(--text-secondary)' }}>Clean:</span>
+                                    <strong style={{ color: 'var(--text-primary)' }}>{stats.clean || 0}</strong>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
+                                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#f59e0b' }} />
+                                    <span style={{ color: 'var(--text-secondary)' }}>Suspicious:</span>
+                                    <strong style={{ color: 'var(--text-primary)' }}>{stats.suspicious || 0}</strong>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
+                                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#f43f5e' }} />
+                                    <span style={{ color: 'var(--text-secondary)' }}>Malicious:</span>
+                                    <strong style={{ color: 'var(--text-primary)' }}>{stats.malicious || 0}</strong>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
+                                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#8b5cf6' }} />
+                                    <span style={{ color: 'var(--text-secondary)' }}>Quarantine:</span>
+                                    <strong style={{ color: 'var(--text-primary)' }}>{stats.quarantined || 0}</strong>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Area / Line Chart: 7-Day Threat & Scanning Velocity */}
+                        <div className="glass" style={{ padding: '24px', borderRadius: '18px', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-0)', display: 'flex', flexDirection: 'column', boxShadow: 'var(--shadow-sm)' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                                <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <TrendingUp size={18} color="#38bdf8" /> Scanning & Defense Velocity (7 Days)
+                                </h3>
+                                <span style={{ fontSize: '11px', color: '#10b981', fontWeight: '700', background: 'rgba(16, 185, 129, 0.12)', padding: '3px 8px', borderRadius: '6px', border: '1px solid rgba(16, 185, 129, 0.25)' }}>
+                                    ● Live Defense
+                                </span>
+                            </div>
+                            <div style={{ width: '100%', height: '220px' }}>
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <AreaChart data={trendData}>
+                                        <defs>
+                                            <linearGradient id="secCleanGrad" x1="0" y1="0" x2="0" y2="1">
+                                                <stop offset="5%" stopColor="#10b981" stopOpacity={0.4}/>
+                                                <stop offset="95%" stopColor="#10b981" stopOpacity={0.0}/>
+                                            </linearGradient>
+                                            <linearGradient id="secThreatGrad" x1="0" y1="0" x2="0" y2="1">
+                                                <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.5}/>
+                                                <stop offset="95%" stopColor="#f43f5e" stopOpacity={0.0}/>
+                                            </linearGradient>
+                                        </defs>
+                                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" opacity={0.6} />
+                                        <XAxis dataKey="day" stroke="var(--text-secondary)" fontSize={11} tickLine={false} />
+                                        <YAxis stroke="var(--text-secondary)" fontSize={11} tickLine={false} allowDecimals={false} />
+                                        <Tooltip
+                                            contentStyle={{
+                                                background: 'rgba(15, 23, 42, 0.95)',
+                                                border: '1px solid var(--border-subtle)',
+                                                borderRadius: '10px',
+                                                color: '#fff',
+                                                fontSize: '12px',
+                                                boxShadow: '0 8px 32px rgba(0,0,0,0.5)'
+                                            }}
+                                        />
+                                        <Area type="monotone" dataKey="Clean Scans" stroke="#10b981" strokeWidth={2.5} fillOpacity={1} fill="url(#secCleanGrad)" />
+                                        <Area type="monotone" dataKey="Threats Blocked" stroke="#f43f5e" strokeWidth={2.5} fillOpacity={1} fill="url(#secThreatGrad)" />
+                                    </AreaChart>
+                                </ResponsiveContainer>
+                            </div>
+                            <div style={{ display: 'flex', gap: '16px', marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--border-subtle)', fontSize: '12px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <span style={{ width: '12px', height: '3px', background: '#10b981', borderRadius: '2px' }} />
+                                    <span style={{ color: 'var(--text-secondary)' }}>Clean Ingestions</span>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <span style={{ width: '12px', height: '3px', background: '#f43f5e', borderRadius: '2px' }} />
+                                    <span style={{ color: 'var(--text-secondary)' }}>Threats Intercepted</span>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
