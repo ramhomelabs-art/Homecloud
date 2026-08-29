@@ -18,17 +18,11 @@ const ContextMenu = ({
     isGuest, 
     guestPermissions 
 }) => {
-    if (!data) return null;
-    const isFile = !!data.file;
-    const isBulk = selectedCount > 1;
-
-    const canEdit = !isGuest || guestPermissions === 'Edit' || guestPermissions === 'Full Access';
-    const canFullAccess = !isGuest || guestPermissions === 'Full Access';
-
     const menuRef = useRef(null);
-    const [pos, setPos] = useState({ top: data.y, left: data.x });
+    const [pos, setPos] = useState({ top: 0, left: 0 });
 
     useEffect(() => {
+        if (!data) return;
         const handleClickOutside = (e) => {
             if (menuRef.current && !menuRef.current.contains(e.target)) {
                 if (onClose) onClose();
@@ -48,10 +42,10 @@ const ContextMenu = ({
             window.removeEventListener('scroll', handleScroll, true);
             window.removeEventListener('resize', handleClickOutside);
         };
-    }, [onClose]);
+    }, [data, onClose]);
 
     useLayoutEffect(() => {
-        if (!menuRef.current) return;
+        if (!data || !menuRef.current) return;
         const rect = menuRef.current.getBoundingClientRect();
         const vw = window.innerWidth;
         const vh = window.innerHeight;
@@ -70,7 +64,15 @@ const ContextMenu = ({
         }
 
         setPos({ top: newTop, left: newLeft });
-    }, [data.x, data.y, data.file]);
+    }, [data?.x, data?.y, data?.file]);
+
+    if (!data) return null;
+
+    const isFile = !!data.file;
+    const isBulk = selectedCount > 1;
+
+    const canEdit = !isGuest || guestPermissions === 'Edit' || guestPermissions === 'Full Access';
+    const canFullAccess = !isGuest || guestPermissions === 'Full Access';
 
     return (
         <div 
