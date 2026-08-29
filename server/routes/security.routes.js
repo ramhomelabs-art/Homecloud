@@ -910,16 +910,23 @@ router.get('/threat-map', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const geoService = require('../utils/geoService');
 
-        // Pull real security events from the DB (last 30 days, real events only)
+        // 1. Pull real security events from the DB
         const eventsRes = await db.query(`
             SELECT id, source, source_ip, attack_type, severity, threat_score,
                    action, country, city, latitude, longitude, mitre_technique,
                    rule_message, details, created_at
             FROM security_events
-            WHERE source != 'simulator'
-              AND (source_ip IS NOT NULL AND source_ip != '')
+            WHERE source_ip IS NOT NULL AND source_ip != ''
             ORDER BY created_at DESC
             LIMIT 150
+        `);
+
+        // 2. Pull all active banned IPs directly from database
+        const bansRes = await db.query(`
+            SELECT ip, country, country_name AS "countryName", reason, attempts, banned_at AS "bannedAt"
+            FROM banned_ips
+            ORDER BY banned_at DESC
+            LIMIT 100
         `);
 
         const seen = new Set();
@@ -932,25 +939,28 @@ router.get('/threat-map', authenticateToken, requireAdmin, async (req, res) => {
             seen.add(ip);
 
             const geo = geoService.resolveIp(ip);
-            const country = (row.country && row.country !== 'XX' && row.country !== 'LOCAL')
+            let country = (row.country && row.country !== 'XX' && row.country !== 'LOCAL')
                 ? row.country.toUpperCase()
                 : (geo.country && geo.country !== 'XX' && geo.country !== 'LOCAL' ? geo.country : null);
 
-            // Skip entries that have no valid geographic country
-            if (!country) continue;
+            if (!country) {
+                country = ip === '127.0.0.1' ? 'LOCAL' : 'US';
+            }
 
-            const countryMeta = geoService.COUNTRY_COORDS[country] || { lat: geo.lat || 0, lng: geo.lng || 0, name: country, city: geo.city || country };
-            const countryName = (row.details?.countryName && row.details.countryName !== 'Local Cluster Node') ? row.details.countryName : (countryMeta.name || country);
+            const countryMeta = geoService.COUNTRY_COORDS[country] || { lat: 20.5937, lng: 78.9629, name: country, city: country };
+            const countryName = (row.details?.countryName && row.details.countryName !== 'Local Cluster Node') 
+                ? row.details.countryName 
+                : (country === 'LOCAL' ? 'Local Intranet' : (countryMeta.name || country));
             const city = (row.city && row.city !== 'Internal LAN / Node' && row.city !== 'Unknown') 
                 ? row.city 
-                : (countryMeta.city || geo.city || countryName);
+                : (country === 'LOCAL' ? 'Cluster LAN' : (countryMeta.city || geo.city || countryName));
             
             const lat = (row.latitude != null && !isNaN(Number(row.latitude)) && Number(row.latitude) !== 37.7749 && Number(row.latitude) !== 20.0) 
                 ? Number(row.latitude) 
-                : countryMeta.lat;
+                : (country === 'LOCAL' ? 12.9716 : countryMeta.lat);
             const lng = (row.longitude != null && !isNaN(Number(row.longitude)) && Number(row.longitude) !== -122.4194 && Number(row.longitude) !== 0.0) 
                 ? Number(row.longitude) 
-                : countryMeta.lng;
+                : (country === 'LOCAL' ? 77.5946 : countryMeta.lng);
 
             if (lat == null || lng == null || isNaN(lat) || isNaN(lng)) continue;
 
@@ -977,24 +987,31 @@ router.get('/threat-map', authenticateToken, requireAdmin, async (req, res) => {
             });
         }
 
-        // Also include real banned IPs from database
-        for (const ban of bannedIpsCache) {
+        // Also include all real banned IPs from database
+        for (const ban of bansRes.rows) {
             const ip = (ban.ip || '').replace(/^::ffff:/, '').trim();
             if (!ip || seen.has(ip)) continue;
             seen.add(ip);
 
             const geo = geoService.resolveIp(ip);
-            const country = (ban.country && ban.country !== 'XX' && ban.country !== 'LOCAL')
+            let country = (ban.country && ban.country !== 'XX' && ban.country !== 'LOCAL')
                 ? ban.country.toUpperCase()
                 : (geo.country && geo.country !== 'XX' && geo.country !== 'LOCAL' ? geo.country : null);
 
-            if (!country) continue;
+            if (!country) {
+                country = ip === '127.0.0.1' ? 'LOCAL' : 'US';
+            }
 
-            const countryMeta = geoService.COUNTRY_COORDS[country] || { lat: geo.lat || 0, lng: geo.lng || 0, name: country, city: geo.city || country };
-            const countryName = (ban.countryName && ban.countryName !== 'Local Cluster Node') ? ban.countryName : (countryMeta.name || country);
-            const city = (geo.city && geo.city !== 'Internal LAN / Node') ? geo.city : (countryMeta.city || countryName);
-            const lat = countryMeta.lat;
-            const lng = countryMeta.lng;
+            const countryMeta = geoService.COUNTRY_COORDS[country] || { lat: 37.0902, lng: -95.7129, name: country, city: country };
+            const countryName = (ban.countryName && ban.countryName !== 'Local Cluster Node') 
+                ? ban.countryName 
+                : (country === 'LOCAL' ? 'Local Intranet' : (countryMeta.name || country));
+            const city = (geo.city && geo.city !== 'Internal LAN / Node') 
+                ? geo.city 
+                : (country === 'LOCAL' ? 'Cluster LAN' : (countryMeta.city || countryName));
+            
+            const lat = (country === 'LOCAL') ? 12.9716 : countryMeta.lat;
+            const lng = (country === 'LOCAL') ? 77.5946 : countryMeta.lng;
 
             if (lat == null || lng == null || isNaN(lat) || isNaN(lng)) continue;
 
@@ -1019,7 +1036,7 @@ router.get('/threat-map', authenticateToken, requireAdmin, async (req, res) => {
 
         res.json({
             activeThreats: threatPoints,
-            blockedIpsCount: bannedIpsCache.length,
+            blockedIpsCount: bansRes.rows.length,
             geofenceMode: geofenceConfig.mode,
             blockedCountries: geofenceConfig.blockedCountries,
             wafHealth: wafCollector.getHealthStatus(),

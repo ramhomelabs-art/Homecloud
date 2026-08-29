@@ -5,7 +5,7 @@ const logger = require('./logger');
 const COUNTRY_COORDS = {
     US: { lat: 37.0902, lng: -95.7129, name: 'United States', city: 'Washington D.C.' },
     CN: { lat: 35.8617, lng: 104.1954, name: 'China', city: 'Beijing' },
-    RU: { lat: 61.5240, lng: 105.3188, name: 'Russia', city: 'Moscow' },
+    RU: { lat: 55.7558, lng: 37.6173, name: 'Russia', city: 'Moscow' },
     DE: { lat: 51.1657, lng: 10.4515, name: 'Germany', city: 'Berlin' },
     IN: { lat: 20.5937, lng: 78.9629, name: 'India', city: 'New Delhi' },
     GB: { lat: 55.3781, lng: -3.4360, name: 'United Kingdom', city: 'London' },

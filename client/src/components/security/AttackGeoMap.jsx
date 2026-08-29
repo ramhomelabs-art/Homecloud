@@ -18,7 +18,7 @@ const COUNTRY_FLAGS = {
     NL: '🇳🇱', RU: '🇷🇺', CN: '🇨🇳', IN: '🇮🇳', BR: '🇧🇷',
     JP: '🇯🇵', KR: '🇰🇷', AU: '🇦🇺', SG: '🇸🇬', VN: '🇻🇳',
     KP: '🇰🇵', IR: '🇮🇷', UA: '🇺🇦', RO: '🇷🇴', BG: '🇧🇬',
-    TR: '🇹🇷', IT: '🇮🇹', ES: '🇪🇸', PL: '🇵🇱', IL: '🇮🇱',
+    TR: 'TR', IT: '🇮🇹', ES: '🇪🇸', PL: '🇵🇱', IL: '🇮🇱',
     ID: '🇮🇩', PK: '🇵🇰', NG: '🇳🇬', ZA: '🇿🇦', EG: '🇪🇬',
     SA: '🇸🇦', AE: '🇦🇪', SE: '🇸🇪', NO: '🇳🇴', FI: '🇫🇮',
     CH: '🇨🇭', LOCAL: '🛡️'
@@ -38,11 +38,11 @@ const COUNTRY_NAMES = {
 // Protected Datacenter Node (Primary Master Hub)
 const PROTECTED_NODE = {
     id: 'protected-cluster-node',
-    name: 'Protected Enterprise Cluster (Master HQ)',
+    name: 'Protected Master HQ',
     country: 'India',
     countryCode: 'IN',
     city: 'Bangalore / Datacenter',
-    ip: '10.10.20.166 (Zero-Trust LAN)',
+    ip: '10.10.20.166 (Shield Active)',
     lng: 77.5946,
     lat: 12.9716,
     status: 'ONLINE_SHIELD_ACTIVE'
@@ -82,6 +82,8 @@ function generateArcPoints(start, end, numPoints = 60) {
 const AttackGeoMap = ({ showToast }) => {
     const mapContainerRef = useRef(null);
     const mapInstanceRef = useRef(null);
+    const markersRef = useRef(new Map());
+    const protectedMarkerRef = useRef(null);
     const sseRef = useRef(null);
 
     const [realThreats, setRealThreats] = useState([]);
@@ -89,7 +91,6 @@ const AttackGeoMap = ({ showToast }) => {
     const [geofence, setGeofence] = useState({ mode: 'disabled', blockedCountries: ['RU', 'KP', 'IR', 'CN'] });
     const [loading, setLoading] = useState(true);
     const [selectedThreat, setSelectedThreat] = useState(null);
-    const [hoveredThreat, setHoveredThreat] = useState(null);
     const [showBanModal, setShowBanModal] = useState(false);
     const [manualIp, setManualIp] = useState('');
     const [manualReason, setManualReason] = useState('Suspicious WAF reconnaissance probe');
@@ -265,45 +266,8 @@ const AttackGeoMap = ({ showToast }) => {
         return combined;
     }, [realThreats, activeFilterTab, bannedIps]);
 
-    // Format GeoJSON Data Layers for MapLibre
+    // Format GeoJSON Data Layers for MapLibre (Arcs and Baselines)
     const geoJsonData = useMemo(() => {
-        const threatFeatures = allThreats.map(t => ({
-            type: 'Feature',
-            id: t.id,
-            geometry: {
-                type: 'Point',
-                coordinates: [Number(t.lng) || 0, Number(t.lat) || 0]
-            },
-            properties: {
-                id: t.id,
-                ip: t.ip,
-                source: t.source || 'bunkerweb',
-                country: t.country || 'XX',
-                countryName: t.countryName || COUNTRY_NAMES[t.country] || 'Global',
-                city: t.city || 'Unknown',
-                severity: t.severity || 'medium',
-                color: SEVERITY_COLORS[t.severity] || SEVERITY_COLORS.medium,
-                tactic: t.tactic || 'WAF Threat Incursion',
-                threatScore: t.threatScore || 30,
-                action: t.action || 'BLOCKED',
-                timestamp: t.timestamp || new Date().toISOString()
-            }
-        }));
-
-        const protectedFeature = {
-            type: 'Feature',
-            geometry: {
-                type: 'Point',
-                coordinates: [PROTECTED_NODE.lng, PROTECTED_NODE.lat]
-            },
-            properties: {
-                name: PROTECTED_NODE.name,
-                ip: PROTECTED_NODE.ip,
-                status: PROTECTED_NODE.status,
-                color: '#10b981'
-            }
-        };
-
         const arcFeatures = allThreats.map((t, idx) => {
             const start = [Number(t.lng) || 0, Number(t.lat) || 0];
             const end = [PROTECTED_NODE.lng, PROTECTED_NODE.lat];
@@ -327,8 +291,6 @@ const AttackGeoMap = ({ showToast }) => {
         });
 
         return {
-            threatPoints: { type: 'FeatureCollection', features: threatFeatures },
-            protectedNode: { type: 'FeatureCollection', features: [protectedFeature] },
             attackArcs: { type: 'FeatureCollection', features: arcFeatures }
         };
     }, [allThreats]);
@@ -403,21 +365,11 @@ const AttackGeoMap = ({ showToast }) => {
         map.addControl(new maplibregl.NavigationControl({ showCompass: true, showZoom: false }), 'top-right');
 
         const setupLayers = () => {
-            if (map.getSource('threat-points-source')) return;
+            if (map.getSource('attack-arcs-source')) return;
 
             map.addSource('attack-arcs-source', {
                 type: 'geojson',
                 data: geoJsonData.attackArcs
-            });
-
-            map.addSource('threat-points-source', {
-                type: 'geojson',
-                data: geoJsonData.threatPoints
-            });
-
-            map.addSource('protected-node-source', {
-                type: 'geojson',
-                data: geoJsonData.protectedNode
             });
 
             // 1. Attack Arc Glow Layer
@@ -445,102 +397,113 @@ const AttackGeoMap = ({ showToast }) => {
                     'line-dasharray': [2, 2]
                 }
             });
-
-            // 3. Threat Outer Pulsing Halos
-            map.addLayer({
-                id: 'threat-halos',
-                type: 'circle',
-                source: 'threat-points-source',
-                paint: {
-                    'circle-radius': 20,
-                    'circle-color': ['get', 'color'],
-                    'circle-opacity': 0.28,
-                    'circle-blur': 0.8
-                }
-            });
-
-            // 4. Threat Core Points
-            map.addLayer({
-                id: 'threat-points',
-                type: 'circle',
-                source: 'threat-points-source',
-                paint: {
-                    'circle-radius': 7,
-                    'circle-color': ['get', 'color'],
-                    'circle-stroke-width': 2,
-                    'circle-stroke-color': '#ffffff',
-                    'circle-opacity': 0.98
-                }
-            });
-
-            // 5. Protected Node Big Radar Halo
-            map.addLayer({
-                id: 'protected-halo-outer',
-                type: 'circle',
-                source: 'protected-node-source',
-                paint: {
-                    'circle-radius': 32,
-                    'circle-color': '#10b981',
-                    'circle-opacity': 0.22,
-                    'circle-blur': 0.8
-                }
-            });
-
-            // 6. Protected Node Core
-            map.addLayer({
-                id: 'protected-point',
-                type: 'circle',
-                source: 'protected-node-source',
-                paint: {
-                    'circle-radius': 9,
-                    'circle-color': '#10b981',
-                    'circle-stroke-width': 2.5,
-                    'circle-stroke-color': '#ffffff'
-                }
-            });
-
-            map.on('mouseenter', 'threat-points', (e) => {
-                map.getCanvas().style.cursor = 'pointer';
-                if (e.features && e.features[0]) {
-                    setHoveredThreat(e.features[0].properties);
-                }
-            });
-
-            map.on('mouseleave', 'threat-points', () => {
-                map.getCanvas().style.cursor = '';
-                setHoveredThreat(null);
-            });
-
-            map.on('click', 'threat-points', (e) => {
-                if (e.features && e.features[0]) {
-                    setSelectedThreat(e.features[0].properties);
-                }
-            });
         };
 
         map.on('load', setupLayers);
         map.on('style.load', setupLayers);
         mapInstanceRef.current = map;
 
+        // Render Protected Master Node HTML Marker in Bangalore
+        const protectedEl = document.createElement('div');
+        protectedEl.className = 'threat-map-marker protected-node-marker';
+        protectedEl.innerHTML = `
+            <div class="threat-marker-icon-wrapper">
+                <div class="threat-marker-radar-wave" style="background: rgba(16, 185, 129, 0.4); border: 1.5px solid #10b981;"></div>
+                <div class="threat-marker-core-badge" style="background: #059669; border-color: #34d399;">🛡️</div>
+            </div>
+            <div class="threat-marker-callout-pill" style="border-color: rgba(16, 185, 129, 0.4);">
+                <div class="threat-marker-country-label" style="color: #10b981;">
+                    🇮🇳 ${PROTECTED_NODE.name}
+                </div>
+                <div class="threat-marker-ip-label" style="color: #6ee7b7;">
+                    ${PROTECTED_NODE.ip}
+                </div>
+            </div>
+        `;
+        protectedMarkerRef.current = new maplibregl.Marker({ element: protectedEl, anchor: 'center' })
+            .setLngLat([PROTECTED_NODE.lng, PROTECTED_NODE.lat])
+            .addTo(map);
+
         return () => {
+            if (protectedMarkerRef.current) protectedMarkerRef.current.remove();
             map.remove();
         };
     }, []);
 
-    // Update map data without re-instantiating
+    // Update Arc Trajectory lines
     useEffect(() => {
         const map = mapInstanceRef.current;
         if (!map || !map.isStyleLoaded()) return;
 
-        const threatSrc = map.getSource('threat-points-source');
-        if (threatSrc) threatSrc.setData(geoJsonData.threatPoints);
-
         const arcSrc = map.getSource('attack-arcs-source');
         if (arcSrc) arcSrc.setData(geoJsonData.attackArcs);
-
-        const protSrc = map.getSource('protected-node-source');
-        if (protSrc) protSrc.setData(geoJsonData.protectedNode);
     }, [geoJsonData]);
+
+    // Synchronize Animated Threat HTML Markers on the Map
+    useEffect(() => {
+        const map = mapInstanceRef.current;
+        if (!map) return;
+
+        const currentMarkerKeys = new Set();
+
+        allThreats.forEach((t) => {
+            const key = `${t.ip}-${t.country}`;
+            currentMarkerKeys.add(key);
+
+            const lng = Number(t.lng);
+            const lat = Number(t.lat);
+            if (isNaN(lng) || isNaN(lat)) return;
+
+            const flag = COUNTRY_FLAGS[t.country] || '🌐';
+            const countryName = t.countryName || COUNTRY_NAMES[t.country] || t.country;
+            const color = SEVERITY_COLORS[t.severity] || '#ef4444';
+
+            if (markersRef.current.has(key)) {
+                // Update position if needed
+                const marker = markersRef.current.get(key);
+                marker.setLngLat([lng, lat]);
+            } else {
+                // Create animated custom DOM Element
+                const el = document.createElement('div');
+                el.className = 'threat-map-marker';
+                el.innerHTML = `
+                    <div class="threat-marker-icon-wrapper">
+                        <div class="threat-marker-radar-wave" style="background: ${color}33; border: 1.5px solid ${color};"></div>
+                        <div class="threat-marker-core-badge" style="background: ${color}; border-color: #ffffff;">
+                            ${flag}
+                        </div>
+                    </div>
+                    <div class="threat-marker-callout-pill" style="border-color: ${color}55;">
+                        <div class="threat-marker-country-label">
+                            <span>${flag}</span> ${countryName}
+                        </div>
+                        <div class="threat-marker-ip-label">
+                            ${t.ip}
+                        </div>
+                    </div>
+                `;
+
+                el.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    setSelectedThreat(t);
+                });
+
+                const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
+                    .setLngLat([lng, lat])
+                    .addTo(map);
+
+                markersRef.current.set(key, marker);
+            }
+        });
+
+        // Remove markers that are no longer active in threats list
+        for (const [key, marker] of markersRef.current.entries()) {
+            if (!currentMarkerKeys.has(key)) {
+                marker.remove();
+                markersRef.current.delete(key);
+            }
+        }
+    }, [allThreats]);
 
     // Auto-Quarantine All Active Threat Bots
     const handleAutoQuarantineAll = async () => {
@@ -681,6 +644,94 @@ const AttackGeoMap = ({ showToast }) => {
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
             
+            {/* CSS Animation Keyframes for Live Radar Markers */}
+            <style>{`
+                @keyframes map-radar-ping {
+                    0% {
+                        transform: scale(0.6);
+                        opacity: 0.9;
+                    }
+                    50% {
+                        transform: scale(1.8);
+                        opacity: 0.35;
+                    }
+                    100% {
+                        transform: scale(2.8);
+                        opacity: 0;
+                    }
+                }
+                .threat-map-marker {
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    cursor: pointer;
+                    transform: translate(-50%, -50%);
+                    transition: transform 0.2s ease-out;
+                    z-index: 5;
+                }
+                .threat-map-marker:hover {
+                    transform: translate(-50%, -50%) scale(1.15);
+                    z-index: 25;
+                }
+                .threat-marker-icon-wrapper {
+                    position: relative;
+                    width: 32px;
+                    height: 32px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                }
+                .threat-marker-radar-wave {
+                    position: absolute;
+                    inset: 0;
+                    border-radius: 50%;
+                    animation: map-radar-ping 2.2s cubic-bezier(0, 0.2, 0.8, 1) infinite;
+                    pointer-events: none;
+                }
+                .threat-marker-core-badge {
+                    width: 26px;
+                    height: 26px;
+                    border-radius: 50%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-size: 14px;
+                    box-shadow: 0 4px 14px rgba(0,0,0,0.6);
+                    border: 2px solid #ffffff;
+                    position: relative;
+                    z-index: 2;
+                }
+                .threat-marker-callout-pill {
+                    margin-top: 5px;
+                    background: rgba(13, 19, 31, 0.94);
+                    backdrop-filter: blur(8px);
+                    border: 1px solid rgba(255, 255, 255, 0.15);
+                    border-radius: 8px;
+                    padding: 3px 8px;
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+                    white-space: nowrap;
+                    pointer-events: none;
+                }
+                .threat-marker-country-label {
+                    font-size: 11px;
+                    font-weight: 800;
+                    color: #ffffff;
+                    display: flex;
+                    align-items: center;
+                    gap: 4px;
+                }
+                .threat-marker-ip-label {
+                    font-family: var(--font-mono, monospace);
+                    font-size: 10px;
+                    font-weight: 700;
+                    color: #38bdf8;
+                    margin-top: 1px;
+                }
+            `}</style>
+
             {/* Top Threat Intel KPI Cards */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px' }}>
                 <div className="glass" style={{ padding: '16px 20px', borderRadius: '16px', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-0)' }}>
