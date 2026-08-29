@@ -18,7 +18,10 @@ const COUNTRY_FLAGS = {
     NL: '🇳🇱', RU: '🇷🇺', CN: '🇨🇳', IN: '🇮🇳', BR: '🇧🇷',
     JP: '🇯🇵', KR: '🇰🇷', AU: '🇦🇺', SG: '🇸🇬', VN: '🇻🇳',
     KP: '🇰🇵', IR: '🇮🇷', UA: '🇺🇦', RO: '🇷🇴', BG: '🇧🇬',
-    LOCAL: '🛡️'
+    TR: '🇹🇷', IT: '🇮🇹', ES: '🇪🇸', PL: '🇵🇱', IL: '🇮🇱',
+    ID: '🇮🇩', PK: '🇵🇰', NG: '🇳🇬', ZA: '🇿🇦', EG: '🇪🇬',
+    SA: '🇸🇦', AE: '🇦🇪', SE: '🇸🇪', NO: '🇳🇴', FI: '🇫🇮',
+    CH: '🇨🇭', LOCAL: '🛡️'
 };
 
 const COUNTRY_NAMES = {
@@ -26,7 +29,10 @@ const COUNTRY_NAMES = {
     NL: 'Netherlands', RU: 'Russia', CN: 'China', IN: 'India', BR: 'Brazil',
     JP: 'Japan', KR: 'South Korea', AU: 'Australia', SG: 'Singapore', VN: 'Vietnam',
     KP: 'North Korea', IR: 'Iran', UA: 'Ukraine', RO: 'Romania', BG: 'Bulgaria',
-    LOCAL: 'Local Intranet'
+    TR: 'Turkey', IT: 'Italy', ES: 'Spain', PL: 'Poland', IL: 'Israel',
+    ID: 'Indonesia', PK: 'Pakistan', NG: 'Nigeria', ZA: 'South Africa', EG: 'Egypt',
+    SA: 'Saudi Arabia', AE: 'United Arab Emirates', SE: 'Sweden', NO: 'Norway',
+    FI: 'Finland', CH: 'Switzerland', LOCAL: 'Local Intranet'
 };
 
 // Protected Datacenter Node (Primary Master Hub)
@@ -76,12 +82,9 @@ function generateArcPoints(start, end, numPoints = 60) {
 const AttackGeoMap = ({ showToast }) => {
     const mapContainerRef = useRef(null);
     const mapInstanceRef = useRef(null);
-    const animFrameRef = useRef(null);
     const sseRef = useRef(null);
 
     const [realThreats, setRealThreats] = useState([]);
-    const [simulatedThreats, setSimulatedThreats] = useState([]);
-    const [simulatingType, setSimulatingType] = useState(null);
     const [bannedIps, setBannedIps] = useState([]);
     const [geofence, setGeofence] = useState({ mode: 'disabled', blockedCountries: ['RU', 'KP', 'IR', 'CN'] });
     const [loading, setLoading] = useState(true);
@@ -109,7 +112,7 @@ const AttackGeoMap = ({ showToast }) => {
     // Incursion Stream Feed
     const [incursionLogs, setIncursionLogs] = useState([]);
 
-    // Fetch initial historical spatial threats from database
+    // Fetch real spatial threats from database
     const fetchThreatData = useCallback(async (silent = false) => {
         if (!silent) setLoading(true);
         try {
@@ -122,7 +125,7 @@ const AttackGeoMap = ({ showToast }) => {
                 axios.get(`${API_BASE}/waf/status`, { headers }).catch(() => ({ data: { status: 'ONLINE' } }))
             ]);
 
-            const threats = mapRes.data.activeThreats || [];
+            const threats = (mapRes.data.activeThreats || []).filter(t => !t.isSimulated);
             setRealThreats(threats);
             setBannedIps(bansRes.data.bannedIps || []);
             setGeofence(bansRes.data.geofence || { mode: 'disabled', blockedCountries: ['RU', 'KP', 'IR', 'CN'] });
@@ -135,14 +138,14 @@ const AttackGeoMap = ({ showToast }) => {
                     time: new Date(t.timestamp || Date.now()).toLocaleTimeString(),
                     ip: t.ip,
                     country: t.country,
-                    countryName: t.countryName,
+                    countryName: t.countryName || COUNTRY_NAMES[t.country] || t.country,
+                    city: t.city,
                     type: t.attackType || 'WAF_INCURSION',
                     verdict: t.action || 'BLOCKED',
                     score: t.threatScore || 50,
                     path: t.path || '/',
                     severity: t.severity,
-                    source: t.source,
-                    isSimulated: Boolean(t.isSimulated || t.source === 'simulator')
+                    source: t.source
                 }));
             });
         } catch (err) {
@@ -171,7 +174,7 @@ const AttackGeoMap = ({ showToast }) => {
         es.addEventListener('waf_event', (e) => {
             try {
                 const ev = JSON.parse(e.data);
-                if (!ev || !ev.sourceIp) return;
+                if (!ev || !ev.sourceIp || ev.isSimulated) return;
 
                 // Add or update real threat point on map
                 setRealThreats(prev => {
@@ -179,7 +182,6 @@ const AttackGeoMap = ({ showToast }) => {
                     const updatedItem = {
                         id: ev.id,
                         source: ev.source || 'bunkerweb',
-                        isSimulated: Boolean(ev.isSimulated || ev.source === 'simulator'),
                         ip: ev.sourceIp,
                         country: ev.country || 'XX',
                         countryName: ev.countryName || COUNTRY_NAMES[ev.country] || 'Global Network',
@@ -211,14 +213,14 @@ const AttackGeoMap = ({ showToast }) => {
                         time: new Date(ev.timestamp || Date.now()).toLocaleTimeString(),
                         ip: ev.sourceIp,
                         country: ev.country,
-                        countryName: ev.countryName,
+                        countryName: ev.countryName || COUNTRY_NAMES[ev.country],
+                        city: ev.city,
                         type: ev.attackType,
                         verdict: ev.action,
                         score: ev.threatScore,
                         path: ev.path,
                         severity: ev.severity,
-                        source: ev.source,
-                        isSimulated: Boolean(ev.isSimulated || ev.source === 'simulator')
+                        source: ev.source
                     },
                     ...prev
                 ].slice(0, 25));
@@ -247,9 +249,9 @@ const AttackGeoMap = ({ showToast }) => {
         };
     }, [fetchThreatData]);
 
-    // Combine real database threats with active incursion simulations
+    // Combine real database threats with active filter tab
     const allThreats = useMemo(() => {
-        let combined = [...realThreats, ...simulatedThreats];
+        let combined = [...realThreats];
 
         if (activeFilterTab === 'bots') {
             combined = combined.filter(t => t.severity === 'bot' || (t.attackType && t.attackType.toLowerCase().includes('bot')) || (t.tactic && t.tactic.toLowerCase().includes('bot')));
@@ -261,7 +263,7 @@ const AttackGeoMap = ({ showToast }) => {
         }
 
         return combined;
-    }, [realThreats, simulatedThreats, activeFilterTab, bannedIps]);
+    }, [realThreats, activeFilterTab, bannedIps]);
 
     // Format GeoJSON Data Layers for MapLibre
     const geoJsonData = useMemo(() => {
@@ -276,7 +278,6 @@ const AttackGeoMap = ({ showToast }) => {
                 id: t.id,
                 ip: t.ip,
                 source: t.source || 'bunkerweb',
-                isSimulated: Boolean(t.isSimulated),
                 country: t.country || 'XX',
                 countryName: t.countryName || COUNTRY_NAMES[t.country] || 'Global',
                 city: t.city || 'Unknown',
@@ -320,8 +321,7 @@ const AttackGeoMap = ({ showToast }) => {
                     threatId: t.id,
                     severity: t.severity || 'medium',
                     color: SEVERITY_COLORS[t.severity] || SEVERITY_COLORS.medium,
-                    ip: t.ip,
-                    isSimulated: Boolean(t.isSimulated)
+                    ip: t.ip
                 }
             };
         });
@@ -542,56 +542,6 @@ const AttackGeoMap = ({ showToast }) => {
         if (protSrc) protSrc.setData(geoJsonData.protectedNode);
     }, [geoJsonData]);
 
-    // ─── ATTACK & BOT INGESTION SIMULATOR TOOL ───
-    const handleRunSimulation = (type) => {
-        setSimulatingType(type);
-
-        let newBots = [];
-        let newLogs = [];
-
-        if (type === 'botnet') {
-            newBots = [
-                { id: `sim-bot-${Date.now()}-1`, ip: '198.51.100.22', country: 'RU', countryName: 'Russia', city: 'Saint Petersburg', lat: 59.9343, lng: 30.3351, severity: 'bot', tactic: 'DarkGate Botnet Credential Stuffing', attempts: 3200, category: 'bot', attackType: 'BOTNET', timestamp: new Date().toISOString() },
-                { id: `sim-bot-${Date.now()}-2`, ip: '203.0.113.144', country: 'VN', countryName: 'Vietnam', city: 'Hanoi', lat: 21.0285, lng: 105.8542, severity: 'bot', tactic: 'Mirai IoT Ingestion Swarm', attempts: 2840, category: 'bot', attackType: 'BOTNET', timestamp: new Date().toISOString() },
-                { id: `sim-bot-${Date.now()}-3`, ip: '192.0.2.190', country: 'CN', countryName: 'China', city: 'Shenzhen', lat: 22.5431, lng: 114.0579, severity: 'bot', tactic: 'Distributed Brute Force Flood', attempts: 4120, category: 'bot', attackType: 'BOTNET', timestamp: new Date().toISOString() }
-            ];
-            newLogs = [
-                { id: `log-${Date.now()}-1`, time: new Date().toLocaleTimeString(), ip: '198.51.100.22', country: 'RU', type: 'BOTNET_CRED_STUFFING', verdict: 'BLOCKED', score: 92, isSimulated: true },
-                { id: `log-${Date.now()}-2`, time: new Date().toLocaleTimeString(), ip: '203.0.113.144', country: 'VN', type: 'MIRAI_IOT_SWARM', verdict: 'RATE_LIMITED', score: 85, isSimulated: true }
-            ];
-            if (showToast) showToast('🤖 Botnet Incursion Swarm Simulated: 3 Attack Vectors Active', 'info');
-        } else if (type === 'crawler') {
-            newBots = [
-                { id: `sim-crawl-${Date.now()}-1`, ip: '198.51.100.55', country: 'US', countryName: 'United States', city: 'Seattle', lat: 47.6062, lng: -122.3321, severity: 'high', tactic: 'Aggressive WAF Vulnerability Crawler', attempts: 1840, category: 'exploit', attackType: 'RECON_SCANNER', timestamp: new Date().toISOString() },
-                { id: `sim-crawl-${Date.now()}-2`, ip: '203.0.113.62', country: 'FR', countryName: 'France', city: 'Paris', lat: 48.8566, lng: 2.3522, severity: 'high', tactic: 'Dir Traversal & .env Scraper', attempts: 1650, category: 'exploit', attackType: 'DIRECTORY_TRAVERSAL', timestamp: new Date().toISOString() }
-            ];
-            newLogs = [
-                { id: `log-${Date.now()}-3`, time: new Date().toLocaleTimeString(), ip: '198.51.100.55', country: 'US', type: 'WAF_SCANNER_SWEEP', verdict: 'BLOCKED', score: 89, isSimulated: true },
-                { id: `log-${Date.now()}-4`, time: new Date().toLocaleTimeString(), ip: '203.0.113.62', country: 'FR', type: 'ENV_SECRET_PROBE', verdict: 'BLOCKED', score: 94, isSimulated: true }
-            ];
-            if (showToast) showToast('🕷️ WAF Exploit Crawler Simulated: Probing perimeter defenses', 'info');
-        } else if (type === 'ddos') {
-            newBots = [
-                { id: `sim-ddos-${Date.now()}-1`, ip: '192.0.2.210', country: 'IR', countryName: 'Iran', city: 'Tehran', lat: 35.6892, lng: 51.3890, severity: 'critical', tactic: 'Volumetric TCP SYN Flood Spike', attempts: 9400, category: 'exploit', attackType: 'RATE_LIMIT_EXCEEDED', timestamp: new Date().toISOString() },
-                { id: `sim-ddos-${Date.now()}-2`, ip: '198.51.100.177', country: 'KP', countryName: 'North Korea', city: 'Pyongyang', lat: 39.0392, lng: 125.7625, severity: 'critical', tactic: 'HTTP Layer-7 Flood Burst', attempts: 8900, category: 'exploit', attackType: 'RATE_LIMIT_EXCEEDED', timestamp: new Date().toISOString() }
-            ];
-            newLogs = [
-                { id: `log-${Date.now()}-5`, time: new Date().toLocaleTimeString(), ip: '192.0.2.210', country: 'IR', type: 'TCP_SYN_FLOOD', verdict: 'DROPPED', score: 99, isSimulated: true },
-                { id: `log-${Date.now()}-6`, time: new Date().toLocaleTimeString(), ip: '198.51.100.177', country: 'KP', type: 'HTTP_L7_BURST', verdict: 'DROPPED', score: 98, isSimulated: true }
-            ];
-            if (showToast) showToast('⚡ DDoS Volumetric Surge Simulated: Inbound dropping enforced', 'error');
-        }
-
-        setSimulatedThreats(prev => [...prev, ...newBots]);
-        setIncursionLogs(prev => [...newLogs, ...prev].slice(0, 25));
-    };
-
-    const handleClearSimulation = () => {
-        setSimulatedThreats([]);
-        setSimulatingType(null);
-        if (showToast) showToast('Simulation cleared. Baseline telemetry active.', 'info');
-    };
-
     // Auto-Quarantine All Active Threat Bots
     const handleAutoQuarantineAll = async () => {
         const unbannedThreats = allThreats.filter(t => !bannedIps.some(b => b.ip === t.ip));
@@ -774,57 +724,6 @@ const AttackGeoMap = ({ showToast }) => {
                 </div>
             </div>
 
-            {/* Incursion Simulation & Stress-Test Operations Toolbar */}
-            <div className="glass" style={{ padding: '16px 20px', borderRadius: '16px', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-0)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '14px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <Cpu size={18} color="var(--primary)" />
-                    <div>
-                        <div style={{ fontSize: '13px', fontWeight: '800', color: 'var(--text-primary)' }}>Traffic & Bot Incursion Security Suite</div>
-                        <div style={{ fontSize: '11.5px', color: 'var(--text-secondary)' }}>Launch live stress-testing scenarios & automated WAF quarantine defense</div>
-                    </div>
-                </div>
-
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                    <button 
-                        onClick={() => handleRunSimulation('botnet')}
-                        className="btn-secondary"
-                        style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: '700', padding: '6px 12px', borderRadius: '8px', color: '#a855f7', borderColor: 'rgba(168,85,247,0.3)' }}
-                    >
-                        <Bot size={14} /> Simulate Botnet Swarm
-                    </button>
-                    <button 
-                        onClick={() => handleRunSimulation('crawler')}
-                        className="btn-secondary"
-                        style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: '700', padding: '6px 12px', borderRadius: '8px', color: '#f97316', borderColor: 'rgba(249,115,22,0.3)' }}
-                    >
-                        <Bug size={14} /> Simulate WAF Crawler
-                    </button>
-                    <button 
-                        onClick={() => handleRunSimulation('ddos')}
-                        className="btn-secondary"
-                        style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: '700', padding: '6px 12px', borderRadius: '8px', color: '#ef4444', borderColor: 'rgba(239,68,68,0.3)' }}
-                    >
-                        <Flame size={14} /> Simulate DDoS Flood
-                    </button>
-                    <button 
-                        onClick={handleAutoQuarantineAll}
-                        className="btn-primary"
-                        style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: '800', padding: '6px 14px', borderRadius: '8px', background: 'linear-gradient(135deg, #10b981, #059669)' }}
-                    >
-                        <ShieldCheck size={14} /> Auto-Quarantine All Threats
-                    </button>
-                    {simulatedThreats.length > 0 && (
-                        <button 
-                            onClick={handleClearSimulation}
-                            className="btn-secondary"
-                            style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: '700', padding: '6px 12px', borderRadius: '8px', color: '#f43f5e' }}
-                        >
-                            <X size={14} /> Clear Simulation
-                        </button>
-                    )}
-                </div>
-            </div>
-
             {/* Main Interactive Map & SIEM Container */}
             <div style={{
                 position: 'relative',
@@ -985,11 +884,9 @@ const AttackGeoMap = ({ showToast }) => {
                                 >
                                     <span>{COUNTRY_FLAGS[log.country] || '🌐'}</span>
                                     <span style={{ fontWeight: '700', color: '#f8fafc' }}>{log.ip}</span>
+                                    <span style={{ color: '#94a3b8', fontSize: '10.5px' }}>({log.countryName || log.country})</span>
                                     <span style={{ color: log.verdict === 'BLOCKED' ? '#ef4444' : '#f59e0b', fontWeight: '800' }}>[{log.type}]</span>
                                     <span style={{ color: '#94a3b8', fontSize: '10px' }}>{log.time}</span>
-                                    {log.isSimulated && (
-                                        <span style={{ fontSize: '9px', fontWeight: '800', background: 'rgba(168,85,247,0.2)', color: '#a855f7', padding: '1px 4px', borderRadius: '4px' }}>SIMULATED</span>
-                                    )}
                                 </div>
                             ))
                         )}
@@ -1012,13 +909,22 @@ const AttackGeoMap = ({ showToast }) => {
                             </div>
                         </div>
 
-                        <button 
-                            onClick={() => setShowBanModal(true)}
-                            className="btn-secondary shadow-premium"
-                            style={{ padding: '6px 12px', borderRadius: '8px', fontSize: '11.5px', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '4px' }}
-                        >
-                            <Plus size={14} /> Quarantine IP
-                        </button>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                            <button 
+                                onClick={handleAutoQuarantineAll}
+                                className="btn-secondary shadow-premium"
+                                style={{ padding: '6px 12px', borderRadius: '8px', fontSize: '11.5px', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '4px', color: '#10b981', borderColor: 'rgba(16,185,129,0.3)' }}
+                            >
+                                <ShieldCheck size={14} /> Auto-Quarantine
+                            </button>
+                            <button 
+                                onClick={() => setShowBanModal(true)}
+                                className="btn-secondary shadow-premium"
+                                style={{ padding: '6px 12px', borderRadius: '8px', fontSize: '11.5px', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '4px' }}
+                            >
+                                <Plus size={14} /> Quarantine IP
+                            </button>
+                        </div>
                     </div>
 
                     <div style={{ marginBottom: '14px', position: 'relative' }}>
@@ -1063,7 +969,9 @@ const AttackGeoMap = ({ showToast }) => {
                                     <div>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                             <span style={{ fontFamily: 'var(--font-mono)', fontWeight: '800', color: 'var(--text-primary)', fontSize: '13px' }}>{b.ip}</span>
-                                            <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(244, 63, 94, 0.12)', color: '#f43f5e', fontWeight: '800' }}>{b.country || 'XX'}</span>
+                                            <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(244, 63, 94, 0.12)', color: '#f43f5e', fontWeight: '800' }}>
+                                                {COUNTRY_FLAGS[b.country] || '🌐'} {b.country || 'XX'}
+                                            </span>
                                         </div>
                                         <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '2px' }}>
                                             {b.reason} • {b.attempts || 1} attempts

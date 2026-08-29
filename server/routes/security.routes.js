@@ -905,49 +905,54 @@ let bannedIpsCache = [];
 let geofenceConfig = { mode: 'whitelist_all', blockedCountries: ['RU', 'KP', 'IR', 'CN'] };
 
 // ─── GET /api/v1/security/threat-map ──────────────────────────────────────────
-// Builds the initial spatial radar dataset from REAL database WAF telemetry & active bans
+// Builds the spatial radar dataset strictly from REAL database WAF telemetry & active bans
 router.get('/threat-map', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const geoService = require('../utils/geoService');
 
-        // Pull real security events from the DB (last 30 days)
+        // Pull real security events from the DB (last 30 days, real events only)
         const eventsRes = await db.query(`
             SELECT id, source, source_ip, attack_type, severity, threat_score,
                    action, country, city, latitude, longitude, mitre_technique,
                    rule_message, details, created_at
             FROM security_events
-            WHERE source_ip IS NOT NULL OR details->>'ip' IS NOT NULL
+            WHERE source != 'simulator'
+              AND (source_ip IS NOT NULL AND source_ip != '')
             ORDER BY created_at DESC
-            LIMIT 100
+            LIMIT 150
         `);
 
         const seen = new Set();
         const threatPoints = [];
 
-        // Map security_events rows to threat points
+        // Map real security_events rows to threat points based on real IP and Country
         for (const row of eventsRes.rows) {
-            const ip = row.source_ip || row.details?.ip || '198.51.100.1';
-            const dedupeKey = `${ip}-${row.attack_type}`;
-            if (seen.has(dedupeKey)) continue;
-            seen.add(dedupeKey);
+            const ip = (row.source_ip || row.details?.ip || '').replace(/^::ffff:/, '').trim();
+            if (!ip || seen.has(ip)) continue;
+            seen.add(ip);
 
-            let geo = geoService.resolveIp(ip);
-            let country = row.country || geo.country || 'DE';
-            if (country === 'XX' || country === 'LOCAL') {
-                if (row.country && row.country !== 'LOCAL' && row.country !== 'XX') {
-                    country = row.country;
-                } else {
-                    country = 'DE';
-                }
-            }
-            const fallbackCoord = geoService.COUNTRY_COORDS[country] || { lat: 51.1657, lng: 10.4515, name: country, city: country };
+            const geo = geoService.resolveIp(ip);
+            const country = (row.country && row.country !== 'XX' && row.country !== 'LOCAL')
+                ? row.country.toUpperCase()
+                : (geo.country && geo.country !== 'XX' && geo.country !== 'LOCAL' ? geo.country : null);
+
+            // Skip entries that have no valid geographic country
+            if (!country) continue;
+
+            const countryMeta = geoService.COUNTRY_COORDS[country] || { lat: geo.lat || 0, lng: geo.lng || 0, name: country, city: geo.city || country };
+            const countryName = (row.details?.countryName && row.details.countryName !== 'Local Cluster Node') ? row.details.countryName : (countryMeta.name || country);
+            const city = (row.city && row.city !== 'Internal LAN / Node' && row.city !== 'Unknown') 
+                ? row.city 
+                : (countryMeta.city || geo.city || countryName);
             
-            const countryName = (geo.countryName && geo.countryName !== 'Local Cluster Node' && geo.countryName !== 'Unknown') 
-                ? geo.countryName 
-                : fallbackCoord.name;
-            const city = (row.city && row.city !== 'Internal LAN / Node') ? row.city : fallbackCoord.city;
-            const lat = row.latitude != null ? Number(row.latitude) : (geo.lat && geo.lat !== 37.7749 ? geo.lat : fallbackCoord.lat);
-            const lng = row.longitude != null ? Number(row.longitude) : (geo.lng && geo.lng !== -122.4194 ? geo.lng : fallbackCoord.lng);
+            const lat = (row.latitude != null && !isNaN(Number(row.latitude)) && Number(row.latitude) !== 37.7749 && Number(row.latitude) !== 20.0) 
+                ? Number(row.latitude) 
+                : countryMeta.lat;
+            const lng = (row.longitude != null && !isNaN(Number(row.longitude)) && Number(row.longitude) !== -122.4194 && Number(row.longitude) !== 0.0) 
+                ? Number(row.longitude) 
+                : countryMeta.lng;
+
+            if (lat == null || lng == null || isNaN(lat) || isNaN(lng)) continue;
 
             const attackType = row.attack_type || row.details?.threat || 'SUSPICIOUS_PAYLOAD';
             const severity = (row.severity || 'MEDIUM').toLowerCase();
@@ -956,7 +961,7 @@ router.get('/threat-map', authenticateToken, requireAdmin, async (req, res) => {
             threatPoints.push({
                 id: row.id,
                 source: row.source || 'bunkerweb',
-                isSimulated: row.source === 'simulator',
+                isSimulated: false,
                 ip,
                 country,
                 countryName,
@@ -966,34 +971,49 @@ router.get('/threat-map', authenticateToken, requireAdmin, async (req, res) => {
                 severity,
                 attackType,
                 tactic: `${mitre} ${attackType.replace(/_/g, ' ')}`,
-                threatScore: row.threat_score || 25,
+                threatScore: row.threat_score || 35,
                 action: row.action || 'BLOCKED',
                 timestamp: row.created_at
             });
         }
 
-        // Also include currently banned IPs not already in events
+        // Also include real banned IPs from database
         for (const ban of bannedIpsCache) {
-            if (seen.has(ban.ip)) continue;
-            seen.add(ban.ip);
-            const geo = geoService.resolveIp(ban.ip);
-            const city = geo.city || countryName;
+            const ip = (ban.ip || '').replace(/^::ffff:/, '').trim();
+            if (!ip || seen.has(ip)) continue;
+            seen.add(ip);
+
+            const geo = geoService.resolveIp(ip);
+            const country = (ban.country && ban.country !== 'XX' && ban.country !== 'LOCAL')
+                ? ban.country.toUpperCase()
+                : (geo.country && geo.country !== 'XX' && geo.country !== 'LOCAL' ? geo.country : null);
+
+            if (!country) continue;
+
+            const countryMeta = geoService.COUNTRY_COORDS[country] || { lat: geo.lat || 0, lng: geo.lng || 0, name: country, city: geo.city || country };
+            const countryName = (ban.countryName && ban.countryName !== 'Local Cluster Node') ? ban.countryName : (countryMeta.name || country);
+            const city = (geo.city && geo.city !== 'Internal LAN / Node') ? geo.city : (countryMeta.city || countryName);
+            const lat = countryMeta.lat;
+            const lng = countryMeta.lng;
+
+            if (lat == null || lng == null || isNaN(lat) || isNaN(lng)) continue;
 
             threatPoints.push({
-                id: `ban-${ban.ip}`,
+                id: `ban-${ip}`,
                 source: 'bunkerweb',
-                ip: ban.ip,
+                isSimulated: false,
+                ip,
                 country,
                 countryName,
                 city,
-                lat: geo.lat || 20.0,
-                lng: geo.lng || 0.0,
-                severity: ban.attempts > 10 ? 'critical' : 'high',
+                lat,
+                lng,
+                severity: (ban.attempts || 1) > 10 ? 'critical' : 'high',
                 attackType: 'IP_BLACKLISTED',
-                tactic: ban.reason || 'T1110 Blacklisted Offender',
+                tactic: ban.reason || 'Persistent Blacklist Quarantine',
                 threatScore: 85,
                 action: 'BLOCKED',
-                timestamp: ban.bannedAt
+                timestamp: ban.bannedAt || new Date().toISOString()
             });
         }
 
