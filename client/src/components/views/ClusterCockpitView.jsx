@@ -233,6 +233,13 @@ export default function ClusterCockpitView({
     const [chartMode, setChartMode] = useState('network'); // 'network' or 'disk'
     const [hoveredDataPoint, setHoveredDataPoint] = useState(null);
     const [isRefreshing, setIsRefreshing] = useState(false);
+    const [clearedAt, setClearedAt] = useState(0);
+
+    const handleClearActivities = () => {
+        setClearedAt(Date.now());
+        if (setActivityHistory) setActivityHistory([]);
+        if (showToast) showToast('Fleet event log cleared', 'info');
+    };
 
     // Calculate cluster averages
     const onlineApprovedNodes = filteredNodes.filter(n => n.online && n.status === 'approved');
@@ -1052,41 +1059,51 @@ export default function ClusterCockpitView({
                     style={{ 
                         display: 'flex', 
                         flexDirection: 'column', 
-                        height: '100%',
-                        minHeight: '750px',
-                        background: 'var(--bg-surface-1)',
-                        backdropFilter: 'blur(24px)',
+                        height: 'fit-content',
+                        maxHeight: '680px',
+                        background: 'var(--bg-surface-0, #ffffff)',
                         border: '1px solid var(--border-subtle)',
                         borderRadius: '18px',
-                        padding: '22px',
-                        boxSizing: 'border-box'
+                        padding: '20px',
+                        boxSizing: 'border-box',
+                        position: 'sticky',
+                        top: '20px',
+                        boxShadow: '0 4px 20px rgba(0, 0, 0, 0.04)'
                     }} 
                 >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px', flexShrink: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexShrink: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                             <Activity size={18} color="var(--accent-gold)" />
-                            <h3 style={{ fontSize: '17px', fontWeight: '850', margin: 0, color: 'var(--text-primary)', letterSpacing: '-0.3px' }}>
+                            <h3 style={{ fontSize: '16px', fontWeight: '850', margin: 0, color: 'var(--text-primary)', letterSpacing: '-0.3px' }}>
                                 Fleet Event Stream & Audits
                             </h3>
                         </div>
                         <button 
-                            onClick={() => setActivityHistory && setActivityHistory([])} 
+                            onClick={handleClearActivities} 
                             style={{ 
-                                background: 'rgba(255,255,255,0.05)', 
+                                background: 'var(--bg-surface-2, rgba(0,0,0,0.04))', 
                                 border: '1px solid var(--border-subtle)', 
                                 color: 'var(--text-secondary)', 
                                 cursor: 'pointer', 
                                 fontSize: '11px',
                                 fontWeight: '700',
                                 padding: '4px 10px',
-                                borderRadius: '6px'
+                                borderRadius: '6px',
+                                transition: 'all 0.2s ease'
                             }}
                         >
                             Clear
                         </button>
                     </div>
 
-                    <div style={{ flex: 1, overflowY: 'auto', paddingRight: '6px', minHeight: 0 }}>
+                    <div style={{ 
+                        overflowY: 'auto', 
+                        maxHeight: '580px', 
+                        paddingRight: '6px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '4px'
+                    }}>
                         {(() => {
                             const combinedActivities = [
                                 ...activityHistory,
@@ -1098,7 +1115,9 @@ export default function ClusterCockpitView({
                                     timestamp: a.timestamp,
                                     error: typeof a.status === 'string' && a.status.length < 80 ? a.status : null
                                 }))
-                            ].sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0)).slice(0, 30);
+                            ].filter(a => !clearedAt || (new Date(a.timestamp || 0).getTime() > clearedAt))
+                             .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))
+                             .slice(0, 30);
 
                             if (combinedActivities.length === 0) {
                                 return (

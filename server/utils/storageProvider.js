@@ -213,29 +213,46 @@ class StorageProvider {
             return [...dirs, ...files];
         }
 
-        const files = fs.readdirSync(p, { withFileTypes: true });
-        return files.map(file => {
-            const fPath = path.join(p, file.name);
-            let s = { size: 0, mtime: new Date() };
-            try { s = fs.statSync(fPath); } catch (e) {}
-            const isDir = file.isDirectory();
-            let dirSize = 0;
-            let itemCount = 0;
-            if (isDir) {
-                try {
-                    const children = fs.readdirSync(fPath);
-                    itemCount = children.length;
-                    dirSize = getDirectorySize(fPath, 3);
-                } catch (e) {}
+        let fileEntries = [];
+        try {
+            fileEntries = fs.readdirSync(p, { withFileTypes: true });
+        } catch (readErr) {
+            logger.warn(`[StorageProvider] readdir error on ${p}: ${readErr.message}`);
+            throw readErr;
+        }
+
+        const items = [];
+        for (const file of fileEntries) {
+            try {
+                const fPath = path.join(p, file.name);
+                let s = { size: 0, mtime: new Date() };
+                try { 
+                    s = fs.statSync(fPath); 
+                } catch (e) {
+                    try { s = fs.lstatSync(fPath); } catch (_) {}
+                }
+                const isDir = file.isDirectory() || (file.isSymbolicLink() && typeof s.isDirectory === 'function' && s.isDirectory());
+                let dirSize = 0;
+                let itemCount = 0;
+                if (isDir) {
+                    try {
+                        const children = fs.readdirSync(fPath);
+                        itemCount = children.length;
+                        dirSize = getDirectorySize(fPath, 2);
+                    } catch (e) {}
+                }
+                items.push({
+                    name: file.name,
+                    isDirectory: isDir,
+                    size: isDir ? dirSize : (s.size || 0),
+                    itemCount: isDir ? itemCount : undefined,
+                    modified: s.mtime || new Date()
+                });
+            } catch (itemErr) {
+                // Skip problematic inaccessible files safely
             }
-            return {
-                name: file.name,
-                isDirectory: isDir,
-                size: isDir ? dirSize : s.size,
-                itemCount: isDir ? itemCount : undefined,
-                modified: s.mtime
-            };
-        });
+        }
+        return items;
     }
 
     async stat(targetPath) {

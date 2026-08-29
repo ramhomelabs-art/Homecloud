@@ -829,9 +829,10 @@ router.get('/list', async (req, res) => {
         }
     }
 
-    const isRoot = !targetPath || targetPath === '/' || targetPath === '';
+    const isWindowsRoot = process.platform === 'win32' && (!targetPath || targetPath === '/' || targetPath === '');
+    const isHardwareOverview = req.query.hardware === 'true' && (!targetPath || targetPath === '/' || targetPath === '');
 
-    if (isRoot) {
+    if (isWindowsRoot || isHardwareOverview) {
         try {
             const rootItems = await getRootListing(req);
             return res.json(rootItems);
@@ -841,10 +842,12 @@ router.get('/list', async (req, res) => {
         }
     }
 
+    const effectivePath = (!targetPath || targetPath === '') ? '/' : targetPath;
+
     try {
         let resolvedRaw = '';
         try {
-            resolvedRaw = resolveFilePath(req, targetPath || '');
+            resolvedRaw = resolveFilePath(req, effectivePath);
         } catch (e) {}
 
         const locker = await vaultService.getLockerForPath(resolvedRaw);
@@ -854,7 +857,7 @@ router.get('/list', async (req, res) => {
             }
             
             const keys = vaultService.getKeys(locker.id);
-            const physicalPath = await vaultService.resolveVaultPath(req, targetPath || '');
+            const physicalPath = await vaultService.resolveVaultPath(req, effectivePath);
             let files;
             try {
                 files = await storageProvider.readdir(physicalPath);
@@ -868,12 +871,13 @@ router.get('/list', async (req, res) => {
             const decryptedFiles = files.map(f => {
                 const decName = vaultService.decryptFilename(f.name, keys.filenameKey);
                 const isDir = f.isDirectory;
+                const childPath = effectivePath === '/' ? `/${decName}` : path.join(effectivePath, decName);
                 return {
                     name: decName,
                     isDirectory: isDir,
                     size: isDir ? 0 : (f.size > 16 ? f.size - 16 : 0),
                     modified: f.modified,
-                    path: path.join(targetPath || '', decName),
+                    path: childPath,
                     isVault: false,
                     isLocked: false
                 };
@@ -887,7 +891,7 @@ router.get('/list', async (req, res) => {
 
         let files;
         try {
-            files = await storageProvider.readdir(targetPath || '');
+            files = await storageProvider.readdir(effectivePath);
         } catch (readErr) {
             if (readErr.code === 'ENOENT') {
                 return res.json([]);
@@ -895,9 +899,15 @@ router.get('/list', async (req, res) => {
             throw readErr;
         }
 
-
         const mappedFiles = files.map(f => {
-            const fVirtualPath = path.join(targetPath || '', f.name);
+            let fVirtualPath;
+            if (effectivePath === '/' || effectivePath === '') {
+                fVirtualPath = `/${f.name}`;
+            } else if (effectivePath.endsWith('/') || effectivePath.endsWith('\\')) {
+                fVirtualPath = `${effectivePath}${f.name}`;
+            } else {
+                fVirtualPath = `${effectivePath}/${f.name}`;
+            }
             let resolvedF = '';
             try { resolvedF = resolveFilePath(req, fVirtualPath); } catch (e) {}
             
@@ -913,6 +923,24 @@ router.get('/list', async (req, res) => {
                 lockerId: matchingLocker ? matchingLocker.id : null
             };
         });
+
+        // If at Linux root '/', also include database network shares
+        if (process.platform !== 'win32' && (effectivePath === '/' || !targetPath)) {
+            try {
+                const sharesRes = await db.query('SELECT label, path, type FROM network_shares');
+                sharesRes.rows.forEach(row => {
+                    mappedFiles.push({
+                        name: `[${row.type || 'Share'}] ${row.label}`,
+                        isDirectory: true,
+                        size: 0,
+                        modified: new Date(),
+                        path: row.path,
+                        isShare: true
+                    });
+                });
+            } catch (_) {}
+        }
+
         res.json(mappedFiles);
     } catch (err) {
         logger.error(`[Files Routes] List failed: ${err.message}`);
