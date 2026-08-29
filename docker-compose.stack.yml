@@ -1,12 +1,36 @@
 version: '3.8'
 
 services:
+  # BunkerWeb OWASP Core Rule Set Reverse Proxy & Web Application Firewall
+  bunkerweb:
+    image: bunkerity/bunkerweb:1.5.8
+    container_name: nexadisk-waf
+    restart: always
+    ports:
+      - "80:8080"
+      - "443:8443"
+    env_file:
+      - bunkerweb.env
+    environment:
+      - SERVER_NAME=localhost
+      - REVERSE_PROXY_URL=/
+      - REVERSE_PROXY_HOST=http://nexadisk-master:5000
+    volumes:
+      - bw-data:/var/lib/bunkerweb
+      - ./nginx/bunkerweb.conf:/etc/bunkerweb/custom-configs/nexadisk-stream.conf:ro
+    depends_on:
+      - nexadisk-master
+    networks:
+      - nexadisk-net
+
   # NexaDisk Master Storage Server & Web UI (Prebuilt Image Mode)
   nexadisk-master:
     image: ghcr.io/ramhomelabs-art/homecloud:latest
     container_name: nexadisk-master
     hostname: debian-master
     restart: always
+    expose:
+      - "5000"
     ports:
       - "5000:5000"
     environment:
@@ -75,6 +99,7 @@ services:
       - nexadisk-net
 
 volumes:
+  bw-data:
   nexadisk-data:
   nexadisk-trash:
   nexadisk-profiles:

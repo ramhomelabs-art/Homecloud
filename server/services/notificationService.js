@@ -10,7 +10,6 @@ class NotificationService {
     constructor() {
         this.activities = inAppActivities;
         this.registerEventListeners();
-        this.loadPersistedAlerts();
     }
 
     async loadPersistedAlerts() {

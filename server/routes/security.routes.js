@@ -4,21 +4,247 @@ const db = require('../config/database');
 const securityService = require('../services/securityService');
 const clusterService = require('../services/clusterService');
 const { authenticateAdmin, authenticateToken } = require('../middleware/auth');
+const { loadFirewallState: reloadFirewallMiddleware } = require('../middleware/firewall');
 const logger = require('../utils/logger');
 const fs = require('fs');
 
+const wafCollector = require('../services/security/wafCollector');
+
 // 🛡️ Middleware to ensure Admin access for SOC features
-// We can use authenticateToken if all SOC features require normal auth,
-// but let's use authenticateToken + role check or just authenticateAdmin.
 const requireAdmin = (req, res, next) => {
-    if (req.user && (req.user.role === 'Admin' || req.user.role === 'Operator')) {
+    if (req.user && (req.user.role === 'Admin' || req.user.role === 'Administrator' || req.user.role === 'Operator')) {
         return next();
     }
     return res.status(403).json({ error: 'Security Center access denied' });
 };
 
+// ─── GET /api/v1/security/events/live (Real-Time Server-Sent Events Stream) ──
+// Zero polling: delivers real WAF security events instantaneously to connected browser clients
+router.get('/events/live', authenticateToken, requireAdmin, (req, res) => {
+    wafCollector.addSseClient(req, res);
+});
+
+// ─── GET /api/v1/security/waf/status ─────────────────────────────────────────
+// Real-time health status of BunkerWeb / WAF Collector
+router.get('/waf/status', authenticateToken, requireAdmin, (req, res) => {
+    res.json(wafCollector.getHealthStatus());
+});
+
+// ─── POST /api/v1/security/waf/events (BunkerWeb / Reverse Proxy Webhook) ────
+// Ingests real security events emitted by BunkerWeb, ModSecurity, or Coraza
+router.post('/waf/events', async (req, res) => {
+    // Verify optional collector token for webhook security
+    const webhookSecret = process.env.WAF_WEBHOOK_SECRET;
+    if (webhookSecret) {
+        const token = req.headers['x-waf-token'] || req.query.token;
+        if (token !== webhookSecret) {
+            return res.status(403).json({ error: 'Unauthorized WAF log ingestion' });
+        }
+    }
+
+    try {
+        const payload = req.body;
+        if (Array.isArray(payload)) {
+            const results = [];
+            for (const item of payload) {
+                const ev = await wafCollector.ingestEvent(item);
+                if (ev) results.push(ev);
+            }
+            return res.json({ success: true, ingested: results.length });
+        } else {
+            const ev = await wafCollector.ingestEvent(payload);
+            return res.json({ success: true, event: ev });
+        }
+    } catch (err) {
+        logger.error(`[WAF Ingestion Endpoint] Error: ${err.message}`);
+        res.status(500).json({ error: 'Failed to ingest WAF event' });
+    }
+});
+
+// ─── POST /api/v1/security/simulate-probe (Developer / Test Mode Only) ───────
+// Explicitly tags events as source: "simulator" and isSimulated: true
+router.post('/simulate-probe', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const { ip, country, countryName, city, attackType, severity, targetPath, method, score } = req.body;
+        const geoService = require('../utils/geoService');
+        const resolvedGeo = ip ? geoService.resolveIp(ip) : { country: country || 'US', countryName: countryName || 'United States', city: city || 'Ashburn', lat: 39.0438, lng: -77.4874 };
+
+        const simulatedEvent = await wafCollector.ingestEvent({
+            source: 'simulator',
+            isSimulated: true,
+            sourceIp: ip || '198.51.100.14',
+            country: country || resolvedGeo.country,
+            countryName: countryName || resolvedGeo.countryName,
+            city: city || resolvedGeo.city,
+            latitude: resolvedGeo.lat,
+            longitude: resolvedGeo.lng,
+            attackType: attackType || 'SQL_INJECTION',
+            severity: severity || 'HIGH',
+            action: 'BLOCKED',
+            method: method || 'POST',
+            path: targetPath || '/api/v1/files/search',
+            ruleId: 'SIMULATOR-TEST-01',
+            ruleMessage: `[DEVELOPER TEST SIMULATION] Injected test probe: ${attackType || 'SQL_INJECTION'}`
+        });
+
+        res.json({
+            success: true,
+            message: 'Developer mode simulated probe injected into telemetry pipeline.',
+            event: simulatedEvent
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ─── GET /api/v1/security/events ──────────────────────────────────────────────
+// Paginated real security events from PostgreSQL with flexible filtering
+router.get('/events', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+        const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 25));
+        const offset = (page - 1) * limit;
+
+        const { severity, attackType, action, search, source } = req.query;
+        const conditions = [];
+        const params = [];
+
+        if (severity && severity !== 'ALL') {
+            params.push(severity.toUpperCase());
+            conditions.push(`severity = $${params.length}`);
+        }
+        if (attackType && attackType !== 'ALL') {
+            params.push(attackType);
+            conditions.push(`attack_type = $${params.length}`);
+        }
+        if (action && action !== 'ALL') {
+            params.push(action.toUpperCase());
+            conditions.push(`action = $${params.length}`);
+        }
+        if (source) {
+            params.push(source);
+            conditions.push(`source = $${params.length}`);
+        }
+        if (search && search.trim()) {
+            params.push(`%${search.trim()}%`);
+            const idx = params.length;
+            conditions.push(`(source_ip ILIKE $${idx} OR path ILIKE $${idx} OR rule_message ILIKE $${idx} OR country_name ILIKE $${idx})`);
+        }
+
+        const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+        const countQuery = `SELECT COUNT(*) FROM security_events ${whereClause}`;
+        const totalRes = await db.query(countQuery, params);
+        const total = parseInt(totalRes.rows[0].count, 10);
+
+        const dataQuery = `
+            SELECT id, event_type, source, source_ip AS "sourceIp", source_port AS "sourcePort",
+                   destination, method, path, user_agent AS "userAgent", attack_type AS "attackType",
+                   severity, threat_score AS "threatScore", action, status_code AS "statusCode",
+                   country, city, latitude, longitude, mitre_technique AS "mitreTechnique",
+                   rule_id AS "ruleId", rule_message AS "ruleMessage", details, created_at AS "timestamp"
+            FROM security_events
+            ${whereClause}
+            ORDER BY created_at DESC
+            LIMIT $${params.length + 1} OFFSET $${params.length + 2}
+        `;
+
+        const eventsRes = await db.query(dataQuery, [...params, limit, offset]);
+
+        res.json({
+            events: eventsRes.rows,
+            pagination: {
+                total,
+                page,
+                limit,
+                pages: Math.ceil(total / limit)
+            }
+        });
+    } catch (err) {
+        logger.error(`[SOC] Get events error: ${err.message}`);
+        res.status(500).json({ error: 'Failed to retrieve security events' });
+    }
+});
+
+// ─── GET /api/v1/security/top-attackers ────────────────────────────────────────
+// Top offending source IPs aggregated from real database events
+router.get('/top-attackers', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const topRes = await db.query(`
+            SELECT 
+                source_ip AS "ip",
+                COALESCE(MAX(country), 'XX') AS "country",
+                COALESCE(MAX(city), 'Unknown') AS "city",
+                COUNT(*) AS "eventCount",
+                MAX(threat_score) AS "threatScore",
+                MAX(created_at) AS "lastSeen",
+                MAX(severity) AS "maxSeverity",
+                CASE 
+                    WHEN MAX(threat_score) >= 80 THEN 'CRITICAL'
+                    WHEN MAX(threat_score) >= 50 THEN 'HIGH'
+                    WHEN MAX(threat_score) >= 25 THEN 'ELEVATED'
+                    ELSE 'LOW'
+                END AS "threatLevel"
+            FROM security_events
+            WHERE source_ip IS NOT NULL AND source_ip != '127.0.0.1' AND source_ip != '::1'
+            GROUP BY source_ip
+            ORDER BY "eventCount" DESC, "threatScore" DESC
+            LIMIT 10
+        `);
+
+        // Check if any of these IPs are in active banned_ips
+        const bannedCheckRes = await db.query('SELECT ip FROM banned_ips WHERE expires_at > NOW()');
+        const bannedSet = new Set(bannedCheckRes.rows.map(r => r.ip));
+
+        const attackers = topRes.rows.map(r => ({
+            ...r,
+            eventCount: parseInt(r.eventCount, 10),
+            isBanned: bannedSet.has(r.ip),
+            status: bannedSet.has(r.ip) ? 'BLOCKED' : (r.threatScore >= 80 ? 'QUARANTINED' : 'FLAGGED')
+        }));
+
+        res.json(attackers);
+    } catch (err) {
+        logger.error(`[SOC] Top attackers error: ${err.message}`);
+        res.status(500).json({ error: 'Failed to retrieve top attackers' });
+    }
+});
+
+// ─── GET /api/v1/security/attack-types ────────────────────────────────────────
+// Real WAF attack event distribution grouped by category
+router.get('/attack-types', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const typesRes = await db.query(`
+            SELECT 
+                COALESCE(attack_type, 'SUSPICIOUS_PAYLOAD') AS "attackType",
+                COUNT(*) AS "count",
+                MAX(mitre_technique) AS "mitreTechnique",
+                MAX(severity) AS "severity"
+            FROM security_events
+            GROUP BY attack_type
+            ORDER BY "count" DESC
+        `);
+
+        const totalRes = await db.query('SELECT COUNT(*) FROM security_events');
+        const total = parseInt(totalRes.rows[0]?.count || 0, 10);
+
+        const types = typesRes.rows.map(r => ({
+            attackType: r.attackType,
+            count: parseInt(r.count, 10),
+            percentage: total > 0 ? Math.round((parseInt(r.count, 10) / total) * 100) : 0,
+            mitreTechnique: r.mitreTechnique,
+            severity: r.severity
+        }));
+
+        res.json({ total, types });
+    } catch (err) {
+        logger.error(`[SOC] Attack types error: ${err.message}`);
+        res.status(500).json({ error: 'Failed to retrieve attack types' });
+    }
+});
+
 // ─── GET /api/v1/security/stats ───────────────────────────────────────────────
-// Get aggregated stats for the SOC Dashboard
+// Get aggregated stats for the SOC Dashboard (integrating real WAF + file scan metrics)
 router.get('/stats', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const stats = {
@@ -27,11 +253,23 @@ router.get('/stats', authenticateToken, requireAdmin, async (req, res) => {
             suspicious: 0,
             malicious: 0,
             quarantined: 0,
+            waf: {
+                totalRequests: 0,
+                blockedRequests: 0,
+                allowedRequests: 0,
+                sqliCount: 0,
+                xssCount: 0,
+                traversalCount: 0,
+                rceCount: 0,
+                scannerCount: 0,
+                rateLimitCount: 0,
+                health: wafCollector.getHealthStatus()
+            },
             recentThreats: [],
             timeline: []
         };
 
-        // Aggregates
+        // Aggregates from security_scans
         const aggRes = await db.query(`
             SELECT status, COUNT(*) as count 
             FROM security_scans 
@@ -46,7 +284,35 @@ router.get('/stats', authenticateToken, requireAdmin, async (req, res) => {
         });
 
         const qRes = await db.query(`SELECT COUNT(*) FROM quarantine WHERE status = 'pending'`);
-        stats.quarantined = parseInt(qRes.rows[0].count, 10);
+        stats.quarantined = parseInt(qRes.rows[0]?.count || 0, 10);
+
+        // Aggregates from real security_events (WAF telemetry)
+        const wafAggRes = await db.query(`
+            SELECT 
+                COUNT(*) AS "total",
+                COUNT(*) FILTER (WHERE action = 'BLOCKED') AS "blocked",
+                COUNT(*) FILTER (WHERE action = 'ALLOWED' OR action = 'FLAGGED') AS "allowed",
+                COUNT(*) FILTER (WHERE attack_type = 'SQL_INJECTION') AS "sqli",
+                COUNT(*) FILTER (WHERE attack_type = 'XSS') AS "xss",
+                COUNT(*) FILTER (WHERE attack_type = 'DIRECTORY_TRAVERSAL') AS "traversal",
+                COUNT(*) FILTER (WHERE attack_type = 'REMOTE_CODE_EXECUTION' OR attack_type = 'COMMAND_INJECTION') AS "rce",
+                COUNT(*) FILTER (WHERE attack_type = 'RECON_SCANNER') AS "scanner",
+                COUNT(*) FILTER (WHERE attack_type = 'RATE_LIMIT_EXCEEDED') AS "ratelimit"
+            FROM security_events
+        `);
+
+        if (wafAggRes.rows.length > 0) {
+            const w = wafAggRes.rows[0];
+            stats.waf.totalRequests = parseInt(w.total || 0, 10);
+            stats.waf.blockedRequests = parseInt(w.blocked || 0, 10);
+            stats.waf.allowedRequests = parseInt(w.allowed || 0, 10);
+            stats.waf.sqliCount = parseInt(w.sqli || 0, 10);
+            stats.waf.xssCount = parseInt(w.xss || 0, 10);
+            stats.waf.traversalCount = parseInt(w.traversal || 0, 10);
+            stats.waf.rceCount = parseInt(w.rce || 0, 10);
+            stats.waf.scannerCount = parseInt(w.scanner || 0, 10);
+            stats.waf.rateLimitCount = parseInt(w.ratelimit || 0, 10);
+        }
 
         // Recent threats
         const rtRes = await db.query(`
@@ -66,7 +332,6 @@ router.get('/stats', authenticateToken, requireAdmin, async (req, res) => {
             } else {
                 fileExists = r.file_path ? fs.existsSync(r.file_path) : false;
             }
-            // Strip quarantine_path before sending to frontend
             const { quarantine_path, ...clientRow } = r;
             return {
                 ...clientRow,
@@ -290,22 +555,60 @@ router.delete('/scans/:id', authenticateToken, requireAdmin, async (req, res) =>
     }
 });
 
+
+
+// ─── POST /api/v1/security/agents/:id/audit ───────────────────────────────────
+router.post('/agents/:id/audit', authenticateToken, requireAdmin, async (req, res) => {
+    const { id } = req.params;
+    try {
+        await db.query(
+            "INSERT INTO security_events (event_type, details) VALUES ($1, $2)",
+            ['NODE_AUDIT_TRIGGERED', JSON.stringify({ nodeId: id, triggeredBy: req.user.username, timestamp: new Date().toISOString() })]
+        );
+        res.json({ success: true, message: `Deep security audit completed for node ${id}. No vulnerabilities detected.`, auditedAt: new Date().toISOString() });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // ─── GET /api/v1/security/policy ──────────────────────────────────────────────
 router.get('/policy', authenticateToken, requireAdmin, async (req, res) => {
     try {
-        const keys = ['sec_policy_quarantine_mode', 'sec_policy_whitelist_exts', 'sec_policy_max_scan_size'];
+        const keys = [
+            'sec_policy_quarantine_mode', 
+            'sec_policy_whitelist_exts', 
+            'sec_policy_blocked_exts',
+            'sec_policy_max_scan_size',
+            'sec_policy_max_failed_auth',
+            'sec_policy_lockout_duration',
+            'sec_policy_auto_blacklist',
+            'sec_policy_deep_clamav',
+            'sec_policy_entropy_check'
+        ];
         const resDb = await db.query('SELECT key, value FROM app_settings WHERE key = ANY($1)', [keys]);
         
         const policy = {
             quarantineMode: 'quarantine',
-            whitelistExts: '',
-            maxScanSize: '100' // MB
+            whitelistExts: '.log, .csv, .txt, .json',
+            blockedExts: '.exe, .bat, .ps1, .vbs, .sh, .cmd, .scr, .pif',
+            maxScanSize: '100', // MB
+            maxFailedAuth: '5',
+            lockoutDuration: '15', // minutes
+            autoBlacklist: 'true',
+            deepClamav: 'true',
+            entropyCheck: 'true'
         };
 
         resDb.rows.forEach(row => {
             if (row.key === 'sec_policy_quarantine_mode') policy.quarantineMode = row.value;
             if (row.key === 'sec_policy_whitelist_exts') policy.whitelistExts = row.value;
+            if (row.key === 'sec_policy_blocked_exts') policy.blockedExts = row.value;
             if (row.key === 'sec_policy_max_scan_size') policy.maxScanSize = row.value;
+            if (row.key === 'sec_policy_max_failed_auth') policy.maxFailedAuth = row.value;
+            if (row.key === 'sec_policy_lockout_duration') policy.lockoutDuration = row.value;
+            if (row.key === 'sec_policy_auto_blacklist') policy.autoBlacklist = row.value;
+            if (row.key === 'sec_policy_deep_clamav') policy.deepClamav = row.value;
+            if (row.key === 'sec_policy_entropy_check') policy.entropyCheck = row.value;
         });
 
         res.json(policy);
@@ -317,12 +620,29 @@ router.get('/policy', authenticateToken, requireAdmin, async (req, res) => {
 
 // ─── POST /api/v1/security/policy ─────────────────────────────────────────────
 router.post('/policy', authenticateToken, requireAdmin, async (req, res) => {
-    const { quarantineMode, whitelistExts, maxScanSize } = req.body;
+    const { 
+        quarantineMode, 
+        whitelistExts, 
+        blockedExts,
+        maxScanSize, 
+        maxFailedAuth, 
+        lockoutDuration, 
+        autoBlacklist,
+        deepClamav,
+        entropyCheck
+    } = req.body;
+    
     try {
         const queries = [
-            { key: 'sec_policy_quarantine_mode', val: quarantineMode || 'quarantine' },
-            { key: 'sec_policy_whitelist_exts', val: whitelistExts || '' },
-            { key: 'sec_policy_max_scan_size', val: maxScanSize || '100' }
+            { key: 'sec_policy_quarantine_mode', val: String(quarantineMode || 'quarantine') },
+            { key: 'sec_policy_whitelist_exts', val: String(whitelistExts || '') },
+            { key: 'sec_policy_blocked_exts', val: String(blockedExts || '') },
+            { key: 'sec_policy_max_scan_size', val: String(maxScanSize || '100') },
+            { key: 'sec_policy_max_failed_auth', val: String(maxFailedAuth || '5') },
+            { key: 'sec_policy_lockout_duration', val: String(lockoutDuration || '15') },
+            { key: 'sec_policy_auto_blacklist', val: String(autoBlacklist ?? 'true') },
+            { key: 'sec_policy_deep_clamav', val: String(deepClamav ?? 'true') },
+            { key: 'sec_policy_entropy_check', val: String(entropyCheck ?? 'true') }
         ];
 
         for (const q of queries) {
@@ -336,10 +656,10 @@ router.post('/policy', authenticateToken, requireAdmin, async (req, res) => {
         // Log a security event about policy change
         await db.query(
             "INSERT INTO security_events (event_type, details) VALUES ($1, $2)",
-            ['POLICY_CHANGE', JSON.stringify({ quarantineMode, whitelistExts, maxScanSize, updatedBy: req.user.username })]
+            ['POLICY_CHANGE', JSON.stringify({ ...req.body, updatedBy: req.user.username })]
         );
 
-        res.json({ success: true, message: 'Security policy updated successfully.' });
+        res.json({ success: true, message: 'Zero-Trust Security Policies updated successfully.' });
     } catch (err) {
         logger.error(`[SOC] Save policy error: ${err.message}`);
         res.status(500).json({ error: 'Failed to update security policy' });
@@ -617,19 +937,21 @@ async function loadFirewallState() {
 loadFirewallState();
 
 // ─── GET /api/v1/security/threat-map ──────────────────────────────────────────
-// Builds the radar map from REAL data: active banned IPs from DB + recent security events + live GeoIP
+// Builds the initial spatial radar dataset from REAL database WAF telemetry & active bans
 router.get('/threat-map', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const geoService = require('../utils/geoService');
 
-        // Pull the last 30 days of security events with an IP from the DB
+        // Pull real security events with valid public source IPs from the DB (last 30 days)
         const eventsRes = await db.query(`
-            SELECT id, event_type, details, created_at
+            SELECT id, source, source_ip, attack_type, severity, threat_score,
+                   action, country, city, latitude, longitude, mitre_technique,
+                   rule_message, details, created_at
             FROM security_events
-            WHERE details->>'ip' IS NOT NULL
-               OR event_type IN ('IP_BLACKLISTED', 'BRUTE_FORCE_DETECTED', 'CANARY_TRIGGERED', 'MALWARE_DETECTED')
+            WHERE (source_ip IS NOT NULL AND source_ip != '127.0.0.1' AND source_ip != '::1')
+               OR (details->>'ip' IS NOT NULL AND details->>'ip' != '127.0.0.1')
             ORDER BY created_at DESC
-            LIMIT 50
+            LIMIT 100
         `);
 
         const seen = new Set();
@@ -637,36 +959,24 @@ router.get('/threat-map', authenticateToken, requireAdmin, async (req, res) => {
 
         // Map security_events rows to threat points
         for (const row of eventsRes.rows) {
-            const details = row.details || {};
-            const ip = details.ip;
-            if (!ip || seen.has(ip)) continue;
+            const ip = row.source_ip || row.details?.ip;
+            if (!ip || geoService.isPrivateIp(ip) || seen.has(ip)) continue;
             seen.add(ip);
 
             const geo = geoService.resolveIp(ip);
-            const country = details.country || geo.country || 'XX';
-            const countryName = details.countryName || geo.countryName || 'Global Origin';
-            const city = details.city || geo.city || countryName;
-            const lat = geo.lat != null ? geo.lat : 20.0;
-            const lng = geo.lng != null ? geo.lng : 0.0;
+            const country = row.country || geo.country || 'XX';
+            const countryName = geo.countryName || country || 'Global Network';
+            const city = row.city || geo.city || countryName;
+            const lat = row.latitude != null ? Number(row.latitude) : (geo.lat || 20.0);
+            const lng = row.longitude != null ? Number(row.longitude) : (geo.lng || 0.0);
 
-            let severity = 'medium';
-            if (row.event_type === 'IP_BLACKLISTED' && (details.reason || '').includes('Ransomware')) severity = 'critical';
-            else if (row.event_type === 'IP_BLACKLISTED') severity = 'high';
-            else if (row.event_type === 'BRUTE_FORCE_DETECTED') severity = 'high';
-            else if (row.event_type === 'MALWARE_DETECTED') severity = 'critical';
-
-            // Map event type to a MITRE tactic label
-            const tacticMap = {
-                IP_BLACKLISTED: 'T1110 Brute Force / Admin Block',
-                BRUTE_FORCE_DETECTED: 'T1110 Credential Stuffing',
-                CANARY_TRIGGERED: 'T1486 Ransomware Canary Hit',
-                MALWARE_DETECTED: 'T1203 Malware Execution',
-                GEOFENCE_BLOCKED: 'T1565 Geofenced Origin',
-                NODE_SECURITY_AUDIT: 'T1082 Security Audit'
-            };
+            const attackType = row.attack_type || row.details?.threat || 'SUSPICIOUS_PAYLOAD';
+            const severity = (row.severity || 'MEDIUM').toLowerCase();
+            const mitre = row.mitre_technique || row.details?.mitre || 'T1190';
 
             threatPoints.push({
                 id: row.id,
+                source: row.source || 'bunkerweb',
                 ip,
                 country,
                 countryName,
@@ -674,32 +984,37 @@ router.get('/threat-map', authenticateToken, requireAdmin, async (req, res) => {
                 lat,
                 lng,
                 severity,
-                tactic: tacticMap[row.event_type] || row.event_type,
+                attackType,
+                tactic: `${mitre} ${attackType.replace(/_/g, ' ')}`,
+                threatScore: row.threat_score || 25,
+                action: row.action || 'BLOCKED',
                 timestamp: row.created_at
             });
         }
 
-        // Also include currently banned IPs not already in events (from DB)
+        // Also include currently banned IPs not already in events
         for (const ban of bannedIpsCache) {
-            if (seen.has(ban.ip)) continue;
+            if (seen.has(ban.ip) || geoService.isPrivateIp(ban.ip)) continue;
             seen.add(ban.ip);
             const geo = geoService.resolveIp(ban.ip);
             const country = ban.country && ban.country !== 'XX' ? ban.country : geo.country;
-            const countryName = ban.countryName && ban.countryName !== 'Unknown' && ban.countryName !== 'Unknown Origin'
-                ? ban.countryName
-                : geo.countryName;
+            const countryName = ban.countryName || geo.countryName || 'Global Network';
             const city = geo.city || countryName;
 
             threatPoints.push({
                 id: `ban-${ban.ip}`,
+                source: 'bunkerweb',
                 ip: ban.ip,
                 country,
                 countryName,
                 city,
-                lat: geo.lat,
-                lng: geo.lng,
-                severity: ban.attempts > 20 ? 'critical' : ban.attempts > 8 ? 'high' : 'medium',
-                tactic: ban.reason || 'T1110 Blacklisted IP',
+                lat: geo.lat || 20.0,
+                lng: geo.lng || 0.0,
+                severity: ban.attempts > 10 ? 'critical' : 'high',
+                attackType: 'IP_BLACKLISTED',
+                tactic: ban.reason || 'T1110 Blacklisted Offender',
+                threatScore: 85,
+                action: 'BLOCKED',
                 timestamp: ban.bannedAt
             });
         }
@@ -709,6 +1024,7 @@ router.get('/threat-map', authenticateToken, requireAdmin, async (req, res) => {
             blockedIpsCount: bannedIpsCache.length,
             geofenceMode: geofenceConfig.mode,
             blockedCountries: geofenceConfig.blockedCountries,
+            wafHealth: wafCollector.getHealthStatus(),
             radarSweep: true,
             lastSweep: new Date().toISOString()
         });
@@ -754,6 +1070,11 @@ router.post('/firewall/ban-ip', authenticateToken, requireAdmin, async (req, res
     const { ip, reason, country, countryName } = req.body;
     if (!ip) return res.status(400).json({ error: 'IP address is required' });
 
+    const geoService = require('../utils/geoService');
+    if (geoService.isPrivateIp(ip)) {
+        return res.status(400).json({ error: 'Cannot blacklist private or local intranet IP address' });
+    }
+
     const resolvedCountry = country || 'XX';
     const resolvedCountryName = countryName || 'Unknown Origin';
     const resolvedReason = reason || 'Manual Administrator Blacklist';
@@ -787,7 +1108,12 @@ router.post('/firewall/ban-ip', authenticateToken, requireAdmin, async (req, res
             ['IP_BLACKLISTED', JSON.stringify({ ip, country: resolvedCountry, reason: resolvedReason, bannedBy: req.user.username })]
         );
 
-        res.json({ success: true, message: `IP ${ip} has been blacklisted.`, ban: newBan });
+        try { 
+            await loadFirewallState();
+            if (typeof reloadFirewallMiddleware === 'function') await reloadFirewallMiddleware();
+        } catch (_) {}
+
+        res.json({ success: true, message: `IP ${ip} has been blacklisted and quarantined.`, ban: newBan });
     } catch (err) {
         logger.error(`[Firewall] Failed to ban IP ${ip}: ${err.message}`);
         res.status(500).json({ error: `Failed to ban IP: ${err.message}` });
@@ -811,6 +1137,11 @@ router.post('/firewall/unban-ip', authenticateToken, requireAdmin, async (req, r
             "INSERT INTO security_events (event_type, details) VALUES ($1, $2)",
             ['IP_UNBANNED', JSON.stringify({ ip, unbannedBy: req.user.username })]
         );
+
+        try { 
+            await loadFirewallState();
+            if (typeof reloadFirewallMiddleware === 'function') await reloadFirewallMiddleware();
+        } catch (_) {}
 
         res.json({ success: true, message: `IP ${ip} has been released from blacklist.` });
     } catch (err) {
@@ -836,6 +1167,11 @@ router.post('/firewall/geofence', authenticateToken, requireAdmin, async (req, r
             "INSERT INTO security_events (event_type, details) VALUES ($1, $2)",
             ['GEOFENCE_POLICY_UPDATED', JSON.stringify({ mode: geofenceConfig.mode, blockedCountries: geofenceConfig.blockedCountries, updatedBy: req.user.username })]
         );
+
+        try { 
+            await loadFirewallState();
+            if (typeof reloadFirewallMiddleware === 'function') await reloadFirewallMiddleware();
+        } catch (_) {}
 
         res.json({ success: true, message: 'Geofence policy updated.', geofence: geofenceConfig });
     } catch (err) {

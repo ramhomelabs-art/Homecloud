@@ -1,163 +1,666 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import axios from 'axios';
-import { motion, AnimatePresence } from 'framer-motion';
+import * as maplibregl from 'maplibre-gl';
+import 'maplibre-gl/dist/maplibre-gl.css';
 import { 
-    Globe, ShieldAlert, ShieldCheck, AlertOctagon, Trash2, 
-    Plus, RefreshCw, Radio, Lock, Unlock, Eye, Filter, CheckCircle2, XCircle
+    Globe, Shield, ShieldAlert, ShieldCheck, Lock, Unlock, 
+    AlertTriangle, RefreshCw, Plus, Trash2, Radio, Server,
+    Flame, Zap, Crosshair, CheckCircle2, Copy, Filter, Ban, X,
+    Maximize2, Minimize2, Compass, Layers, Activity, Bot, Bug,
+    Play, RotateCcw, ShieldOff, Terminal, Cpu, Wifi, WifiOff,
+    CheckCircle, AlertOctagon, ArrowUpRight, HelpCircle, Search
 } from 'lucide-react';
 
 const API_BASE = '/api/v1/security';
 
-// Client-side ISO 3166-1 alpha-2 -> country name/city lookup
-// Used as a fallback when the backend has no country metadata stored
-const COUNTRY_LOOKUP = {
-    RU: { name: 'Russia', city: 'Moscow' },
-    DE: { name: 'Germany', city: 'Frankfurt' },
-    CN: { name: 'China', city: 'Beijing' },
-    US: { name: 'United States', city: 'San Jose' },
-    IN: { name: 'India', city: 'Bengaluru' },
-    VN: { name: 'Vietnam', city: 'Hanoi' },
-    NL: { name: 'Netherlands', city: 'Amsterdam' },
-    KP: { name: 'North Korea', city: 'Pyongyang' },
-    IR: { name: 'Iran', city: 'Tehran' },
-    BR: { name: 'Brazil', city: 'Brasília' },
-    NG: { name: 'Nigeria', city: 'Abuja' },
-    UA: { name: 'Ukraine', city: 'Kyiv' },
-    GB: { name: 'United Kingdom', city: 'London' },
-    FR: { name: 'France', city: 'Paris' },
-    TR: { name: 'Turkey', city: 'Istanbul' },
-    PK: { name: 'Pakistan', city: 'Karachi' },
-    BD: { name: 'Bangladesh', city: 'Dhaka' },
-    ID: { name: 'Indonesia', city: 'Jakarta' },
-    PH: { name: 'Philippines', city: 'Manila' },
-    MY: { name: 'Malaysia', city: 'Kuala Lumpur' },
-    SG: { name: 'Singapore', city: 'Singapore' },
-    TH: { name: 'Thailand', city: 'Bangkok' },
-    JP: { name: 'Japan', city: 'Tokyo' },
-    KR: { name: 'South Korea', city: 'Seoul' },
-    AU: { name: 'Australia', city: 'Sydney' },
-    CA: { name: 'Canada', city: 'Toronto' },
-    MX: { name: 'Mexico', city: 'Mexico City' },
-    AR: { name: 'Argentina', city: 'Buenos Aires' },
-    ZA: { name: 'South Africa', city: 'Johannesburg' },
-    EG: { name: 'Egypt', city: 'Cairo' },
-    SA: { name: 'Saudi Arabia', city: 'Riyadh' },
-    AE: { name: 'UAE', city: 'Dubai' },
-    IL: { name: 'Israel', city: 'Tel Aviv' },
-    IT: { name: 'Italy', city: 'Rome' },
-    ES: { name: 'Spain', city: 'Madrid' },
-    PT: { name: 'Portugal', city: 'Lisbon' },
-    PL: { name: 'Poland', city: 'Warsaw' },
-    BE: { name: 'Belgium', city: 'Brussels' },
-    CH: { name: 'Switzerland', city: 'Zurich' },
-    AT: { name: 'Austria', city: 'Vienna' },
-    SE: { name: 'Sweden', city: 'Stockholm' },
-    NO: { name: 'Norway', city: 'Oslo' },
-    FI: { name: 'Finland', city: 'Helsinki' },
-    DK: { name: 'Denmark', city: 'Copenhagen' },
-    RO: { name: 'Romania', city: 'Bucharest' },
-    CZ: { name: 'Czech Republic', city: 'Prague' },
-    HU: { name: 'Hungary', city: 'Budapest' },
-    GR: { name: 'Greece', city: 'Athens' },
-    XX: { name: 'Unknown Origin', city: 'Unknown' },
+const COUNTRY_FLAGS = {
+    US: '🇺🇸', CA: '🇨🇦', GB: '🇬🇧', DE: '🇩🇪', FR: '🇫🇷',
+    NL: '🇳🇱', RU: '🇷🇺', CN: '🇨🇳', IN: '🇮🇳', BR: '🇧🇷',
+    JP: '🇯🇵', KR: '🇰🇷', AU: '🇦🇺', SG: '🇸🇬', VN: '🇻🇳',
+    KP: '🇰🇵', IR: '🇮🇷', UA: '🇺🇦', RO: '🇷🇴', BG: '🇧🇬',
+    LOCAL: '🛡️'
 };
 
-// Resolve display label for a threat point
-const resolveThreatLabel = (threat) => {
-    const code = threat.country || 'XX';
-    const lookup = COUNTRY_LOOKUP[code] || COUNTRY_LOOKUP.XX;
-    const city = (threat.city && threat.city !== 'Unknown') ? threat.city : lookup.city;
-    const countryName = (threat.countryName && threat.countryName !== 'Unknown' && threat.countryName !== 'Unknown Origin') 
-        ? threat.countryName 
-        : lookup.name;
-    return { city, countryName, code };
+const COUNTRY_NAMES = {
+    US: 'United States', CA: 'Canada', GB: 'United Kingdom', DE: 'Germany', FR: 'France',
+    NL: 'Netherlands', RU: 'Russia', CN: 'China', IN: 'India', BR: 'Brazil',
+    JP: 'Japan', KR: 'South Korea', AU: 'Australia', SG: 'Singapore', VN: 'Vietnam',
+    KP: 'North Korea', IR: 'Iran', UA: 'Ukraine', RO: 'Romania', BG: 'Bulgaria',
+    LOCAL: 'Local Intranet'
 };
+
+// Protected Datacenter Node (Primary Master Hub)
+const PROTECTED_NODE = {
+    id: 'protected-cluster-node',
+    name: 'Protected Enterprise Cluster (Master HQ)',
+    country: 'India',
+    countryCode: 'IN',
+    city: 'Bangalore / Datacenter',
+    ip: '10.10.20.166 (Zero-Trust LAN)',
+    lng: 77.5946,
+    lat: 12.9716,
+    status: 'ONLINE_SHIELD_ACTIVE'
+};
+
+// Severity color palette
+const SEVERITY_COLORS = {
+    critical: '#ef4444',
+    high: '#f97316',
+    medium: '#f59e0b',
+    low: '#06b6d4',
+    bot: '#a855f7',
+    clean: '#10b981',
+    trusted: '#10b981'
+};
+
+// Interpolate curved geographic arc points between origin and destination
+function generateArcPoints(start, end, numPoints = 60) {
+    const points = [];
+    const [lng1, lat1] = start;
+    const [lng2, lat2] = end;
+
+    const midLng = (lng1 + lng2) / 2;
+    const distance = Math.hypot(lng2 - lng1, lat2 - lat1);
+    const altitude = Math.min(distance * 0.25, 32);
+    const midLat = (lat1 + lat2) / 2 + altitude;
+
+    for (let i = 0; i <= numPoints; i++) {
+        const t = i / numPoints;
+        const lng = (1 - t) * (1 - t) * lng1 + 2 * (1 - t) * t * midLng + t * t * lng2;
+        const lat = (1 - t) * (1 - t) * lat1 + 2 * (1 - t) * t * midLat + t * t * lat2;
+        points.push([lng, lat]);
+    }
+    return points;
+}
 
 const AttackGeoMap = ({ showToast }) => {
-    const [threatMapData, setThreatMapData] = useState(null);
+    const mapContainerRef = useRef(null);
+    const mapInstanceRef = useRef(null);
+    const animFrameRef = useRef(null);
+    const sseRef = useRef(null);
+
+    const [realThreats, setRealThreats] = useState([]);
+    const [simulatedThreats, setSimulatedThreats] = useState([]);
+    const [simulatingType, setSimulatingType] = useState(null);
     const [bannedIps, setBannedIps] = useState([]);
-    const [geofence, setGeofence] = useState({ mode: 'whitelist_all', blockedCountries: [] });
+    const [geofence, setGeofence] = useState({ mode: 'disabled', blockedCountries: ['RU', 'KP', 'IR', 'CN'] });
     const [loading, setLoading] = useState(true);
     const [selectedThreat, setSelectedThreat] = useState(null);
-
-    // Manual Ban Form
-    const [manualIp, setManualIp] = useState('');
-    const [manualReason, setManualReason] = useState('');
-    const [manualCountry, setManualCountry] = useState('US');
-    const [banning, setBanning] = useState(false);
+    const [hoveredThreat, setHoveredThreat] = useState(null);
     const [showBanModal, setShowBanModal] = useState(false);
+    const [manualIp, setManualIp] = useState('');
+    const [manualReason, setManualReason] = useState('Suspicious WAF reconnaissance probe');
+    const [banDuration, setBanDuration] = useState('24');
+    const [banning, setBanning] = useState(false);
+    const [searchFilter, setSearchFilter] = useState('');
+    const [isFullscreen, setIsFullscreen] = useState(false);
+    const [is3dPitch, setIs3dPitch] = useState(false);
+    const [activeFilterTab, setActiveFilterTab] = useState('all'); // 'all' | 'bots' | 'exploits' | 'quarantined'
+    
+    // WAF Collector Health Telemetry
+    const [wafHealth, setWafHealth] = useState({
+        status: 'ONLINE',
+        totalProcessed: 0,
+        blockedCount: 0,
+        allowedCount: 0,
+        lastEventAt: null
+    });
 
-    const fetchThreatData = async (silent = false) => {
+    // Incursion Stream Feed
+    const [incursionLogs, setIncursionLogs] = useState([]);
+
+    // Fetch initial historical spatial threats from database
+    const fetchThreatData = useCallback(async (silent = false) => {
         if (!silent) setLoading(true);
         try {
             const token = localStorage.getItem('token');
             const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
-            const [mapRes, banRes] = await Promise.all([
+            const [mapRes, bansRes, healthRes] = await Promise.all([
                 axios.get(`${API_BASE}/threat-map`, { headers }),
-                axios.get(`${API_BASE}/firewall/banned-ips`, { headers })
+                axios.get(`${API_BASE}/firewall/banned-ips`, { headers }),
+                axios.get(`${API_BASE}/waf/status`, { headers }).catch(() => ({ data: { status: 'ONLINE' } }))
             ]);
 
-            setThreatMapData(mapRes.data);
-            setBannedIps(banRes.data.bannedIps || []);
-            setGeofence(banRes.data.geofence || { mode: 'whitelist_all', blockedCountries: [] });
+            setRealThreats(mapRes.data.activeThreats || []);
+            setBannedIps(bansRes.data.bannedIps || []);
+            setGeofence(bansRes.data.geofence || { mode: 'disabled', blockedCountries: ['RU', 'KP', 'IR', 'CN'] });
+            setWafHealth(healthRes.data || { status: 'ONLINE' });
         } catch (err) {
-            console.error('Failed to fetch threat map data', err);
+            console.error('Failed to fetch threat map telemetry:', err);
         } finally {
-            if (!silent) setLoading(false);
+            setLoading(false);
+        }
+    }, []);
+
+    // ─── Real-Time Server-Sent Events (SSE) Live Stream ───
+    useEffect(() => {
+        fetchThreatData();
+
+        const token = localStorage.getItem('token') || '';
+        const sseUrl = `${API_BASE}/events/live?token=${encodeURIComponent(token)}`;
+        const es = new EventSource(sseUrl);
+        sseRef.current = es;
+
+        es.addEventListener('init', (e) => {
+            try {
+                const data = JSON.parse(e.data);
+                setWafHealth(prev => ({ ...prev, status: data.status || 'ONLINE' }));
+            } catch (_) {}
+        });
+
+        es.addEventListener('waf_event', (e) => {
+            try {
+                const ev = JSON.parse(e.data);
+                if (!ev || !ev.sourceIp) return;
+
+                // Add or update real threat point on map
+                setRealThreats(prev => {
+                    const existingIdx = prev.findIndex(t => t.ip === ev.sourceIp);
+                    const updatedItem = {
+                        id: ev.id,
+                        source: ev.source || 'bunkerweb',
+                        isSimulated: Boolean(ev.isSimulated || ev.source === 'simulator'),
+                        ip: ev.sourceIp,
+                        country: ev.country || 'XX',
+                        countryName: ev.countryName || COUNTRY_NAMES[ev.country] || 'Global Network',
+                        city: ev.city || 'Unknown',
+                        lat: ev.latitude != null ? Number(ev.latitude) : 20.0,
+                        lng: ev.longitude != null ? Number(ev.longitude) : 0.0,
+                        severity: (ev.severity || 'MEDIUM').toLowerCase(),
+                        attackType: ev.attackType || 'SUSPICIOUS_PAYLOAD',
+                        tactic: `${ev.mitreTechnique || 'T1190'} ${ev.attackType || 'Exploit'}`,
+                        threatScore: ev.threatScore || 40,
+                        action: ev.action || 'BLOCKED',
+                        path: ev.path || '/',
+                        timestamp: ev.timestamp || new Date().toISOString()
+                    };
+
+                    if (existingIdx >= 0) {
+                        const copy = [...prev];
+                        copy[existingIdx] = updatedItem;
+                        return copy;
+                    } else {
+                        return [updatedItem, ...prev].slice(0, 80);
+                    }
+                });
+
+                // Add to live incursion log stream
+                setIncursionLogs(prev => [
+                    {
+                        id: ev.id,
+                        time: new Date(ev.timestamp || Date.now()).toLocaleTimeString(),
+                        ip: ev.sourceIp,
+                        country: ev.country,
+                        countryName: ev.countryName,
+                        type: ev.attackType,
+                        verdict: ev.action,
+                        score: ev.threatScore,
+                        path: ev.path,
+                        severity: ev.severity,
+                        source: ev.source,
+                        isSimulated: Boolean(ev.isSimulated || ev.source === 'simulator')
+                    },
+                    ...prev
+                ].slice(0, 25));
+
+                // Update WAF counter stats
+                setWafHealth(prev => ({
+                    ...prev,
+                    status: 'ONLINE',
+                    totalProcessed: (prev.totalProcessed || 0) + 1,
+                    blockedCount: ev.action === 'BLOCKED' ? (prev.blockedCount || 0) + 1 : prev.blockedCount,
+                    allowedCount: ev.action !== 'BLOCKED' ? (prev.allowedCount || 0) + 1 : prev.allowedCount,
+                    lastEventAt: ev.timestamp || new Date().toISOString()
+                }));
+
+            } catch (err) {
+                console.error('[AttackGeoMap] Error processing live WAF event:', err);
+            }
+        });
+
+        es.onerror = () => {
+            setWafHealth(prev => ({ ...prev, status: 'ONLINE' }));
+        };
+
+        return () => {
+            es.close();
+        };
+    }, [fetchThreatData]);
+
+    // Combine real database threats with active incursion simulations
+    const allThreats = useMemo(() => {
+        let combined = [...realThreats, ...simulatedThreats];
+
+        if (activeFilterTab === 'bots') {
+            combined = combined.filter(t => t.severity === 'bot' || (t.attackType && t.attackType.toLowerCase().includes('bot')) || (t.tactic && t.tactic.toLowerCase().includes('bot')));
+        } else if (activeFilterTab === 'exploits') {
+            combined = combined.filter(t => t.severity === 'critical' || t.severity === 'high');
+        } else if (activeFilterTab === 'quarantined') {
+            const bannedIpSet = new Set(bannedIps.map(b => b.ip));
+            combined = combined.filter(t => bannedIpSet.has(t.ip));
+        }
+
+        return combined;
+    }, [realThreats, simulatedThreats, activeFilterTab, bannedIps]);
+
+    // Format GeoJSON Data Layers for MapLibre
+    const geoJsonData = useMemo(() => {
+        const threatFeatures = allThreats.map(t => ({
+            type: 'Feature',
+            id: t.id,
+            geometry: {
+                type: 'Point',
+                coordinates: [Number(t.lng) || 0, Number(t.lat) || 0]
+            },
+            properties: {
+                id: t.id,
+                ip: t.ip,
+                source: t.source || 'bunkerweb',
+                isSimulated: Boolean(t.isSimulated),
+                country: t.country || 'XX',
+                countryName: t.countryName || COUNTRY_NAMES[t.country] || 'Global',
+                city: t.city || 'Unknown',
+                severity: t.severity || 'medium',
+                color: SEVERITY_COLORS[t.severity] || SEVERITY_COLORS.medium,
+                tactic: t.tactic || 'WAF Threat Incursion',
+                threatScore: t.threatScore || 30,
+                action: t.action || 'BLOCKED',
+                timestamp: t.timestamp || new Date().toISOString()
+            }
+        }));
+
+        const protectedFeature = {
+            type: 'Feature',
+            geometry: {
+                type: 'Point',
+                coordinates: [PROTECTED_NODE.lng, PROTECTED_NODE.lat]
+            },
+            properties: {
+                name: PROTECTED_NODE.name,
+                ip: PROTECTED_NODE.ip,
+                status: PROTECTED_NODE.status,
+                color: '#10b981'
+            }
+        };
+
+        const arcFeatures = allThreats.map((t, idx) => {
+            const start = [Number(t.lng) || 0, Number(t.lat) || 0];
+            const end = [PROTECTED_NODE.lng, PROTECTED_NODE.lat];
+            const arcCoords = generateArcPoints(start, end, 60);
+
+            return {
+                type: 'Feature',
+                id: `arc-${t.id || idx}`,
+                geometry: {
+                    type: 'LineString',
+                    coordinates: arcCoords
+                },
+                properties: {
+                    id: `arc-${t.id || idx}`,
+                    threatId: t.id,
+                    severity: t.severity || 'medium',
+                    color: SEVERITY_COLORS[t.severity] || SEVERITY_COLORS.medium,
+                    ip: t.ip,
+                    isSimulated: Boolean(t.isSimulated)
+                }
+            };
+        });
+
+        return {
+            threatPoints: { type: 'FeatureCollection', features: threatFeatures },
+            protectedNode: { type: 'FeatureCollection', features: [protectedFeature] },
+            attackArcs: { type: 'FeatureCollection', features: arcFeatures }
+        };
+    }, [allThreats]);
+
+    // Initialize MapLibre GL Map with High-Visibility ArcGIS World Dark Canvas
+    useEffect(() => {
+        if (!mapContainerRef.current) return;
+
+        const darkCanvasStyle = {
+            version: 8,
+            name: 'NexaDisk-Dark-Canvas',
+            sources: {
+                'esri-dark-base': {
+                    type: 'raster',
+                    tiles: [
+                        'https://services.arcgisonline.com/arcgis/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}'
+                    ],
+                    tileSize: 256,
+                    attribution: '© Esri, HERE, Garmin, OpenStreetMap'
+                },
+                'esri-dark-labels': {
+                    type: 'raster',
+                    tiles: [
+                        'https://services.arcgisonline.com/arcgis/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}'
+                    ],
+                    tileSize: 256,
+                    attribution: ''
+                }
+            },
+            layers: [
+                {
+                    id: 'background',
+                    type: 'background',
+                    paint: { 'background-color': '#0d131f' }
+                },
+                {
+                    id: 'esri-dark-layer',
+                    type: 'raster',
+                    source: 'esri-dark-base',
+                    paint: {
+                        'raster-opacity': 0.95,
+                        'raster-contrast': 0.15,
+                        'raster-brightness-max': 0.95
+                    }
+                },
+                {
+                    id: 'esri-labels-layer',
+                    type: 'raster',
+                    source: 'esri-dark-labels',
+                    paint: {
+                        'raster-opacity': 0.75
+                    }
+                }
+            ]
+        };
+
+        const map = new maplibregl.Map({
+            container: mapContainerRef.current,
+            style: darkCanvasStyle,
+            center: [25, 20],
+            zoom: 1.6,
+            minZoom: 1,
+            maxZoom: 14,
+            pitch: is3dPitch ? 45 : 0,
+            attributionControl: false
+        });
+
+        setTimeout(() => {
+            try { map.resize(); } catch (_) {}
+        }, 200);
+
+        map.addControl(new maplibregl.NavigationControl({ showCompass: true, showZoom: false }), 'top-right');
+
+        const setupLayers = () => {
+            if (map.getSource('threat-points-source')) return;
+
+            map.addSource('attack-arcs-source', {
+                type: 'geojson',
+                data: geoJsonData.attackArcs
+            });
+
+            map.addSource('threat-points-source', {
+                type: 'geojson',
+                data: geoJsonData.threatPoints
+            });
+
+            map.addSource('protected-node-source', {
+                type: 'geojson',
+                data: geoJsonData.protectedNode
+            });
+
+            // 1. Attack Arc Glow Layer
+            map.addLayer({
+                id: 'arcs-glow',
+                type: 'line',
+                source: 'attack-arcs-source',
+                paint: {
+                    'line-color': ['get', 'color'],
+                    'line-width': 4.5,
+                    'line-opacity': 0.4,
+                    'line-blur': 3
+                }
+            });
+
+            // 2. Attack Arc Solid Trajectory Line
+            map.addLayer({
+                id: 'arcs-line',
+                type: 'line',
+                source: 'attack-arcs-source',
+                paint: {
+                    'line-color': ['get', 'color'],
+                    'line-width': 2.2,
+                    'line-opacity': 0.95,
+                    'line-dasharray': [2, 2]
+                }
+            });
+
+            // 3. Threat Outer Pulsing Halos
+            map.addLayer({
+                id: 'threat-halos',
+                type: 'circle',
+                source: 'threat-points-source',
+                paint: {
+                    'circle-radius': 20,
+                    'circle-color': ['get', 'color'],
+                    'circle-opacity': 0.28,
+                    'circle-blur': 0.8
+                }
+            });
+
+            // 4. Threat Core Points
+            map.addLayer({
+                id: 'threat-points',
+                type: 'circle',
+                source: 'threat-points-source',
+                paint: {
+                    'circle-radius': 7,
+                    'circle-color': ['get', 'color'],
+                    'circle-stroke-width': 2,
+                    'circle-stroke-color': '#ffffff',
+                    'circle-opacity': 0.98
+                }
+            });
+
+            // 5. Protected Node Big Radar Halo
+            map.addLayer({
+                id: 'protected-halo-outer',
+                type: 'circle',
+                source: 'protected-node-source',
+                paint: {
+                    'circle-radius': 32,
+                    'circle-color': '#10b981',
+                    'circle-opacity': 0.22,
+                    'circle-blur': 0.8
+                }
+            });
+
+            // 6. Protected Node Core
+            map.addLayer({
+                id: 'protected-point',
+                type: 'circle',
+                source: 'protected-node-source',
+                paint: {
+                    'circle-radius': 9,
+                    'circle-color': '#10b981',
+                    'circle-stroke-width': 2.5,
+                    'circle-stroke-color': '#ffffff'
+                }
+            });
+
+            map.on('mouseenter', 'threat-points', (e) => {
+                map.getCanvas().style.cursor = 'pointer';
+                if (e.features && e.features[0]) {
+                    setHoveredThreat(e.features[0].properties);
+                }
+            });
+
+            map.on('mouseleave', 'threat-points', () => {
+                map.getCanvas().style.cursor = '';
+                setHoveredThreat(null);
+            });
+
+            map.on('click', 'threat-points', (e) => {
+                if (e.features && e.features[0]) {
+                    setSelectedThreat(e.features[0].properties);
+                }
+            });
+        };
+
+        map.on('load', setupLayers);
+        map.on('style.load', setupLayers);
+        mapInstanceRef.current = map;
+
+        return () => {
+            map.remove();
+        };
+    }, []);
+
+    // Update map data without re-instantiating
+    useEffect(() => {
+        const map = mapInstanceRef.current;
+        if (!map || !map.isStyleLoaded()) return;
+
+        const threatSrc = map.getSource('threat-points-source');
+        if (threatSrc) threatSrc.setData(geoJsonData.threatPoints);
+
+        const arcSrc = map.getSource('attack-arcs-source');
+        if (arcSrc) arcSrc.setData(geoJsonData.attackArcs);
+
+        const protSrc = map.getSource('protected-node-source');
+        if (protSrc) protSrc.setData(geoJsonData.protectedNode);
+    }, [geoJsonData]);
+
+    // ─── ATTACK & BOT INGESTION SIMULATOR TOOL ───
+    const handleRunSimulation = (type) => {
+        setSimulatingType(type);
+
+        let newBots = [];
+        let newLogs = [];
+
+        if (type === 'botnet') {
+            newBots = [
+                { id: `sim-bot-${Date.now()}-1`, ip: '198.51.100.22', country: 'RU', countryName: 'Russia', city: 'Saint Petersburg', lat: 59.9343, lng: 30.3351, severity: 'bot', tactic: 'DarkGate Botnet Credential Stuffing', attempts: 3200, category: 'bot', attackType: 'BOTNET', timestamp: new Date().toISOString() },
+                { id: `sim-bot-${Date.now()}-2`, ip: '203.0.113.144', country: 'VN', countryName: 'Vietnam', city: 'Hanoi', lat: 21.0285, lng: 105.8542, severity: 'bot', tactic: 'Mirai IoT Ingestion Swarm', attempts: 2840, category: 'bot', attackType: 'BOTNET', timestamp: new Date().toISOString() },
+                { id: `sim-bot-${Date.now()}-3`, ip: '192.0.2.190', country: 'CN', countryName: 'China', city: 'Shenzhen', lat: 22.5431, lng: 114.0579, severity: 'bot', tactic: 'Distributed Brute Force Flood', attempts: 4120, category: 'bot', attackType: 'BOTNET', timestamp: new Date().toISOString() }
+            ];
+            newLogs = [
+                { id: `log-${Date.now()}-1`, time: new Date().toLocaleTimeString(), ip: '198.51.100.22', country: 'RU', type: 'BOTNET_CRED_STUFFING', verdict: 'BLOCKED', score: 92, isSimulated: true },
+                { id: `log-${Date.now()}-2`, time: new Date().toLocaleTimeString(), ip: '203.0.113.144', country: 'VN', type: 'MIRAI_IOT_SWARM', verdict: 'RATE_LIMITED', score: 85, isSimulated: true }
+            ];
+            if (showToast) showToast('🤖 Botnet Incursion Swarm Simulated: 3 Attack Vectors Active', 'info');
+        } else if (type === 'crawler') {
+            newBots = [
+                { id: `sim-crawl-${Date.now()}-1`, ip: '198.51.100.55', country: 'US', countryName: 'United States', city: 'Seattle', lat: 47.6062, lng: -122.3321, severity: 'high', tactic: 'Aggressive WAF Vulnerability Crawler', attempts: 1840, category: 'exploit', attackType: 'RECON_SCANNER', timestamp: new Date().toISOString() },
+                { id: `sim-crawl-${Date.now()}-2`, ip: '203.0.113.62', country: 'FR', countryName: 'France', city: 'Paris', lat: 48.8566, lng: 2.3522, severity: 'high', tactic: 'Dir Traversal & .env Scraper', attempts: 1650, category: 'exploit', attackType: 'DIRECTORY_TRAVERSAL', timestamp: new Date().toISOString() }
+            ];
+            newLogs = [
+                { id: `log-${Date.now()}-3`, time: new Date().toLocaleTimeString(), ip: '198.51.100.55', country: 'US', type: 'WAF_SCANNER_SWEEP', verdict: 'BLOCKED', score: 89, isSimulated: true },
+                { id: `log-${Date.now()}-4`, time: new Date().toLocaleTimeString(), ip: '203.0.113.62', country: 'FR', type: 'ENV_SECRET_PROBE', verdict: 'BLOCKED', score: 94, isSimulated: true }
+            ];
+            if (showToast) showToast('🕷️ WAF Exploit Crawler Simulated: Probing perimeter defenses', 'info');
+        } else if (type === 'ddos') {
+            newBots = [
+                { id: `sim-ddos-${Date.now()}-1`, ip: '192.0.2.210', country: 'IR', countryName: 'Iran', city: 'Tehran', lat: 35.6892, lng: 51.3890, severity: 'critical', tactic: 'Volumetric TCP SYN Flood Spike', attempts: 9400, category: 'exploit', attackType: 'RATE_LIMIT_EXCEEDED', timestamp: new Date().toISOString() },
+                { id: `sim-ddos-${Date.now()}-2`, ip: '198.51.100.177', country: 'KP', countryName: 'North Korea', city: 'Pyongyang', lat: 39.0392, lng: 125.7625, severity: 'critical', tactic: 'HTTP Layer-7 Flood Burst', attempts: 8900, category: 'exploit', attackType: 'RATE_LIMIT_EXCEEDED', timestamp: new Date().toISOString() }
+            ];
+            newLogs = [
+                { id: `log-${Date.now()}-5`, time: new Date().toLocaleTimeString(), ip: '192.0.2.210', country: 'IR', type: 'TCP_SYN_FLOOD', verdict: 'DROPPED', score: 99, isSimulated: true },
+                { id: `log-${Date.now()}-6`, time: new Date().toLocaleTimeString(), ip: '198.51.100.177', country: 'KP', type: 'HTTP_L7_BURST', verdict: 'DROPPED', score: 98, isSimulated: true }
+            ];
+            if (showToast) showToast('⚡ DDoS Volumetric Surge Simulated: Inbound dropping enforced', 'error');
+        }
+
+        setSimulatedThreats(prev => [...prev, ...newBots]);
+        setIncursionLogs(prev => [...newLogs, ...prev].slice(0, 25));
+    };
+
+    const handleClearSimulation = () => {
+        setSimulatedThreats([]);
+        setSimulatingType(null);
+        if (showToast) showToast('Simulation cleared. Baseline telemetry active.', 'info');
+    };
+
+    // Auto-Quarantine All Active Threat Bots
+    const handleAutoQuarantineAll = async () => {
+        const unbannedThreats = allThreats.filter(t => !bannedIps.some(b => b.ip === t.ip));
+        if (unbannedThreats.length === 0) {
+            if (showToast) showToast('All active threat sources are already quarantined.', 'info');
+            return;
+        }
+
+        try {
+            const token = localStorage.getItem('token');
+            const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+            await Promise.all(unbannedThreats.map(t => 
+                axios.post(`${API_BASE}/firewall/ban-ip`, {
+                    ip: t.ip,
+                    reason: t.tactic || 'Auto-Quarantined Malicious Threat',
+                    country: t.country,
+                    countryName: t.countryName,
+                    durationHours: 24
+                }, { headers })
+            ));
+
+            if (showToast) showToast(`🛡️ Auto-Quarantine Activated: ${unbannedThreats.length} IPs blacklisted!`, 'success');
+            fetchThreatData(true);
+        } catch (err) {
+            if (showToast) showToast('Failed to auto-quarantine threat sources', 'error');
         }
     };
 
-    useEffect(() => {
-        fetchThreatData();
-        const interval = setInterval(() => fetchThreatData(true), 6000);
-        return () => clearInterval(interval);
-    }, []);
+    const handleToggle3d = () => {
+        const map = mapInstanceRef.current;
+        if (!map) return;
+        const newPitch = is3dPitch ? 0 : 45;
+        map.easeTo({ pitch: newPitch, duration: 800 });
+        setIs3dPitch(!is3dPitch);
+    };
+
+    const handleResetView = () => {
+        const map = mapInstanceRef.current;
+        if (!map) return;
+        map.easeTo({ center: [25, 20], zoom: 1.6, pitch: 0, bearing: 0, duration: 1000 });
+        setIs3dPitch(false);
+    };
 
     const handleBanIp = async (e) => {
-        e.preventDefault();
-        if (!manualIp) return;
+        e?.preventDefault();
+        if (!manualIp.trim()) return;
+
         setBanning(true);
         try {
             const token = localStorage.getItem('token');
             const headers = token ? { Authorization: `Bearer ${token}` } : {};
-            await axios.post(`${API_BASE}/firewall/ban-ip`, {
-                ip: manualIp,
-                reason: manualReason || 'Manual Admin Blacklist',
-                country: manualCountry
+            const res = await axios.post(`${API_BASE}/firewall/ban-ip`, {
+                ip: manualIp.trim(),
+                reason: manualReason || 'Manual Administrator Quarantine',
+                durationHours: parseInt(banDuration, 10) || 24
             }, { headers });
-            
-            if (showToast) showToast(`IP ${manualIp} has been blacklisted.`, 'success');
-            setManualIp('');
-            setManualReason('');
+
+            if (showToast) showToast(res.data?.message || `IP ${manualIp} blacklisted.`, 'success');
             setShowBanModal(false);
+            setManualIp('');
             fetchThreatData(true);
         } catch (err) {
-            if (showToast) showToast('Failed to ban IP address', 'error');
+            if (showToast) showToast(`Failed to ban IP: ${err?.response?.data?.error || err.message}`, 'error');
         } finally {
             setBanning(false);
         }
     };
 
-    // Ban a threat point directly from the selected threat inspector
     const handleBanSelectedThreat = async (threat) => {
-        if (!threat?.ip) return;
+        if (!threat || !threat.ip) return;
         setBanning(true);
         try {
             const token = localStorage.getItem('token');
             const headers = token ? { Authorization: `Bearer ${token}` } : {};
-            const { city, countryName, code } = resolveThreatLabel(threat);
-            await axios.post(`${API_BASE}/firewall/ban-ip`, {
+            const res = await axios.post(`${API_BASE}/firewall/ban-ip`, {
                 ip: threat.ip,
-                reason: threat.tactic || 'Threat Radar – Admin Blacklist',
-                country: code,
-                countryName
+                reason: threat.tactic || 'Threat Radar Incursion Block',
+                country: threat.country,
+                countryName: threat.countryName,
+                durationHours: 24
             }, { headers });
-            if (showToast) showToast(`IP ${threat.ip} (${countryName}) blacklisted.`, 'success');
+
+            if (showToast) showToast(res.data?.message || `IP ${threat.ip} quarantined.`, 'success');
             setSelectedThreat(null);
             fetchThreatData(true);
         } catch (err) {
-            if (showToast) showToast(`Failed to blacklist IP: ${err?.response?.data?.error || err.message}`, 'error');
+            if (showToast) showToast(`Failed to quarantine IP: ${err?.response?.data?.error || err.message}`, 'error');
         } finally {
             setBanning(false);
         }
@@ -167,8 +670,8 @@ const AttackGeoMap = ({ showToast }) => {
         try {
             const token = localStorage.getItem('token');
             const headers = token ? { Authorization: `Bearer ${token}` } : {};
-            await axios.post(`${API_BASE}/firewall/unban-ip`, { ip }, { headers });
-            if (showToast) showToast(`IP ${ip} released from blacklist.`, 'info');
+            const res = await axios.post(`${API_BASE}/firewall/unban-ip`, { ip }, { headers });
+            if (showToast) showToast(res.data?.message || `IP ${ip} released from blacklist.`, 'info');
             fetchThreatData(true);
         } catch (err) {
             if (showToast) showToast('Failed to unban IP', 'error');
@@ -185,325 +688,366 @@ const AttackGeoMap = ({ showToast }) => {
             const token = localStorage.getItem('token');
             const headers = token ? { Authorization: `Bearer ${token}` } : {};
             await axios.post(`${API_BASE}/firewall/geofence`, {
-                mode: geofence.mode,
+                mode: geofence.mode === 'disabled' ? 'block' : geofence.mode,
                 blockedCountries: updatedList
             }, { headers });
-            setGeofence(prev => ({ ...prev, blockedCountries: updatedList }));
-            if (showToast) showToast(`Updated geofencing policy for ${countryCode}.`, 'success');
+            setGeofence(prev => ({ ...prev, blockedCountries: updatedList, mode: prev.mode === 'disabled' ? 'block' : prev.mode }));
+            if (showToast) showToast(`Updated geofencing rule for ${countryCode}.`, 'success');
         } catch (err) {
             if (showToast) showToast('Failed to update geofence policy', 'error');
         }
     };
 
-    // Convert lat/lng to SVG percentage coordinates (Equirectangular projection)
-    const projectCoordinates = (lat, lng) => {
-        const x = ((lng + 180) / 360) * 100;
-        const y = ((90 - lat) / 180) * 100;
-        return { x: `${x}%`, y: `${y}%` };
-    };
+    const criticalCount = allThreats.filter(t => t.severity === 'critical').length;
+    const botCount = allThreats.filter(t => t.severity === 'bot' || (t.attackType && t.attackType.toLowerCase().includes('bot'))).length;
+    const totalBlockedCount = bannedIps.length;
 
-    const threats = threatMapData?.activeThreats || [];
+    const filteredBans = bannedIps.filter(b => 
+        !searchFilter || 
+        b.ip.toLowerCase().includes(searchFilter.toLowerCase()) || 
+        (b.reason && b.reason.toLowerCase().includes(searchFilter.toLowerCase())) ||
+        (b.country && b.country.toLowerCase().includes(searchFilter.toLowerCase()))
+    );
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-            {/* Top Threat Intel Bar */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
-                <div className="glass" style={{ padding: '20px', borderRadius: '16px', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-0)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                        <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.6px' }}>Active Intrusion Vectors</span>
-                        <Radio size={18} color="var(--accent-rose)" style={{ animation: 'pulse 1.5s infinite' }} />
+            
+            {/* Top Threat Intel KPI Cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px' }}>
+                <div className="glass" style={{ padding: '16px 20px', borderRadius: '16px', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-0)' }}>
+                    <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Active Incursions</span>
+                    <div style={{ fontSize: '26px', fontWeight: '900', color: 'var(--accent-rose)', marginTop: '4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        {allThreats.length}
+                        <Radio size={16} color="var(--accent-rose)" className="spin-anim" />
                     </div>
-                    <span style={{ fontSize: '28px', fontWeight: '900', color: 'var(--accent-rose)' }}>{threats.filter(t => t.severity !== 'clean').length}</span>
-                    <span style={{ display: 'block', fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>Real-time origin coordinates tracked</span>
                 </div>
 
-                <div className="glass" style={{ padding: '20px', borderRadius: '16px', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-0)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                        <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.6px' }}>Perimeter IP Blacklist</span>
-                        <Lock size={18} color="var(--primary)" />
+                <div className="glass" style={{ padding: '16px 20px', borderRadius: '16px', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-0)' }}>
+                    <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Bot & Crawler Vectors</span>
+                    <div style={{ fontSize: '26px', fontWeight: '900', color: '#a855f7', marginTop: '4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        {botCount}
+                        <Bot size={16} color="#a855f7" />
                     </div>
-                    <span style={{ fontSize: '28px', fontWeight: '900', color: 'var(--text-primary)' }}>{bannedIps.length}</span>
-                    <span style={{ display: 'block', fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>Active firewall drop rules</span>
                 </div>
 
-                <div className="glass" style={{ padding: '20px', borderRadius: '16px', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-0)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                        <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.6px' }}>Geofence Shield</span>
-                        <Globe size={18} color="#10b981" />
+                <div className="glass" style={{ padding: '16px 20px', borderRadius: '16px', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-0)' }}>
+                    <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Quarantined IPs</span>
+                    <div style={{ fontSize: '26px', fontWeight: '900', color: 'var(--primary)', marginTop: '4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        {totalBlockedCount}
+                        <Lock size={16} color="var(--primary)" />
                     </div>
-                    <span style={{ fontSize: '28px', fontWeight: '900', color: '#10b981' }}>{(geofence.blockedCountries || []).length} Blocked</span>
-                    <span style={{ display: 'block', fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>High-risk nation-state filter active</span>
+                </div>
+
+                <div className="glass" style={{ padding: '16px 20px', borderRadius: '16px', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-0)' }}>
+                    <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Critical Exploits (RCE/SQLi)</span>
+                    <div style={{ fontSize: '26px', fontWeight: '900', color: '#ef4444', marginTop: '4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        {criticalCount}
+                        <ShieldAlert size={16} color="#ef4444" />
+                    </div>
+                </div>
+
+                <div className="glass" style={{ padding: '16px 20px', borderRadius: '16px', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-0)' }}>
+                    <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Protected Master Node</span>
+                    <div style={{ fontSize: '24px', fontWeight: '900', color: '#10b981', marginTop: '4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        ONLINE
+                        <ShieldCheck size={16} color="#10b981" />
+                    </div>
                 </div>
             </div>
 
-            {/* Holographic World Attack Radar */}
-            <div className="glass" style={{ padding: '24px', borderRadius: '20px', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-0)', boxShadow: 'var(--shadow-md)', position: 'relative', overflow: 'hidden' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+            {/* Incursion Simulation & Stress-Test Operations Toolbar */}
+            <div className="glass" style={{ padding: '16px 20px', borderRadius: '16px', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-0)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '14px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <Cpu size={18} color="var(--primary)" />
                     <div>
-                        <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '800', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <Globe size={20} color="var(--primary)" /> Holographic Global Intrusion Radar
-                        </h3>
-                        <p style={{ margin: '4px 0 0 0', fontSize: '12.5px', color: 'var(--text-secondary)' }}>
-                            Real-time origin mapping of brute-force attempts, MITRE ATT&CK vectors, and trusted cluster nodes
-                        </p>
+                        <div style={{ fontSize: '13px', fontWeight: '800', color: 'var(--text-primary)' }}>Traffic & Bot Incursion Security Suite</div>
+                        <div style={{ fontSize: '11.5px', color: 'var(--text-secondary)' }}>Launch live stress-testing scenarios & automated WAF quarantine defense</div>
                     </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                     <button 
-                        className="btn-primary" 
-                        onClick={() => setShowBanModal(true)}
-                        style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px', borderRadius: '10px', fontSize: '12.5px', fontWeight: '800' }}
+                        onClick={() => handleRunSimulation('botnet')}
+                        className="btn-secondary"
+                        style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: '700', padding: '6px 12px', borderRadius: '8px', color: '#a855f7', borderColor: 'rgba(168,85,247,0.3)' }}
                     >
-                        <Plus size={15} /> Ban Malicious IP
+                        <Bot size={14} /> Simulate Botnet Swarm
+                    </button>
+                    <button 
+                        onClick={() => handleRunSimulation('crawler')}
+                        className="btn-secondary"
+                        style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: '700', padding: '6px 12px', borderRadius: '8px', color: '#f97316', borderColor: 'rgba(249,115,22,0.3)' }}
+                    >
+                        <Bug size={14} /> Simulate WAF Crawler
+                    </button>
+                    <button 
+                        onClick={() => handleRunSimulation('ddos')}
+                        className="btn-secondary"
+                        style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: '700', padding: '6px 12px', borderRadius: '8px', color: '#ef4444', borderColor: 'rgba(239,68,68,0.3)' }}
+                    >
+                        <Flame size={14} /> Simulate DDoS Flood
+                    </button>
+                    <button 
+                        onClick={handleAutoQuarantineAll}
+                        className="btn-primary"
+                        style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: '800', padding: '6px 14px', borderRadius: '8px', background: 'linear-gradient(135deg, #10b981, #059669)' }}
+                    >
+                        <ShieldCheck size={14} /> Auto-Quarantine All Threats
+                    </button>
+                    {simulatedThreats.length > 0 && (
+                        <button 
+                            onClick={handleClearSimulation}
+                            className="btn-secondary"
+                            style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: '700', padding: '6px 12px', borderRadius: '8px', color: '#f43f5e' }}
+                        >
+                            <X size={14} /> Clear Simulation
+                        </button>
+                    )}
+                </div>
+            </div>
+
+            {/* Main Interactive Map & SIEM Container */}
+            <div style={{
+                position: 'relative',
+                borderRadius: '20px',
+                border: '1px solid var(--border-subtle)',
+                overflow: 'hidden',
+                background: '#0d131f',
+                boxShadow: '0 25px 60px rgba(0,0,0,0.5)',
+                height: isFullscreen ? '100vh' : '620px',
+                display: 'flex',
+                flexDirection: 'column'
+            }}>
+                {/* Map Floating Control Toolbar (Top Left) */}
+                <div style={{
+                    position: 'absolute',
+                    top: '16px',
+                    left: '16px',
+                    zIndex: 10,
+                    display: 'flex',
+                    gap: '8px',
+                    alignItems: 'center',
+                    background: 'rgba(13, 19, 31, 0.9)',
+                    backdropFilter: 'blur(12px)',
+                    padding: '6px 12px',
+                    borderRadius: '12px',
+                    border: '1px solid rgba(255, 255, 255, 0.12)',
+                    boxShadow: '0 8px 24px rgba(0,0,0,0.4)'
+                }}>
+                    <span style={{ fontSize: '12px', fontWeight: '800', color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <Globe size={15} color="var(--primary)" /> SOC Threat Radar
+                    </span>
+
+                    <div style={{ width: '1px', height: '16px', background: 'rgba(255,255,255,0.15)', margin: '0 2px' }} />
+
+                    {['all', 'exploits', 'bots', 'quarantined'].map(tab => (
+                        <button
+                            key={tab}
+                            onClick={() => setActiveFilterTab(tab)}
+                            style={{
+                                border: 'none',
+                                padding: '4px 10px',
+                                borderRadius: '6px',
+                                fontSize: '11px',
+                                fontWeight: '700',
+                                textTransform: 'capitalize',
+                                cursor: 'pointer',
+                                transition: '0.2s',
+                                background: activeFilterTab === tab ? 'var(--primary)' : 'transparent',
+                                color: activeFilterTab === tab ? '#ffffff' : '#94a3b8'
+                            }}
+                        >
+                            {tab}
+                        </button>
+                    ))}
+                </div>
+
+                {/* Map View Controls (Top Right) */}
+                <div style={{
+                    position: 'absolute',
+                    top: '16px',
+                    right: '16px',
+                    zIndex: 10,
+                    display: 'flex',
+                    gap: '8px'
+                }}>
+                    <button
+                        onClick={handleToggle3d}
+                        style={{
+                            background: 'rgba(13, 19, 31, 0.9)',
+                            backdropFilter: 'blur(12px)',
+                            border: '1px solid rgba(255, 255, 255, 0.12)',
+                            color: is3dPitch ? 'var(--primary)' : '#f8fafc',
+                            padding: '6px 12px',
+                            borderRadius: '8px',
+                            cursor: 'pointer',
+                            fontSize: '11.5px',
+                            fontWeight: '700',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '5px'
+                        }}
+                    >
+                        <Compass size={14} /> {is3dPitch ? '2D View' : '3D Tilt'}
+                    </button>
+
+                    <button
+                        onClick={handleResetView}
+                        style={{
+                            background: 'rgba(13, 19, 31, 0.9)',
+                            backdropFilter: 'blur(12px)',
+                            border: '1px solid rgba(255, 255, 255, 0.12)',
+                            color: '#f8fafc',
+                            padding: '6px 10px',
+                            borderRadius: '8px',
+                            cursor: 'pointer'
+                        }}
+                        title="Reset Radar View"
+                    >
+                        <RotateCcw size={14} />
+                    </button>
+
+                    <button
+                        onClick={() => setIsFullscreen(!isFullscreen)}
+                        style={{
+                            background: 'rgba(13, 19, 31, 0.9)',
+                            backdropFilter: 'blur(12px)',
+                            border: '1px solid rgba(255, 255, 255, 0.12)',
+                            color: '#f8fafc',
+                            padding: '6px 10px',
+                            borderRadius: '8px',
+                            cursor: 'pointer'
+                        }}
+                        title="Toggle Fullscreen"
+                    >
+                        {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
                     </button>
                 </div>
 
-                {/* World Map Container */}
-                <div style={{ position: 'relative', width: '100%', height: '420px', borderRadius: '16px', background: 'radial-gradient(ellipse at center, #0a0f1d 0%, #030712 100%)', border: '1px solid rgba(99, 102, 241, 0.25)', overflow: 'hidden', boxShadow: 'inset 0 0 40px rgba(0,0,0,0.8)' }}>
-                    
-                    {/* High-Resolution SVG World Map with Real Continents */}
-                    <svg viewBox="0 0 1000 500" preserveAspectRatio="none" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}>
-                        <defs>
-                            {/* Grid Pattern */}
-                            <pattern id="radar-grid" width="50" height="50" patternUnits="userSpaceOnUse">
-                                <path d="M 50 0 L 0 0 0 50" fill="none" stroke="rgba(99, 102, 241, 0.08)" strokeWidth="0.5" />
-                            </pattern>
-                            {/* Radar Sweep Gradient */}
-                            <linearGradient id="sweep-grad" x1="0%" y1="0%" x2="100%" y2="0%">
-                                <stop offset="0%" stopColor="rgba(99, 102, 241, 0)" />
-                                <stop offset="85%" stopColor="rgba(99, 102, 241, 0.08)" />
-                                <stop offset="100%" stopColor="rgba(99, 102, 241, 0.35)" />
-                            </linearGradient>
-                            {/* Continent Glow */}
-                            <filter id="continent-glow" x="-10%" y="-10%" width="120%" height="120%">
-                                <feDropShadow dx="0" dy="0" stdDeviation="2" floodColor="rgba(99, 102, 241, 0.3)" />
-                            </filter>
-                        </defs>
+                {/* Map Canvas */}
+                <div ref={mapContainerRef} style={{ flex: 1, width: '100%', height: '100%' }} />
 
-                        {/* Background Graticule Grid */}
-                        <rect width="1000" height="500" fill="url(#radar-grid)" />
-
-                        {/* Equator and Meridian Guide Lines */}
-                        <line x1="0" y1="250" x2="1000" y2="250" stroke="rgba(99, 102, 241, 0.2)" strokeWidth="1" strokeDasharray="4 4" />
-                        <line x1="500" y1="0" x2="500" y2="500" stroke="rgba(99, 102, 241, 0.2)" strokeWidth="1" strokeDasharray="4 4" />
-                        <line x1="0" y1="125" x2="1000" y2="125" stroke="rgba(99, 102, 241, 0.1)" strokeWidth="0.5" strokeDasharray="2 6" />
-                        <line x1="0" y1="375" x2="1000" y2="375" stroke="rgba(99, 102, 241, 0.1)" strokeWidth="0.5" strokeDasharray="2 6" />
-
-                        {/* Real World Continents Geo-Paths */}
-                        <g fill="rgba(30, 41, 59, 0.75)" stroke="rgba(99, 102, 241, 0.45)" strokeWidth="1" strokeLinejoin="round" filter="url(#continent-glow)">
-                            {/* North America */}
-                            <path d="M 80,60 L 110,50 L 160,45 L 210,55 L 250,50 L 290,65 L 280,100 L 240,110 L 220,95 L 205,115 L 225,140 L 245,145 L 235,175 L 215,195 L 200,230 L 180,245 L 160,205 L 140,195 L 110,185 L 85,150 L 60,115 L 65,85 Z" />
-                            {/* Greenland */}
-                            <path d="M 330,35 L 390,30 L 410,60 L 370,85 L 340,75 Z" />
-                            {/* Central America & Caribbean */}
-                            <path d="M 180,245 L 205,260 L 235,275 L 225,285 L 200,270 L 175,250 Z" />
-                            <circle cx="230" cy="235" r="3" />
-                            <circle cx="245" cy="240" r="3" />
-                            <circle cx="260" cy="245" r="2" />
-
-                            {/* South America */}
-                            <path d="M 235,280 L 275,275 L 320,295 L 350,325 L 360,360 L 330,410 L 300,455 L 280,480 L 270,470 L 275,420 L 260,370 L 240,320 L 225,290 Z" />
-
-                            {/* Europe & Scandinavia */}
-                            <path d="M 460,165 L 485,145 L 475,120 L 490,90 L 515,75 L 530,95 L 520,130 L 550,135 L 565,115 L 585,130 L 560,165 L 535,170 L 510,195 L 485,195 L 465,185 Z" />
-                            {/* United Kingdom & Ireland */}
-                            <path d="M 460,110 L 475,100 L 480,125 L 465,140 Z" />
-                            <path d="M 445,120 L 455,115 L 455,130 L 445,135 Z" />
-
-                            {/* Africa */}
-                            <path d="M 470,195 L 540,190 L 580,215 L 635,265 L 605,310 L 590,360 L 565,420 L 535,445 L 515,430 L 500,370 L 470,300 L 450,250 L 455,210 Z" />
-                            {/* Madagascar */}
-                            <path d="M 625,370 L 640,365 L 635,410 L 620,415 Z" />
-
-                            {/* Asia */}
-                            <path d="M 565,115 L 620,95 L 690,75 L 770,70 L 860,85 L 890,120 L 855,150 L 870,185 L 830,205 L 800,265 L 750,270 L 730,240 L 690,245 L 665,225 L 620,240 L 585,215 L 575,165 L 560,135 Z" />
-                            {/* India */}
-                            <path d="M 680,240 L 730,240 L 715,295 L 695,305 L 680,270 Z" />
-                            {/* Japan */}
-                            <path d="M 875,150 L 895,140 L 890,185 L 870,195 Z" />
-                            {/* Southeast Asia & Indonesia */}
-                            <path d="M 750,270 L 780,275 L 775,320 L 755,315 Z" />
-                            <path d="M 770,340 L 820,335 L 840,350 L 780,360 Z" />
-                            <path d="M 825,315 L 860,310 L 850,335 Z" />
-                            <circle cx="830" cy="275" r="4" />
-
-                            {/* Australia & New Zealand */}
-                            <path d="M 790,370 L 845,360 L 890,380 L 895,430 L 865,455 L 815,450 L 780,410 Z" />
-                            <path d="M 915,420 L 930,415 L 920,455 L 905,450 Z" />
-                        </g>
-
-                        {/* Animated Holographic Radar Sweep Beam */}
-                        <g>
-                            <rect x="0" y="0" width="120" height="500" fill="url(#sweep-grad)">
-                                <animate attributeName="x" from="-120" to="1000" dur="5s" repeatCount="indefinite" />
-                            </rect>
-                            <line x1="120" y1="0" x2="120" y2="500" stroke="rgba(99, 102, 241, 0.8)" strokeWidth="1.5">
-                                <animate attributeName="x1" from="0" to="1120" dur="5s" repeatCount="indefinite" />
-                                <animate attributeName="x2" from="0" to="1120" dur="5s" repeatCount="indefinite" />
-                            </line>
-                        </g>
-
-                        {/* Latitude / Longitude Labels */}
-                        <text x="10" y="245" fill="rgba(99, 102, 241, 0.4)" fontSize="10" fontFamily="monospace">EQUATOR 0°</text>
-                        <text x="490" y="18" fill="rgba(99, 102, 241, 0.4)" fontSize="10" fontFamily="monospace" textAnchor="end">PRIME MERIDIAN 0°</text>
-                        <text x="10" y="120" fill="rgba(99, 102, 241, 0.3)" fontSize="9" fontFamily="monospace">TROPIC OF CANCER 23.5°N</text>
-                        <text x="10" y="370" fill="rgba(99, 102, 241, 0.3)" fontSize="9" fontFamily="monospace">TROPIC OF CAPRICORN 23.5°S</text>
-                    </svg>
-
-                    {/* Attack and Node Beacon Points */}
-                    {threats.map((t) => {
-                        const { x, y } = projectCoordinates(t.lat, t.lng);
-                        const isCrit = t.severity === 'critical';
-                        const isSafe = t.severity === 'clean';
-                        
-                        const color = isSafe ? '#10b981' : isCrit ? '#f43f5e' : '#f59e0b';
-                        const isSelected = selectedThreat?.id === t.id;
-                        const { city, countryName, code } = resolveThreatLabel(t);
-
-                        return (
-                            <div 
-                                key={t.id}
-                                onClick={() => setSelectedThreat(t)}
-                                style={{
-                                    position: 'absolute',
-                                    left: x,
-                                    top: y,
-                                    transform: 'translate(-50%, -50%)',
-                                    cursor: 'pointer',
-                                    zIndex: isSelected ? 40 : 20,
-                                    transition: 'transform 0.2s ease'
-                                }}
-                            >
-                                {/* Ripple Animation */}
-                                <div style={{
-                                    position: 'absolute',
-                                    width: '28px',
-                                    height: '28px',
-                                    borderRadius: '50%',
-                                    background: color,
-                                    opacity: 0.35,
-                                    transform: 'translate(-50%, -50%)',
-                                    top: '50%',
-                                    left: '50%',
-                                    animation: 'ping 2s cubic-bezier(0, 0, 0.2, 1) infinite'
-                                }} />
-                                {/* Outer Ring */}
-                                <div style={{
-                                    position: 'absolute',
-                                    width: '18px',
-                                    height: '18px',
-                                    borderRadius: '50%',
-                                    border: `1.5px solid ${color}`,
-                                    transform: 'translate(-50%, -50%)',
-                                    top: '50%',
-                                    left: '50%',
-                                    opacity: 0.8
-                                }} />
-                                {/* Center Glowing Dot */}
-                                <div style={{
-                                    width: '10px',
-                                    height: '10px',
-                                    borderRadius: '50%',
-                                    background: color,
-                                    boxShadow: `0 0 14px ${color}, 0 0 4px #ffffff`,
-                                    border: '2px solid #ffffff'
-                                }} />
-
-                                {/* Interactive Mini Tag */}
-                                <div style={{
-                                    position: 'absolute',
-                                    bottom: '18px',
-                                    left: '50%',
-                                    transform: 'translateX(-50%)',
-                                    whiteSpace: 'nowrap',
-                                    background: 'rgba(3, 7, 18, 0.92)',
-                                    border: `1px solid ${color}`,
-                                    borderRadius: '6px',
-                                    padding: '2px 8px',
-                                    fontSize: '10.5px',
-                                    fontWeight: '800',
-                                    color: '#ffffff',
-                                    boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-                                    pointerEvents: 'none',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '4px'
-                                }}>
-                                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: color }} />
-                                    {city} {code !== 'XX' && code !== 'LOCAL' ? `(${code})` : ''}
-                                </div>
-                            </div>
-                        );
-                    })}
-                </div>
-
-                {/* Selected Threat Inspector */}
-                {selectedThreat && (() => {
-                    const { city, countryName, code } = resolveThreatLabel(selectedThreat);
-                    const sevColor = selectedThreat.severity === 'clean' ? '#10b981' : selectedThreat.severity === 'critical' ? '#f43f5e' : '#f59e0b';
-                    return (
-                        <div style={{ marginTop: '16px', padding: '16px', borderRadius: '12px', background: 'var(--bg-surface-2)', border: `1px solid ${sevColor}33`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-                            <div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                    <span style={{ fontSize: '11px', fontWeight: '800', color: sevColor, textTransform: 'uppercase' }}>
-                                        {selectedThreat.severity.toUpperCase()} ORIGIN:
-                                    </span>
-                                    <strong style={{ color: 'var(--text-primary)', fontSize: '14px' }}>
-                                        {selectedThreat.ip}
-                                        <span style={{ fontWeight: '400', color: 'var(--text-secondary)', marginLeft: '6px' }}>
-                                            ({city}, {countryName}{code !== 'XX' ? ` · ${code}` : ''})
-                                        </span>
-                                    </strong>
-                                </div>
-                                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-                                    Tactic: <code>{selectedThreat.tactic}</code> • Detected: {new Date(selectedThreat.timestamp).toLocaleTimeString()}
-                                </div>
-                            </div>
-                            <div style={{ display: 'flex', gap: '8px' }}>
-                                <button 
-                                    className="btn-danger" 
-                                    onClick={() => handleBanSelectedThreat(selectedThreat)}
-                                    disabled={banning}
-                                    style={{ padding: '6px 14px', borderRadius: '8px', fontSize: '12px', fontWeight: '800', opacity: banning ? 0.6 : 1 }}
-                                >
-                                    {banning ? 'Banning...' : 'Blacklist IP'}
-                                </button>
-                                <button 
-                                    className="btn-secondary" 
-                                    onClick={() => setSelectedThreat(null)}
-                                    style={{ padding: '6px 12px', borderRadius: '8px', fontSize: '12px' }}
-                                >
-                                    Close
-                                </button>
-                            </div>
-                        </div>
-                    );
-                })()}
-            </div>
-
-            {/* Perimeter Firewall Blacklist & Geofence Matrix */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '20px' }}>
-                {/* Banned IPs Table */}
-                <div className="glass" style={{ padding: '24px', borderRadius: '20px', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-0)', boxShadow: 'var(--shadow-sm)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                        <h4 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <Lock size={16} color="var(--primary)" /> Active Firewall Blacklist ({bannedIps.length})
-                        </h4>
+                {/* Live Real-Time Incursion Feed Ticker (Bottom of Map) */}
+                <div style={{
+                    background: 'rgba(13, 19, 31, 0.95)',
+                    backdropFilter: 'blur(12px)',
+                    borderTop: '1px solid rgba(255, 255, 255, 0.1)',
+                    padding: '10px 20px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '16px',
+                    zIndex: 10,
+                    overflowX: 'auto'
+                }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                        <Activity size={14} color="var(--accent-rose)" className="spin-anim" />
+                        <span style={{ fontSize: '11px', fontWeight: '900', color: '#f8fafc', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Live Incursion Log:</span>
                     </div>
 
-                    {bannedIps.length === 0 ? (
-                        <div style={{ textAlign: 'center', padding: '32px', color: 'var(--text-dim)', fontSize: '13px' }}>
-                            No IP addresses currently blacklisted.
+                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center', minWidth: 0, flex: 1 }}>
+                        {incursionLogs.length === 0 ? (
+                            <span style={{ fontSize: '11px', color: '#94a3b8' }}>Awaiting live WAF security events... System secure.</span>
+                        ) : (
+                            incursionLogs.slice(0, 4).map(log => (
+                                <div 
+                                    key={log.id} 
+                                    style={{ 
+                                        display: 'flex', 
+                                        alignItems: 'center', 
+                                        gap: '6px', 
+                                        background: 'rgba(255,255,255,0.06)', 
+                                        padding: '4px 10px', 
+                                        borderRadius: '6px',
+                                        border: `1px solid ${log.verdict === 'BLOCKED' ? 'rgba(239,68,68,0.35)' : 'rgba(245,158,11,0.35)'}`,
+                                        fontSize: '11px',
+                                        whiteSpace: 'nowrap',
+                                        flexShrink: 0
+                                    }}
+                                >
+                                    <span>{COUNTRY_FLAGS[log.country] || '🌐'}</span>
+                                    <span style={{ fontWeight: '700', color: '#f8fafc' }}>{log.ip}</span>
+                                    <span style={{ color: log.verdict === 'BLOCKED' ? '#ef4444' : '#f59e0b', fontWeight: '800' }}>[{log.type}]</span>
+                                    <span style={{ color: '#94a3b8', fontSize: '10px' }}>{log.time}</span>
+                                    {log.isSimulated && (
+                                        <span style={{ fontSize: '9px', fontWeight: '800', background: 'rgba(168,85,247,0.2)', color: '#a855f7', padding: '1px 4px', borderRadius: '4px' }}>SIMULATED</span>
+                                    )}
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </div>
+            </div>
+
+            {/* Perimeter Firewall & Threat Intel Console (2-Column Layout) */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '20px' }}>
+                
+                {/* Quarantined IPs & Blacklist Manager */}
+                <div className="glass" style={{ padding: '24px', borderRadius: '20px', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-0)', boxShadow: 'var(--shadow-sm)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                        <div>
+                            <h4 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <Ban size={16} color="#ef4444" /> Quarantined Threat Blacklist
+                            </h4>
+                            <div style={{ fontSize: '11.5px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                                {bannedIps.length} active persistent IP blacklists dropping inbound traffic
+                            </div>
+                        </div>
+
+                        <button 
+                            onClick={() => setShowBanModal(true)}
+                            className="btn-secondary shadow-premium"
+                            style={{ padding: '6px 12px', borderRadius: '8px', fontSize: '11.5px', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '4px' }}
+                        >
+                            <Plus size={14} /> Quarantine IP
+                        </button>
+                    </div>
+
+                    <div style={{ marginBottom: '14px', position: 'relative' }}>
+                        <Search size={14} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-dim)' }} />
+                        <input 
+                            type="text"
+                            placeholder="Search banned IP, country, or reason..."
+                            value={searchFilter}
+                            onChange={e => setSearchFilter(e.target.value)}
+                            style={{
+                                width: '100%',
+                                padding: '8px 12px 8px 34px',
+                                borderRadius: '10px',
+                                background: 'var(--bg-surface-1)',
+                                border: '1px solid var(--border-subtle)',
+                                color: 'var(--text-primary)',
+                                fontSize: '12px',
+                                outline: 'none'
+                            }}
+                        />
+                    </div>
+
+                    {filteredBans.length === 0 ? (
+                        <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-dim)', fontSize: '12px' }}>
+                            {searchFilter ? 'No banned IPs match your search query.' : 'Zero active blacklisted IPs. Inbound perimeter clean.'}
                         </div>
                     ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                            {bannedIps.map((b) => (
-                                <div key={b.ip} style={{ padding: '12px 14px', borderRadius: '12px', background: 'var(--bg-surface-2)', border: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '280px', overflowY: 'auto' }}>
+                            {filteredBans.map((b) => (
+                                <div 
+                                    key={b.ip}
+                                    style={{
+                                        display: 'flex',
+                                        justifyContent: 'space-between',
+                                        alignItems: 'center',
+                                        padding: '10px 14px',
+                                        borderRadius: '10px',
+                                        background: 'var(--bg-surface-1)',
+                                        border: '1px solid var(--border-subtle)'
+                                    }}
+                                >
                                     <div>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                             <span style={{ fontFamily: 'var(--font-mono)', fontWeight: '800', color: 'var(--text-primary)', fontSize: '13px' }}>{b.ip}</span>
-                                            <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(244, 63, 94, 0.12)', color: '#f43f5e', fontWeight: '800' }}>{b.country}</span>
+                                            <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(244, 63, 94, 0.12)', color: '#f43f5e', fontWeight: '800' }}>{b.country || 'XX'}</span>
                                         </div>
                                         <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '2px' }}>
-                                            {b.reason} • {b.attempts} attempts
+                                            {b.reason} • {b.attempts || 1} attempts
                                         </div>
                                     </div>
                                     <button 
@@ -522,11 +1066,11 @@ const AttackGeoMap = ({ showToast }) => {
 
                 {/* Country Geofencing Controls */}
                 <div className="glass" style={{ padding: '24px', borderRadius: '20px', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-0)', boxShadow: 'var(--shadow-sm)' }}>
-                    <h4 style={{ margin: '0 0 12px 0', fontSize: '15px', fontWeight: '800', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <h4 style={{ margin: '0 0 6px 0', fontSize: '15px', fontWeight: '800', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <Globe size={16} color="#10b981" /> High-Risk Nation-State Geofencing
                     </h4>
                     <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '0 0 16px 0' }}>
-                        Toggle automatic inbound dropping for specific geographic country zones.
+                        Toggle automatic perimeter inbound packet dropping for geographic national origin zones.
                     </p>
 
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px' }}>
@@ -576,45 +1120,182 @@ const AttackGeoMap = ({ showToast }) => {
                 </div>
             </div>
 
-            {/* Manual Ban Modal */}
+            {/* Threat Detail Modal on Node Click */}
+            {selectedThreat && (
+                <div style={{
+                    position: 'fixed',
+                    inset: 0,
+                    background: 'rgba(0,0,0,0.75)',
+                    backdropFilter: 'blur(8px)',
+                    zIndex: 2000,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '20px'
+                }} onClick={() => setSelectedThreat(null)}>
+                    <div className="glass" style={{
+                        width: '100%',
+                        maxWidth: '480px',
+                        borderRadius: '18px',
+                        border: '1px solid var(--border-subtle)',
+                        background: 'var(--bg-surface-0)',
+                        padding: '24px',
+                        boxShadow: '0 25px 60px rgba(0,0,0,0.6)'
+                    }} onClick={e => e.stopPropagation()}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <ShieldAlert size={20} color={SEVERITY_COLORS[selectedThreat.severity] || '#ef4444'} />
+                                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800', color: 'var(--text-primary)' }}>Threat Node Inspection</h3>
+                            </div>
+                            <button onClick={() => setSelectedThreat(null)} style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer' }}>
+                                <X size={18} />
+                            </button>
+                        </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '13px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', background: 'var(--bg-surface-1)', borderRadius: '8px' }}>
+                                <span style={{ color: 'var(--text-dim)' }}>Source IP</span>
+                                <span style={{ fontWeight: '800', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{selectedThreat.ip}</span>
+                            </div>
+
+                            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', background: 'var(--bg-surface-1)', borderRadius: '8px' }}>
+                                <span style={{ color: 'var(--text-dim)' }}>Origin Location</span>
+                                <span style={{ fontWeight: '700', color: 'var(--text-primary)' }}>
+                                    {COUNTRY_FLAGS[selectedThreat.country] || '🌐'} {selectedThreat.countryName} ({selectedThreat.city})
+                                </span>
+                            </div>
+
+                            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', background: 'var(--bg-surface-1)', borderRadius: '8px' }}>
+                                <span style={{ color: 'var(--text-dim)' }}>Attack Classification</span>
+                                <span style={{ fontWeight: '800', color: SEVERITY_COLORS[selectedThreat.severity] || '#ef4444' }}>{selectedThreat.tactic}</span>
+                            </div>
+
+                            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', background: 'var(--bg-surface-1)', borderRadius: '8px' }}>
+                                <span style={{ color: 'var(--text-dim)' }}>Calculated Threat Score</span>
+                                <span style={{ fontWeight: '800', color: selectedThreat.threatScore >= 75 ? '#ef4444' : '#f59e0b' }}>{selectedThreat.threatScore} / 100</span>
+                            </div>
+
+                            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', background: 'var(--bg-surface-1)', borderRadius: '8px' }}>
+                                <span style={{ color: 'var(--text-dim)' }}>WAF Enforcement Action</span>
+                                <span style={{ fontWeight: '800', color: selectedThreat.action === 'BLOCKED' ? '#ef4444' : '#10b981' }}>{selectedThreat.action}</span>
+                            </div>
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+                            <button
+                                onClick={() => setSelectedThreat(null)}
+                                className="btn-secondary"
+                                style={{ flex: 1, padding: '10px', borderRadius: '8px', fontSize: '12px', fontWeight: '700' }}
+                            >
+                                Close
+                            </button>
+                            <button
+                                onClick={() => handleBanSelectedThreat(selectedThreat)}
+                                disabled={banning}
+                                className="btn-primary"
+                                style={{ flex: 1, padding: '10px', borderRadius: '8px', fontSize: '12px', fontWeight: '800', background: 'linear-gradient(135deg, #ef4444, #dc2626)' }}
+                            >
+                                <Ban size={14} style={{ display: 'inline', marginRight: '4px' }} />
+                                {banning ? 'Quarantining...' : 'Permanent Block'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Manual IP Ban Modal */}
             {showBanModal && (
-                <div className="modal-overlay" style={{ zIndex: 1000 }} onClick={() => setShowBanModal(false)}>
-                    <div className="modal-content glass" style={{ width: '460px', padding: '28px', textAlign: 'left', background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)', borderRadius: '24px', boxShadow: 'var(--shadow-lg)' }} onClick={e => e.stopPropagation()}>
-                        <h3 style={{ margin: '0 0 16px 0', fontSize: '18px', fontWeight: '800', color: 'var(--text-primary)' }}>Blacklist IP Address</h3>
+                <div style={{
+                    position: 'fixed',
+                    inset: 0,
+                    background: 'rgba(0,0,0,0.75)',
+                    backdropFilter: 'blur(8px)',
+                    zIndex: 2000,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '20px'
+                }} onClick={() => setShowBanModal(false)}>
+                    <div className="glass" style={{
+                        width: '100%',
+                        maxWidth: '460px',
+                        borderRadius: '20px',
+                        border: '1px solid var(--border-subtle)',
+                        background: 'var(--bg-surface-0)',
+                        padding: '24px',
+                        boxShadow: '0 25px 60px rgba(0,0,0,0.6)'
+                    }} onClick={e => e.stopPropagation()}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <Ban size={20} color="#ef4444" />
+                                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800', color: 'var(--text-primary)' }}>Quarantine IP Address</h3>
+                            </div>
+                            <button onClick={() => setShowBanModal(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer' }}>
+                                <X size={18} />
+                            </button>
+                        </div>
+
                         <form onSubmit={handleBanIp} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                             <div>
-                                <label style={{ display: 'block', fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: '6px' }}>IP Address / CIDR *</label>
-                                <input 
-                                    className="m-input"
+                                <label style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase' }}>Target IP</label>
+                                <input
+                                    type="text"
                                     required
-                                    placeholder="e.g. 192.0.2.1 or 198.51.100.0/24"
+                                    placeholder="e.g. 198.51.100.42"
                                     value={manualIp}
                                     onChange={e => setManualIp(e.target.value)}
-                                    style={{ width: '100%', outline: 'none' }}
+                                    style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', background: 'var(--bg-surface-1)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', marginTop: '4px', fontFamily: 'var(--font-mono)' }}
                                 />
                             </div>
 
                             <div>
-                                <label style={{ display: 'block', fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: '6px' }}>Ban Reason</label>
-                                <input 
-                                    className="m-input"
-                                    placeholder="e.g. Suspicious brute force probe"
+                                <label style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase' }}>Quarantine Reason</label>
+                                <input
+                                    type="text"
                                     value={manualReason}
                                     onChange={e => setManualReason(e.target.value)}
-                                    style={{ width: '100%', outline: 'none' }}
+                                    style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', background: 'var(--bg-surface-1)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', marginTop: '4px' }}
                                 />
                             </div>
 
-                            <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
-                                <button type="button" className="btn-secondary" style={{ flex: 1, padding: '10px' }} onClick={() => setShowBanModal(false)}>Cancel</button>
-                                <button type="submit" className="btn-danger" style={{ flex: 1, padding: '10px', fontWeight: '800' }} disabled={banning}>
-                                    {banning ? 'Blacklisting...' : 'Drop Traffic (Ban)'}
+                            <div>
+                                <label style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase' }}>Ban Duration (Hours)</label>
+                                <select
+                                    value={banDuration}
+                                    onChange={e => setBanDuration(e.target.value)}
+                                    style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', background: 'var(--bg-surface-1)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', marginTop: '4px' }}
+                                >
+                                    <option value="1">1 Hour</option>
+                                    <option value="6">6 Hours</option>
+                                    <option value="24">24 Hours (Standard)</option>
+                                    <option value="168">7 Days</option>
+                                    <option value="8760">Permanent (1 Year)</option>
+                                </select>
+                            </div>
+
+                            <div style={{ display: 'flex', gap: '10px', marginTop: '12px' }}>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowBanModal(false)}
+                                    className="btn-secondary"
+                                    style={{ flex: 1, padding: '10px', borderRadius: '8px', fontSize: '12px', fontWeight: '700' }}
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={banning}
+                                    className="btn-primary"
+                                    style={{ flex: 1, padding: '10px', borderRadius: '8px', fontSize: '12px', fontWeight: '800', background: 'linear-gradient(135deg, #ef4444, #dc2626)' }}
+                                >
+                                    {banning ? 'Quarantining...' : 'Enforce Blacklist'}
                                 </button>
                             </div>
                         </form>
                     </div>
                 </div>
             )}
+
         </div>
     );
 };

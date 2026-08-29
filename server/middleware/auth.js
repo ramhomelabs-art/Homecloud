@@ -31,8 +31,8 @@ const requireRole = (allowedRoles = []) => {
     return (req, res, next) => {
         if (!req.user) return res.status(401).json({ error: 'Authentication required' });
         
-        // Admins bypass all role checks
-        if (req.user.role === 'Admin') return next();
+        // Admins and Operators bypass all role checks
+        if (req.user.role === 'Admin' || req.user.role === 'Administrator' || req.user.role === 'Operator') return next();
 
         // Guest users with write access (Edit or Full Access) bypass role checks for User routes
         if (req.user.isGuest) {

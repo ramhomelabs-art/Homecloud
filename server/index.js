@@ -56,7 +56,7 @@ fs.promises.rename = async (src, dest) => {
 const { initDatabase } = require('./config/database');
 const logger = require('./utils/logger');
 const { errorHandler, notFound } = require('./middleware/errorHandler');
-const { firewallMiddleware } = require('./middleware/firewall');
+const { firewallMiddleware, loadFirewallState } = require('./middleware/firewall');
 
 const axios = require('axios');
 const clusterService = require('./services/clusterService');
@@ -470,6 +470,15 @@ async function startServer() {
     try {
         // 1. Initialize DB tables
         await initDatabase();
+
+        // 1.1. Load firewall state and alerts from database
+        await loadFirewallState();
+        const notificationService = require('./services/notificationService');
+        await notificationService.loadPersistedAlerts();
+
+        // 1.15. Initialize WAF Security Event Collector & SSE Pipeline
+        const wafCollector = require('./services/security/wafCollector');
+        wafCollector.init();
 
         // 1.2. Load and restore saved Cloud & Network Mounts
         const cloudMountService = require('./services/cloudMountService');

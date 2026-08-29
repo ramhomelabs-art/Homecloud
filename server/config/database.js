@@ -238,9 +238,57 @@ async function initDatabase() {
             CREATE TABLE IF NOT EXISTS security_events (
                 id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
                 event_type VARCHAR(100) NOT NULL,
+                source VARCHAR(50) DEFAULT 'bunkerweb',
+                source_ip VARCHAR(45),
+                source_port INTEGER,
+                destination VARCHAR(100) DEFAULT 'nexadisk',
+                method VARCHAR(10),
+                path VARCHAR(500),
+                user_agent TEXT,
+                attack_type VARCHAR(100),
+                severity VARCHAR(20) DEFAULT 'MEDIUM',
+                threat_score INTEGER DEFAULT 0,
+                action VARCHAR(20) DEFAULT 'BLOCKED',
+                status_code INTEGER,
+                country VARCHAR(10),
+                city VARCHAR(100),
+                latitude DOUBLE PRECISION,
+                longitude DOUBLE PRECISION,
+                mitre_technique VARCHAR(50),
+                rule_id VARCHAR(100),
+                rule_message TEXT,
                 details JSONB DEFAULT '{}'::jsonb,
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             )
+        `);
+
+        // Migration safety for existing security_events table
+        await client.query(`
+            ALTER TABLE security_events ADD COLUMN IF NOT EXISTS source VARCHAR(50) DEFAULT 'bunkerweb';
+            ALTER TABLE security_events ADD COLUMN IF NOT EXISTS source_ip VARCHAR(45);
+            ALTER TABLE security_events ADD COLUMN IF NOT EXISTS source_port INTEGER;
+            ALTER TABLE security_events ADD COLUMN IF NOT EXISTS destination VARCHAR(100) DEFAULT 'nexadisk';
+            ALTER TABLE security_events ADD COLUMN IF NOT EXISTS method VARCHAR(10);
+            ALTER TABLE security_events ADD COLUMN IF NOT EXISTS path VARCHAR(500);
+            ALTER TABLE security_events ADD COLUMN IF NOT EXISTS user_agent TEXT;
+            ALTER TABLE security_events ADD COLUMN IF NOT EXISTS attack_type VARCHAR(100);
+            ALTER TABLE security_events ADD COLUMN IF NOT EXISTS severity VARCHAR(20) DEFAULT 'MEDIUM';
+            ALTER TABLE security_events ADD COLUMN IF NOT EXISTS threat_score INTEGER DEFAULT 0;
+            ALTER TABLE security_events ADD COLUMN IF NOT EXISTS action VARCHAR(20) DEFAULT 'BLOCKED';
+            ALTER TABLE security_events ADD COLUMN IF NOT EXISTS status_code INTEGER;
+            ALTER TABLE security_events ADD COLUMN IF NOT EXISTS country VARCHAR(10);
+            ALTER TABLE security_events ADD COLUMN IF NOT EXISTS city VARCHAR(100);
+            ALTER TABLE security_events ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION;
+            ALTER TABLE security_events ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION;
+            ALTER TABLE security_events ADD COLUMN IF NOT EXISTS mitre_technique VARCHAR(50);
+            ALTER TABLE security_events ADD COLUMN IF NOT EXISTS rule_id VARCHAR(100);
+            ALTER TABLE security_events ADD COLUMN IF NOT EXISTS rule_message TEXT;
+
+            CREATE INDEX IF NOT EXISTS idx_sec_events_created_at ON security_events (created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_sec_events_source_ip ON security_events (source_ip);
+            CREATE INDEX IF NOT EXISTS idx_sec_events_attack_type ON security_events (attack_type);
+            CREATE INDEX IF NOT EXISTS idx_sec_events_severity ON security_events (severity);
+            CREATE INDEX IF NOT EXISTS idx_sec_events_action ON security_events (action);
         `);
 
         // 6. Create SYNC TASKS table

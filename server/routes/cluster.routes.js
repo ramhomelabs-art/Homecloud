@@ -695,7 +695,7 @@ storageRouter.get('/devices', authenticateToken, async (req, res) => {
 networkRouter.use(authenticateToken);
 
 // List active network shares from PG database
-networkRouter.get('/list', async (req, res) => {
+networkRouter.get(['/list', '/shares'], async (req, res) => {
     try {
         const shares = await networkService.checkSharesStatus();
         res.json(shares);

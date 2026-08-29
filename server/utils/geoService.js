@@ -45,10 +45,11 @@ const COUNTRY_COORDS = {
  */
 function isPrivateIp(ip) {
     if (!ip) return true;
-    const clean = ip.replace(/^::ffff:/, '');
-    if (clean === '127.0.0.1' || clean === '::1' || clean === 'localhost') return true;
-    if (clean.startsWith('10.') || clean.startsWith('192.168.') || clean.startsWith('172.16.') || clean.startsWith('172.24.')) return true;
-    if (clean.startsWith('169.254.') || clean.startsWith('fc00:') || clean.startsWith('fe80:')) return true;
+    const clean = ip.replace(/^::ffff:/, '').trim();
+    if (clean === '127.0.0.1' || clean === '::1' || clean === 'localhost' || clean.startsWith('127.')) return true;
+    if (clean.startsWith('10.') || clean.startsWith('192.168.')) return true;
+    if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(clean)) return true;
+    if (clean.startsWith('169.254.') || clean.startsWith('fc00:') || clean.startsWith('fe80:') || clean === '0.0.0.0') return true;
     return false;
 }
 

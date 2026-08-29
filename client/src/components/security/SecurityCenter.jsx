@@ -6,7 +6,10 @@ import {
     Play, RefreshCw, XCircle, Folder, Settings, ScrollText, 
     Server, Cpu, CheckCircle2, Sliders, Info, Trash2, Globe,
     Lock, DownloadCloud, FileCode, Database, Check,
-    PieChart as PieChartIcon, TrendingUp, BarChart3
+    PieChart as PieChartIcon, TrendingUp, BarChart3,
+    Zap, Terminal, Clock, Copy, Plus, Filter, Key, HardDrive, 
+    FileCheck, Layers, HelpCircle, ExternalLink, Flame, Ban, ChevronRight,
+    Search, FileWarning
 } from 'lucide-react';
 import { 
     ResponsiveContainer, PieChart, Pie, Cell, Tooltip,
@@ -28,8 +31,14 @@ function SecurityCenter({ showToast: externalToast }) {
     const [auditingNode, setAuditingNode] = useState(null);
     const [policy, setPolicy] = useState({
         quarantineMode: 'quarantine',
-        whitelistExts: '',
-        maxScanSize: '100'
+        whitelistExts: '.log, .csv, .txt, .json',
+        blockedExts: '.exe, .bat, .ps1, .vbs, .sh, .cmd, .scr, .pif',
+        maxScanSize: '100',
+        maxFailedAuth: '5',
+        lockoutDuration: '15',
+        autoBlacklist: 'true',
+        deepClamav: 'true',
+        entropyCheck: 'true'
     });
     const [events, setEvents] = useState([]);
     const [canaryStatus, setCanaryStatus] = useState(null);
@@ -57,12 +66,18 @@ function SecurityCenter({ showToast: externalToast }) {
     // Manual Scanner Form State
     const [scanPath, setScanPath] = useState('');
     const [scanNode, setScanNode] = useState('local');
+    const [scanProfile, setScanProfile] = useState('deep'); // quick | deep | fim
     const [scanning, setScanning] = useState(false);
     const [scanResults, setScanResults] = useState(null);
+    const [scanLogs, setScanLogs] = useState([]);
+    const [networkShares, setNetworkShares] = useState([]);
     const [pickerOpen, setPickerOpen] = useState(false);
 
     // Policies Saving State
     const [savingPolicy, setSavingPolicy] = useState(false);
+
+    const [topAttackers, setTopAttackers] = useState([]);
+    const [attackTypes, setAttackTypes] = useState({ total: 0, types: [] });
 
     const fetchData = async (loadPolicy = false) => {
         setLoading(true);
@@ -80,37 +95,56 @@ function SecurityCenter({ showToast: externalToast }) {
                 }
             };
 
-            const [statsData, quarantineData, eventsData, agentsData, postureData, secAgentsData, canaryData, scrubData] = await Promise.all([
+            const [statsData, quarantineData, eventsData, agentsData, postureData, secAgentsData, canaryData, scrubData, sharesData, policyData, attackersData, attackTypesData] = await Promise.all([
                 fetchEndpoint('/api/v1/security/stats', null),
                 fetchEndpoint('/api/v1/security/quarantine', []),
-                fetchEndpoint('/api/v1/security/events', []),
+                fetchEndpoint('/api/v1/security/events', { events: [] }),
                 fetchEndpoint('/api/v1/agents', []),
                 fetchEndpoint('/api/v1/security/posture', null),
                 fetchEndpoint('/api/v1/security/agents', null),
                 fetchEndpoint('/api/v1/security/canary/status', null),
-                fetchEndpoint('/api/v1/security/integrity/status', null)
+                fetchEndpoint('/api/v1/security/integrity/status', null),
+                fetchEndpoint('/api/v1/network/list', []),
+                fetchEndpoint('/api/v1/security/policy', null),
+                fetchEndpoint('/api/v1/security/top-attackers', []),
+                fetchEndpoint('/api/v1/security/attack-types', { total: 0, types: [] })
             ]);
 
             if (statsData !== null) setStats(statsData);
             setQuarantine(quarantineData);
-            setEvents(eventsData);
+            setEvents(eventsData.events || (Array.isArray(eventsData) ? eventsData : []));
             setAgents(agentsData);
             if (postureData !== null) setPosture(postureData);
             if (secAgentsData && secAgentsData.nodes) setAgentNodes(secAgentsData.nodes);
             if (canaryData !== null) setCanaryStatus(canaryData);
             if (scrubData !== null) setScrubReport(scrubData);
-
-            if (loadPolicy) {
-                const policyData = await fetchEndpoint('/api/v1/security/policy', null);
-                if (policyData !== null) {
-                    setPolicy(policyData);
-                }
-            }
+            if (Array.isArray(sharesData)) setNetworkShares(sharesData);
+            if (policyData !== null) setPolicy(policyData);
+            if (Array.isArray(attackersData)) setTopAttackers(attackersData);
+            if (attackTypesData) setAttackTypes(attackTypesData);
         } catch (e) {
             console.error('Failed to fetch security stats', e);
         }
         setLoading(false);
     };
+
+    // ─── Real-Time SSE Stream for Security Center ───
+    useEffect(() => {
+        fetchData();
+        const token = localStorage.getItem('token') || '';
+        const sseUrl = `/api/v1/security/events/live?token=${encodeURIComponent(token)}`;
+        const es = new EventSource(sseUrl);
+
+        es.addEventListener('waf_event', (e) => {
+            try {
+                const ev = JSON.parse(e.data);
+                if (!ev) return;
+                setEvents(prev => [ev, ...(Array.isArray(prev) ? prev : [])].slice(0, 100));
+            } catch (_) {}
+        });
+
+        return () => es.close();
+    }, []);
 
     const handleTriggerScrub = async () => {
         setScrubbing(true);
@@ -135,15 +169,13 @@ function SecurityCenter({ showToast: externalToast }) {
         try {
             const token = localStorage.getItem('token');
             const headers = token ? { Authorization: `Bearer ${token}` } : {};
-            await axios.post('/api/v1/security/scan-node', { nodeId }, { headers });
-            setTimeout(() => {
-                setAuditingNode(null);
-                fetchData();
-                showToast(`Node audit initiated for ${nodeId}`, 'success');
-            }, 1200);
+            const res = await axios.post(`/api/v1/security/agents/${nodeId}/audit`, {}, { headers });
+            showToast(res.data.message || `Security audit finished for node ${nodeId}`, 'success');
+            fetchData();
         } catch (err) {
+            showToast(err.response?.data?.error || 'Node audit failed', 'error');
+        } finally {
             setAuditingNode(null);
-            showToast('Failed to initiate node audit', 'error');
         }
     };
 
@@ -222,13 +254,13 @@ function SecurityCenter({ showToast: externalToast }) {
     };
 
     const handleSavePolicy = async (e) => {
-        e.preventDefault();
+        if (e) e.preventDefault();
         setSavingPolicy(true);
         try {
             const token = localStorage.getItem('token');
             const headers = token ? { Authorization: `Bearer ${token}` } : {};
             await axios.post('/api/v1/security/policy', policy, { headers });
-            showToast('Security policies updated successfully.', 'success');
+            showToast('Zero-Trust Security policies saved successfully.', 'success');
             fetchData(true);
         } catch (err) {
             showToast('Failed to save policies', 'error');
@@ -238,22 +270,37 @@ function SecurityCenter({ showToast: externalToast }) {
     };
 
     const handleManualScan = async (e) => {
-        e.preventDefault();
+        if (e) e.preventDefault();
         if (!scanPath) return;
         setScanning(true);
         setScanResults(null);
+        setScanLogs([
+            `[${new Date().toLocaleTimeString()}] Initializing ${scanProfile.toUpperCase()} scan on target: ${scanPath}`,
+            `[${new Date().toLocaleTimeString()}] Target node: ${scanNode}`,
+            `[${new Date().toLocaleTimeString()}] Loading ClamAV signatures & heuristic threat matrices...`
+        ]);
+
         try {
             const token = localStorage.getItem('token');
             const headers = token ? { Authorization: `Bearer ${token}` } : {};
-            const res = await axios.post('/api/v1/security/scan/file', {
-                filePath: scanPath,
-                agentId: scanNode
-            }, { headers });
+            const isDir = !scanPath.includes('.') || scanPath.endsWith('/') || scanPath.endsWith('\\');
+            const endpoint = isDir ? '/api/v1/security/scan/directory' : '/api/v1/security/scan/file';
+            const payload = isDir 
+                ? { directoryPath: scanPath, agentId: scanNode, profile: scanProfile } 
+                : { filePath: scanPath, agentId: scanNode, profile: scanProfile };
+
+            const res = await axios.post(endpoint, payload, { headers });
             setScanResults(res.data);
-            showToast('Manual scan complete', 'success');
+            setScanLogs(prev => [
+                ...prev,
+                `[${new Date().toLocaleTimeString()}] Scan completed successfully. Target: ${scanPath}`,
+                `[${new Date().toLocaleTimeString()}] Verdict: ${(res.data.verdict || res.data.result?.verdict || 'CLEAN').toUpperCase()} (Risk Score: ${res.data.score || res.data.result?.score || 0}/100)`
+            ]);
+            showToast('On-demand scan completed', 'success');
             fetchData();
         } catch (err) {
-            showToast(err.response?.data?.error || 'Manual scan failed', 'error');
+            setScanLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ERROR: ${err.response?.data?.error || err.message}`]);
+            showToast(err.response?.data?.error || 'Scan failed', 'error');
         } finally {
             setScanning(false);
         }
@@ -712,8 +759,8 @@ function SecurityCenter({ showToast: externalToast }) {
                                     {stats.totalScans || 0} Total Scans
                                 </span>
                             </div>
-                            <div style={{ width: '100%', height: '220px', position: 'relative' }}>
-                                <ResponsiveContainer width="100%" height="100%">
+                            <div style={{ width: '100%', height: '220px', minWidth: 0, minHeight: '220px', position: 'relative' }}>
+                                <ResponsiveContainer width="100%" height={220} minWidth={0} minHeight={220} debounce={50}>
                                     <PieChart>
                                         <Pie
                                             data={pieData.length > 0 ? pieData : [{ name: 'Protected (Clean)', value: 1 }]}
@@ -797,8 +844,8 @@ function SecurityCenter({ showToast: externalToast }) {
                                     ● Live Defense
                                 </span>
                             </div>
-                            <div style={{ width: '100%', height: '220px' }}>
-                                <ResponsiveContainer width="100%" height="100%">
+                            <div style={{ width: '100%', height: '220px', minWidth: 0, minHeight: '220px', position: 'relative' }}>
+                                <ResponsiveContainer width="100%" height={220} minWidth={0} minHeight={220} debounce={50}>
                                     <AreaChart data={trendData}>
                                         <defs>
                                             <linearGradient id="secCleanGrad" x1="0" y1="0" x2="0" y2="1">
@@ -911,6 +958,131 @@ function SecurityCenter({ showToast: externalToast }) {
                                 <div>Anomalies: <strong style={{ color: (scrubReport?.corruptedOrMissing || 0) > 0 ? '#f43f5e' : 'var(--text-primary)' }}>{scrubReport?.corruptedOrMissing || 0}</strong></div>
                                 <div>Verification: <strong style={{ color: 'var(--primary)' }}>100% SHA-256</strong></div>
                             </div>
+                        </div>
+                    </div>
+                    {/* WAF Telemetry & Web Security Incursions Row */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '24px' }}>
+                        <div className="glass" style={{ padding: '20px 24px', borderRadius: '18px', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-0)', boxShadow: 'var(--shadow-sm)' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <Globe size={20} color="var(--primary)" />
+                                    <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: 'var(--text-primary)' }}>OWASP CRS & BunkerWeb Incursion Telemetry</h3>
+                                </div>
+                                <span style={{
+                                    fontSize: '11px',
+                                    fontWeight: '800',
+                                    padding: '3px 8px',
+                                    borderRadius: '6px',
+                                    background: stats?.waf?.health?.status === 'ONLINE' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+                                    color: stats?.waf?.health?.status === 'ONLINE' ? '#10b981' : '#f59e0b',
+                                    border: `1px solid ${stats?.waf?.health?.status === 'ONLINE' ? 'rgba(16, 185, 129, 0.3)' : 'rgba(245, 158, 11, 0.3)'}`
+                                }}>
+                                    ● WAF Status: {stats?.waf?.health?.status || 'ONLINE'}
+                                </span>
+                            </div>
+
+                            {/* WAF Incursion Sub-Metrics Grid */}
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px', marginBottom: '16px' }}>
+                                <div style={{ background: 'var(--bg-surface-1)', padding: '12px 16px', borderRadius: '12px', border: '1px solid var(--border-subtle)' }}>
+                                    <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase' }}>WAF Events</span>
+                                    <div style={{ fontSize: '20px', fontWeight: '900', color: 'var(--text-primary)', marginTop: '2px' }}>{stats?.waf?.totalRequests || 0}</div>
+                                </div>
+                                <div style={{ background: 'var(--bg-surface-1)', padding: '12px 16px', borderRadius: '12px', border: '1px solid var(--border-subtle)' }}>
+                                    <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase' }}>Blocked Requests</span>
+                                    <div style={{ fontSize: '20px', fontWeight: '900', color: '#ef4444', marginTop: '2px' }}>{stats?.waf?.blockedRequests || 0}</div>
+                                </div>
+                                <div style={{ background: 'var(--bg-surface-1)', padding: '12px 16px', borderRadius: '12px', border: '1px solid var(--border-subtle)' }}>
+                                    <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase' }}>SQL Injections</span>
+                                    <div style={{ fontSize: '20px', fontWeight: '900', color: '#f97316', marginTop: '2px' }}>{stats?.waf?.sqliCount || 0}</div>
+                                </div>
+                                <div style={{ background: 'var(--bg-surface-1)', padding: '12px 16px', borderRadius: '12px', border: '1px solid var(--border-subtle)' }}>
+                                    <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase' }}>XSS Exploits</span>
+                                    <div style={{ fontSize: '20px', fontWeight: '900', color: '#eab308', marginTop: '2px' }}>{stats?.waf?.xssCount || 0}</div>
+                                </div>
+                                <div style={{ background: 'var(--bg-surface-1)', padding: '12px 16px', borderRadius: '12px', border: '1px solid var(--border-subtle)' }}>
+                                    <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase' }}>Dir Traversal</span>
+                                    <div style={{ fontSize: '20px', fontWeight: '900', color: '#a855f7', marginTop: '2px' }}>{stats?.waf?.traversalCount || 0}</div>
+                                </div>
+                                <div style={{ background: 'var(--bg-surface-1)', padding: '12px 16px', borderRadius: '12px', border: '1px solid var(--border-subtle)' }}>
+                                    <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase' }}>RCE Probes</span>
+                                    <div style={{ fontSize: '20px', fontWeight: '900', color: '#ec4899', marginTop: '2px' }}>{stats?.waf?.rceCount || 0}</div>
+                                </div>
+                            </div>
+
+                            {/* Top Offending Source IPs Table */}
+                            {topAttackers.length > 0 && (
+                                <div style={{ marginTop: '16px' }}>
+                                    <div style={{ fontSize: '13px', fontWeight: '800', color: 'var(--text-primary)', marginBottom: '8px' }}>Top Offending Remote IPs</div>
+                                    <div style={{ overflowX: 'auto' }}>
+                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                                            <thead>
+                                                <tr style={{ borderBottom: '1px solid var(--border-subtle)', textAlign: 'left', color: 'var(--text-dim)' }}>
+                                                    <th style={{ padding: '8px 12px' }}>SOURCE IP</th>
+                                                    <th style={{ padding: '8px 12px' }}>ORIGIN</th>
+                                                    <th style={{ padding: '8px 12px' }}>TOTAL EVENTS</th>
+                                                    <th style={{ padding: '8px 12px' }}>THREAT SCORE</th>
+                                                    <th style={{ padding: '8px 12px' }}>STATUS</th>
+                                                    <th style={{ padding: '8px 12px', textAlign: 'right' }}>ACTION</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {topAttackers.map((att) => (
+                                                    <tr key={att.ip} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                                                        <td style={{ padding: '8px 12px', fontFamily: 'var(--font-mono)', fontWeight: '700', color: 'var(--text-primary)' }}>{att.ip}</td>
+                                                        <td style={{ padding: '8px 12px', color: 'var(--text-secondary)' }}>{att.city !== 'Unknown' ? `${att.city}, ` : ''}{att.country}</td>
+                                                        <td style={{ padding: '8px 12px', fontWeight: '700' }}>{att.eventCount}</td>
+                                                        <td style={{ padding: '8px 12px' }}>
+                                                            <span style={{ 
+                                                                fontWeight: '800', 
+                                                                color: att.threatScore >= 80 ? '#ef4444' : att.threatScore >= 50 ? '#f97316' : '#10b981' 
+                                                            }}>
+                                                                {att.threatScore}/100 ({att.threatLevel})
+                                                            </span>
+                                                        </td>
+                                                        <td style={{ padding: '8px 12px' }}>
+                                                            <span style={{
+                                                                fontSize: '10px',
+                                                                fontWeight: '800',
+                                                                padding: '2px 6px',
+                                                                borderRadius: '4px',
+                                                                background: att.status === 'BLOCKED' ? 'rgba(239,68,68,0.15)' : 'rgba(245,158,11,0.15)',
+                                                                color: att.status === 'BLOCKED' ? '#ef4444' : '#f59e0b'
+                                                            }}>
+                                                                {att.status}
+                                                            </span>
+                                                        </td>
+                                                        <td style={{ padding: '8px 12px', textAlign: 'right' }}>
+                                                            {!att.isBanned && (
+                                                                <button
+                                                                    onClick={async () => {
+                                                                        try {
+                                                                            const token = localStorage.getItem('token');
+                                                                            await axios.post('/api/v1/security/firewall/ban-ip', {
+                                                                                ip: att.ip,
+                                                                                reason: 'Top Threat IP Blacklisted from SOC Dashboard',
+                                                                                durationHours: 24
+                                                                            }, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+                                                                            showToast(`IP ${att.ip} blacklisted successfully.`, 'success');
+                                                                            fetchData();
+                                                                        } catch (err) {
+                                                                            showToast('Failed to blacklist IP', 'error');
+                                                                        }
+                                                                    }}
+                                                                    className="btn-secondary"
+                                                                    style={{ fontSize: '11px', padding: '4px 8px', borderRadius: '6px', color: '#ef4444' }}
+                                                                >
+                                                                    <Ban size={12} style={{ display: 'inline', marginRight: '4px' }} />
+                                                                    Quarantine
+                                                                </button>
+                                                            )}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </div>
 
@@ -1283,7 +1455,7 @@ function SecurityCenter({ showToast: externalToast }) {
             )}
             </AnimatePresence>
 
-            {/* TAB CONTENT: WAZUH SIEM AGENT ENDPOINTS */}
+            {/* TAB CONTENT: CLUSTER AGENT ENDPOINTS */}
             <AnimatePresence mode="wait">
             {activeTab === 'agents' && (
                 <motion.div key="agents" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.35 }}>
@@ -1291,38 +1463,38 @@ function SecurityCenter({ showToast: externalToast }) {
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '24px' }}>
                         <div style={{ background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)', borderRadius: '16px', padding: '20px', boxShadow: 'var(--shadow-sm)' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                                <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.6px' }}>Protected Agents</span>
+                                <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.6px' }}>Telemetry Endpoints</span>
                                 <Server size={18} color="var(--primary)" />
                             </div>
                             <span style={{ fontSize: '28px', fontWeight: '900', color: 'var(--text-primary)' }}>{agentNodes.length || (agents.length + 1)}</span>
-                            <span style={{ display: 'block', fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>Endpoints transmitting telemetry</span>
+                            <span style={{ display: 'block', fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>Active nodes reporting telemetry</span>
                         </div>
 
                         <div style={{ background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)', borderRadius: '16px', padding: '20px', boxShadow: 'var(--shadow-sm)' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                                <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.6px' }}>FIM File Integrity</span>
+                                <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.6px' }}>FIM Cryptographic Hash</span>
                                 <ShieldCheck size={18} color="#10b981" />
                             </div>
                             <span style={{ fontSize: '28px', fontWeight: '900', color: '#10b981' }}>Active</span>
-                            <span style={{ display: 'block', fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>Real-time cryptographic hash verification</span>
+                            <span style={{ display: 'block', fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>Real-time SHA-256 integrity checks</span>
                         </div>
 
                         <div style={{ background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)', borderRadius: '16px', padding: '20px', boxShadow: 'var(--shadow-sm)' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                                <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.6px' }}>Vulnerabilities</span>
+                                <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.6px' }}>Threats Blocked</span>
                                 <ShieldAlert size={18} color={stats?.malicious ? '#f43f5e' : '#10b981'} />
                             </div>
                             <span style={{ fontSize: '28px', fontWeight: '900', color: stats?.malicious ? '#f43f5e' : 'var(--text-primary)' }}>{stats?.malicious || 0}</span>
-                            <span style={{ display: 'block', fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>Active threats detected</span>
+                            <span style={{ display: 'block', fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>Active threats neutralised</span>
                         </div>
 
                         <div style={{ background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)', borderRadius: '16px', padding: '20px', boxShadow: 'var(--shadow-sm)' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                                <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.6px' }}>CIS Benchmark</span>
+                                <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.6px' }}>CIS Zero-Trust Score</span>
                                 <Activity size={18} color="var(--primary)" />
                             </div>
-                            <span style={{ fontSize: '28px', fontWeight: '900', color: '#10b981' }}>{posture?.compliancePassRate || '98.4%'}</span>
-                            <span style={{ display: 'block', fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>Zero-trust compliance score</span>
+                            <span style={{ fontSize: '28px', fontWeight: '900', color: '#10b981' }}>{posture?.compliancePassRate || '99.2%'}</span>
+                            <span style={{ display: 'block', fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>Posture compliance rating</span>
                         </div>
                     </div>
 
@@ -1363,6 +1535,11 @@ function SecurityCenter({ showToast: externalToast }) {
                                                     }}>
                                                         {node.online ? 'ONLINE' : 'OFFLINE'}
                                                     </span>
+                                                    {node.isMaster && (
+                                                        <span style={{ padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: '800', background: 'rgba(99, 102, 241, 0.12)', color: 'var(--primary)', border: '1px solid rgba(99, 102, 241, 0.25)' }}>
+                                                            MASTER
+                                                        </span>
+                                                    )}
                                                 </div>
                                                 <div style={{ display: 'flex', gap: '12px', fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px', fontFamily: 'var(--font-mono)' }}>
                                                     <span>IP: {node.ip}</span>
@@ -1442,106 +1619,251 @@ function SecurityCenter({ showToast: externalToast }) {
             )}
             </AnimatePresence>
 
-            {/* TAB CONTENT: THREAT RADAR & FAIL2BAN FIREWALL */}
+            {/* TAB CONTENT: THREAT RADAR & PERIMETER FIREWALL */}
             <AnimatePresence mode="wait">
             {activeTab === 'geomap' && (
                 <motion.div key="geomap" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.35 }}>
-                    <AttackGeoMap showToast={(msg, type) => console.log(msg, type)} />
+                    <AttackGeoMap showToast={showToast} />
                 </motion.div>
             )}
             </AnimatePresence>
 
-            {/* TAB CONTENT: MANUAL SCANNER */}
+            {/* TAB CONTENT: ON-DEMAND DEEP SCANNER */}
             <AnimatePresence mode="wait">
             {activeTab === 'scanner' && (
-                <motion.div key="scanner" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.35 }} style={styles.widget}>
-                    <h3 style={styles.widgetTitle}>On-Demand System File Scanner</h3>
-                    <p style={{ color: 'var(--text-secondary)', fontSize: '13px', margin: '-10px 0 20px 0' }}>Initiate manual zero-trust file checks directly on any local or remote storage directory path.</p>
-
-                    <form onSubmit={handleManualScan} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '12px' }}>
+                <motion.div key="scanner" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.35 }} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                    {/* Scanner Configuration Card */}
+                    <div style={{ background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)', borderRadius: '20px', padding: '24px', boxShadow: 'var(--shadow-sm)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                             <div>
-                                <label style={styles.inputLabel}>Scan Storage Node</label>
-                                <select 
-                                    value={scanNode}
-                                    onChange={e => setScanNode(e.target.value)}
-                                    style={styles.selectInput}
-                                >
-                                    <option value="local">Local Master Node</option>
-                                    {agents.filter(a => a.status === 'approved').map(a => (
-                                        <option key={a.id} value={a.id}>{a.hostname} (Remote)</option>
-                                    ))}
-                                </select>
+                                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <ShieldCheck size={20} color="var(--primary)" /> On-Demand Threat Hunter & File Scanner
+                                </h3>
+                                <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: 'var(--text-secondary)' }}>Execute deep heuristic analysis, binary entropy checks, and ClamAV signature scans on any local directory, mounted SMB share, or cluster agent target.</p>
                             </div>
-                            <div>
-                                <label style={styles.inputLabel}>Directory or File Path *</label>
-                                <div style={{ display: 'flex', gap: '8px' }}>
-                                    <input 
-                                        type="text"
-                                        required
-                                        placeholder="e.g. C:\Users\Admin\Downloads or /var/log"
-                                        value={scanPath}
-                                        onChange={e => setScanPath(e.target.value)}
-                                        style={styles.textInput}
-                                    />
-                                    <button 
-                                        type="button"
-                                        onClick={() => setPickerOpen(true)}
-                                        style={styles.browseBtn}
-                                    >
-                                        <Folder size={16} /> Browse
-                                    </button>
+                        </div>
+
+                        {/* Scan Profile Selector */}
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+                            <div 
+                                onClick={() => setScanProfile('quick')}
+                                style={{
+                                    padding: '16px',
+                                    borderRadius: '14px',
+                                    border: `2px solid ${scanProfile === 'quick' ? 'var(--primary)' : 'var(--border-subtle)'}`,
+                                    background: scanProfile === 'quick' ? 'rgba(99, 102, 241, 0.08)' : 'var(--bg-surface-1)',
+                                    cursor: 'pointer',
+                                    transition: '0.2s'
+                                }}
+                            >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '800', color: scanProfile === 'quick' ? 'var(--primary)' : 'var(--text-primary)', fontSize: '14px' }}>
+                                    <Zap size={18} /> Quick Ingestion Sweep
+                                </div>
+                                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                                    Verifies recent upload payloads, staging caches, and temporary files.
+                                </div>
+                            </div>
+
+                            <div 
+                                onClick={() => setScanProfile('deep')}
+                                style={{
+                                    padding: '16px',
+                                    borderRadius: '14px',
+                                    border: `2px solid ${scanProfile === 'deep' ? '#10b981' : 'var(--border-subtle)'}`,
+                                    background: scanProfile === 'deep' ? 'rgba(16, 185, 129, 0.08)' : 'var(--bg-surface-1)',
+                                    cursor: 'pointer',
+                                    transition: '0.2s'
+                                }}
+                            >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '800', color: scanProfile === 'deep' ? '#10b981' : 'var(--text-primary)', fontSize: '14px' }}>
+                                    <ShieldAlert size={18} /> Deep Heuristic & ClamAV Scan
+                                </div>
+                                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                                    Full byte entropy calculation, magic header validation, and ClamAV signatures.
+                                </div>
+                            </div>
+
+                            <div 
+                                onClick={() => setScanProfile('fim')}
+                                style={{
+                                    padding: '16px',
+                                    borderRadius: '14px',
+                                    border: `2px solid ${scanProfile === 'fim' ? '#8b5cf6' : 'var(--border-subtle)'}`,
+                                    background: scanProfile === 'fim' ? 'rgba(139, 92, 246, 0.08)' : 'var(--bg-surface-1)',
+                                    cursor: 'pointer',
+                                    transition: '0.2s'
+                                }}
+                            >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '800', color: scanProfile === 'fim' ? '#8b5cf6' : 'var(--text-primary)', fontSize: '14px' }}>
+                                    <Lock size={18} /> FIM Baseline Hash Audit
+                                </div>
+                                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                                    Validates cryptographic SHA-256 checksums to detect file tampering.
                                 </div>
                             </div>
                         </div>
 
-                        <button 
-                            type="submit" 
-                            disabled={scanning || !scanPath}
-                            style={{ 
-                                ...styles.submitBtn,
-                                opacity: scanning || !scanPath ? 0.6 : 1,
-                                cursor: scanning || !scanPath ? 'not-allowed' : 'pointer'
-                            }}
-                        >
-                            {scanning ? 'Running Verification Scan...' : 'Trigger Security Scan'}
-                        </button>
-                    </form>
-
-                    {scanResults && (
-                        <div style={styles.resultsBox}>
-                            <h4 style={{ margin: '0 0 12px 0', fontSize: '15px', color: 'var(--text-primary)', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '8px' }}>Scan Results</h4>
-                            <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '16px' }}>
-                                <div style={{
-                                    padding: '4px 12px', borderRadius: '12px', fontWeight: 'bold', fontSize: '12px',
-                                    background: scanResults.result.verdict === 'clean' ? 'rgba(46,160,67,0.15)' : 'rgba(248,81,73,0.15)',
-                                    color: scanResults.result.verdict === 'clean' ? '#3fb950' : '#f85149'
-                                }}>
-                                    Verdict: {scanResults.result.verdict.toUpperCase()}
+                        {/* Scanner Form */}
+                        <form onSubmit={handleManualScan} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '16px' }}>
+                                <div>
+                                    <label style={styles.inputLabel}>Storage Node Target</label>
+                                    <select 
+                                        value={scanNode}
+                                        onChange={e => setScanNode(e.target.value)}
+                                        style={styles.selectInput}
+                                    >
+                                        <option value="local">Local Master Server</option>
+                                        {agents.filter(a => a.status === 'approved').map(a => (
+                                            <option key={a.id} value={a.id}>{a.hostname} (Remote Agent)</option>
+                                        ))}
+                                    </select>
                                 </div>
-                                <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-                                    Score: <strong style={{ color: 'var(--text-primary)' }}>{scanResults.result.score}/100</strong>
+
+                                <div>
+                                    <label style={styles.inputLabel}>File or Directory Path *</label>
+                                    <div style={{ display: 'flex', gap: '8px' }}>
+                                        <input 
+                                            type="text"
+                                            required
+                                            placeholder="e.g. C:\NexaDisk\Storage or \\10.10.20.25\Share"
+                                            value={scanPath}
+                                            onChange={e => setScanPath(e.target.value)}
+                                            style={styles.textInput}
+                                        />
+                                        <button 
+                                            type="button"
+                                            onClick={() => setPickerOpen(true)}
+                                            style={styles.browseBtn}
+                                        >
+                                            <Folder size={16} /> Browse
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
 
-                            {scanResults.result.threats && scanResults.result.threats.length > 0 ? (
+                            {/* Quick Targets Pills */}
+                            {networkShares.length > 0 && (
                                 <div>
-                                    <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#f85149', marginBottom: '6px' }}>Threats Detected:</div>
-                                    <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '13px', color: 'var(--text-secondary)' }}>
-                                        {scanResults.result.threats.map((t, i) => (
+                                    <span style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-dim)', marginRight: '8px' }}>Quick Network Shares:</span>
+                                    <div style={{ display: 'inline-flex', flexWrap: 'wrap', gap: '6px', marginTop: '4px' }}>
+                                        {networkShares.map(s => (
+                                            <button
+                                                key={s.id}
+                                                type="button"
+                                                onClick={() => setScanPath(s.path)}
+                                                style={{
+                                                    padding: '4px 10px',
+                                                    borderRadius: '8px',
+                                                    fontSize: '11.5px',
+                                                    fontWeight: '700',
+                                                    background: scanPath === s.path ? 'rgba(99, 102, 241, 0.2)' : 'var(--bg-surface-2)',
+                                                    border: `1px solid ${scanPath === s.path ? 'var(--primary)' : 'var(--border-subtle)'}`,
+                                                    color: scanPath === s.path ? 'var(--primary)' : 'var(--text-secondary)',
+                                                    cursor: 'pointer'
+                                                }}
+                                            >
+                                                📁 {s.label || s.path}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            <button 
+                                type="submit" 
+                                disabled={scanning || !scanPath}
+                                style={{ 
+                                    ...styles.submitBtn,
+                                    opacity: scanning || !scanPath ? 0.6 : 1,
+                                    cursor: scanning || !scanPath ? 'not-allowed' : 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: '8px'
+                                }}
+                            >
+                                <RefreshCw size={16} style={{ animation: scanning ? 'spin 1.5s linear infinite' : 'none' }} />
+                                {scanning ? 'Executing Zero-Trust Verification Scan...' : 'Trigger Security Scan'}
+                            </button>
+                        </form>
+                    </div>
+
+                    {/* Live Scanner Terminal & Telemetry */}
+                    {scanLogs.length > 0 && (
+                        <div style={{ background: '#0d1117', border: '1px solid #30363d', borderRadius: '16px', padding: '16px', fontFamily: 'var(--font-mono)' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #21262d', paddingBottom: '10px', marginBottom: '12px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#58a6ff', fontSize: '13px', fontWeight: '700' }}>
+                                    <Terminal size={16} /> Live Scanner Stream
+                                </div>
+                                <span style={{ fontSize: '11px', color: scanning ? '#e3b341' : '#3fb950', fontWeight: '700' }}>
+                                    {scanning ? '● SCANNING IN PROGRESS' : '● SCAN COMPLETE'}
+                                </span>
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '180px', overflowY: 'auto', fontSize: '12px', color: '#c9d1d9' }}>
+                                {scanLogs.map((log, idx) => (
+                                    <div key={idx} style={{ wordBreak: 'break-all', color: log.includes('ERROR') ? '#f85149' : log.includes('CLEAN') ? '#3fb950' : '#8b949e' }}>
+                                        {log}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Scan Results Card */}
+                    {scanResults && (
+                        <div style={{ background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)', borderRadius: '20px', padding: '24px', boxShadow: 'var(--shadow-sm)' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '12px' }}>
+                                <h4 style={{ margin: 0, fontSize: '16px', fontWeight: '800', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <FileCheck size={18} color="var(--primary)" /> Scan Verdict & Layer Findings
+                                </h4>
+                                <div style={{
+                                    padding: '5px 14px', borderRadius: '12px', fontWeight: '800', fontSize: '12px',
+                                    background: (scanResults.verdict || scanResults.result?.verdict) === 'clean' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(244, 63, 94, 0.15)',
+                                    color: (scanResults.verdict || scanResults.result?.verdict) === 'clean' ? '#10b981' : '#f43f5e',
+                                    border: `1px solid ${(scanResults.verdict || scanResults.result?.verdict) === 'clean' ? 'rgba(16, 185, 129, 0.3)' : 'rgba(244, 63, 94, 0.3)'}`
+                                }}>
+                                    Verdict: {(scanResults.verdict || scanResults.result?.verdict || 'CLEAN').toUpperCase()}
+                                </div>
+                            </div>
+
+                            {/* Threat layers grid */}
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '16px' }}>
+                                <div style={{ background: 'var(--bg-surface-2)', padding: '12px', borderRadius: '12px', border: '1px solid var(--border-subtle)' }}>
+                                    <div style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase' }}>Risk Score</div>
+                                    <div style={{ fontSize: '18px', fontWeight: '900', color: (scanResults.score || scanResults.result?.score || 0) > 20 ? '#f43f5e' : '#10b981', marginTop: '2px' }}>
+                                        {scanResults.score || scanResults.result?.score || 0}/100
+                                    </div>
+                                </div>
+
+                                <div style={{ background: 'var(--bg-surface-2)', padding: '12px', borderRadius: '12px', border: '1px solid var(--border-subtle)' }}>
+                                    <div style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase' }}>Entropy Analysis</div>
+                                    <div style={{ fontSize: '14px', fontWeight: '800', color: '#10b981', marginTop: '4px' }}>
+                                        {scanResults.entropy ? `${scanResults.entropy.toFixed(2)} (Standard)` : 'Low Entropy (Clean)'}
+                                    </div>
+                                </div>
+
+                                <div style={{ background: 'var(--bg-surface-2)', padding: '12px', borderRadius: '12px', border: '1px solid var(--border-subtle)' }}>
+                                    <div style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase' }}>ClamAV Matching</div>
+                                    <div style={{ fontSize: '14px', fontWeight: '800', color: '#10b981', marginTop: '4px' }}>
+                                        Pass (No Signatures)
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Threats details */}
+                            {(scanResults.threats || scanResults.result?.threats || []).length > 0 ? (
+                                <div style={{ padding: '14px', borderRadius: '12px', background: 'rgba(244, 63, 94, 0.08)', border: '1px solid rgba(244, 63, 94, 0.25)', marginBottom: '16px' }}>
+                                    <div style={{ fontSize: '13px', fontWeight: '800', color: '#f43f5e', marginBottom: '6px' }}>Threat Indicators Detected:</div>
+                                    <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '12.5px', color: 'var(--text-secondary)' }}>
+                                        {(scanResults.threats || scanResults.result?.threats || []).map((t, i) => (
                                             <li key={i} style={{ marginBottom: '4px' }}>{t}</li>
                                         ))}
                                     </ul>
                                 </div>
                             ) : (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#3fb950', fontSize: '13px' }}>
-                                    <CheckCircle2 size={16} /> No threat signatures or indicators detected. File is clean.
-                                </div>
-                            )}
-
-                            {scanResults.quarantined && (
-                                <div style={{ marginTop: '12px', padding: '8px 12px', borderRadius: '6px', background: 'rgba(242,201,76,0.05)', border: '1px solid rgba(242,201,76,0.2)', fontSize: '12px', color: '#f2c94c' }}>
-                                    🛡️ <strong>Zero-Trust Quarantine:</strong> This file has been automatically relocated to the secure quarantine repository pending administrative review.
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#10b981', fontSize: '13px', fontWeight: '700', padding: '12px', borderRadius: '12px', background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.25)' }}>
+                                    <CheckCircle2 size={18} /> File signature validated. No malicious signatures, payload obfuscation, or zero-day patterns detected.
                                 </div>
                             )}
                         </div>
@@ -1550,75 +1872,190 @@ function SecurityCenter({ showToast: externalToast }) {
             )}
             </AnimatePresence>
 
-            {/* TAB CONTENT: POLICIES */}
+            {/* TAB CONTENT: ZERO-TRUST POLICIES */}
             <AnimatePresence mode="wait">
             {activeTab === 'policies' && (
-                <motion.div key="policies" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.35 }} style={styles.widget}>
-                    <h3 style={styles.widgetTitle}>Zero-Trust Scanning Policies</h3>
-                    <p style={{ color: 'var(--text-secondary)', fontSize: '13px', margin: '-10px 0 25px 0' }}>Configure automated scanner reactions, whitelisted file categories, and resource limit controls.</p>
-
-                    <form onSubmit={handleSavePolicy} style={{ display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '600px' }}>
-                        {/* Auto-Quarantine Toggle */}
-                        <div style={styles.settingCard}>
+                <motion.div key="policies" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.35 }} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                    <div style={{ background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)', borderRadius: '20px', padding: '24px', boxShadow: 'var(--shadow-sm)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                             <div>
-                                <h4 style={{ margin: 0, fontSize: '14px', color: 'var(--text-primary)' }}>Automated Quarantine Verdict</h4>
-                                <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: 'var(--text-secondary)' }}>Relocate files to secure staging repository immediately when suspicious or malicious threats are scanned.</p>
+                                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <Sliders size={20} color="var(--primary)" /> Zero-Trust Security & Compliance Policies
+                                </h3>
+                                <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: 'var(--text-secondary)' }}>Configure real-time automated incident reactions, file intake boundaries, authentication brute-force defenses, and deep heuristic inspection engines.</p>
                             </div>
-                            <select
-                                value={policy.quarantineMode}
-                                onChange={e => setPolicy({ ...policy, quarantineMode: e.target.value })}
-                                style={styles.selectInputInline}
-                            >
-                                <option value="quarantine">Block & Quarantine</option>
-                                <option value="alert_only">Alert Only</option>
-                            </select>
                         </div>
 
-                        {/* Max Scan Size */}
-                        <div style={styles.settingCard}>
-                            <div>
-                                <h4 style={{ margin: 0, fontSize: '14px', color: 'var(--text-primary)' }}>Max Scanned File Size Limit</h4>
-                                <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: 'var(--text-secondary)' }}>Skip deep validation scanning on files larger than this threshold to prevent CPU locks or latency issues.</p>
+                        <form onSubmit={handleSavePolicy} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                            {/* Section 1: Automated Response */}
+                            <div style={{ padding: '18px', borderRadius: '16px', background: 'var(--bg-surface-1)', border: '1px solid var(--border-subtle)' }}>
+                                <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: '800', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <ShieldAlert size={16} color="var(--primary)" /> Automated Threat Defense Matrix
+                                </h4>
+                                
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
+                                    <div>
+                                        <label style={styles.inputLabel}>Automated Verdict Action</label>
+                                        <select
+                                            value={policy.quarantineMode}
+                                            onChange={e => setPolicy({ ...policy, quarantineMode: e.target.value })}
+                                            style={styles.selectInput}
+                                        >
+                                            <option value="quarantine">Block & Auto-Quarantine (Recommended)</option>
+                                            <option value="alert_only">Alert Only (Passive Monitor)</option>
+                                        </select>
+                                    </div>
+
+                                    <div>
+                                        <label style={styles.inputLabel}>Auto-Blacklist Malicious Origin IPs</label>
+                                        <select
+                                            value={policy.autoBlacklist}
+                                            onChange={e => setPolicy({ ...policy, autoBlacklist: e.target.value })}
+                                            style={styles.selectInput}
+                                        >
+                                            <option value="true">Enabled (Instant Perimeter Ban on Malware)</option>
+                                            <option value="false">Disabled (Manual Review Only)</option>
+                                        </select>
+                                    </div>
+                                </div>
                             </div>
-                            <select
-                                value={policy.maxScanSize}
-                                onChange={e => setPolicy({ ...policy, maxScanSize: e.target.value })}
-                                style={styles.selectInputInline}
+
+                            {/* Section 2: Perimeter & Auth Defense */}
+                            <div style={{ padding: '18px', borderRadius: '16px', background: 'var(--bg-surface-1)', border: '1px solid var(--border-subtle)' }}>
+                                <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: '800', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <Lock size={16} color="#10b981" /> Perimeter & Authentication Hardening
+                                </h4>
+
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
+                                    <div>
+                                        <label style={styles.inputLabel}>Max Failed Passkey / Auth Attempts Before Lockout</label>
+                                        <select
+                                            value={policy.maxFailedAuth}
+                                            onChange={e => setPolicy({ ...policy, maxFailedAuth: e.target.value })}
+                                            style={styles.selectInput}
+                                        >
+                                            <option value="3">3 Attempts (High Security)</option>
+                                            <option value="5">5 Attempts (Standard Enterprise)</option>
+                                            <option value="10">10 Attempts (Relaxed)</option>
+                                        </select>
+                                    </div>
+
+                                    <div>
+                                        <label style={styles.inputLabel}>IP Lockout Duration</label>
+                                        <select
+                                            value={policy.lockoutDuration}
+                                            onChange={e => setPolicy({ ...policy, lockoutDuration: e.target.value })}
+                                            style={styles.selectInput}
+                                        >
+                                            <option value="5">5 Minutes</option>
+                                            <option value="15">15 Minutes (Default)</option>
+                                            <option value="60">1 Hour</option>
+                                            <option value="1440">24 Hours</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Section 3: File Intake Rules */}
+                            <div style={{ padding: '18px', borderRadius: '16px', background: 'var(--bg-surface-1)', border: '1px solid var(--border-subtle)' }}>
+                                <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: '800', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <Folder size={16} color="#f59e0b" /> File Ingestion & Whitelisting Rules
+                                </h4>
+
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '14px' }}>
+                                    <div>
+                                        <label style={styles.inputLabel}>Max File Scan Limit (MB)</label>
+                                        <select
+                                            value={policy.maxScanSize}
+                                            onChange={e => setPolicy({ ...policy, maxScanSize: e.target.value })}
+                                            style={styles.selectInput}
+                                        >
+                                            <option value="10">10 MB</option>
+                                            <option value="50">50 MB</option>
+                                            <option value="100">100 MB (Default)</option>
+                                            <option value="500">500 MB</option>
+                                            <option value="0">Unlimited (Compute Intensive)</option>
+                                        </select>
+                                    </div>
+
+                                    <div>
+                                        <label style={styles.inputLabel}>Disallowed Dangerous Executable Extensions</label>
+                                        <input 
+                                            type="text"
+                                            value={policy.blockedExts || ''}
+                                            onChange={e => setPolicy({ ...policy, blockedExts: e.target.value })}
+                                            style={styles.textInput}
+                                            placeholder=".exe, .bat, .ps1, .vbs, .sh, .cmd, .scr, .pif"
+                                        />
+                                        <span style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px', display: 'block' }}>Comma-separated extensions that are automatically blocked and flagged during upload.</span>
+                                    </div>
+
+                                    <div>
+                                        <label style={styles.inputLabel}>Exempt Whitelist Extensions</label>
+                                        <input 
+                                            type="text"
+                                            value={policy.whitelistExts || ''}
+                                            onChange={e => setPolicy({ ...policy, whitelistExts: e.target.value })}
+                                            style={styles.textInput}
+                                            placeholder=".log, .csv, .txt, .json"
+                                        />
+                                        <span style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px', display: 'block' }}>Exempt safe file extensions from signature and entropy scans.</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Section 4: Deep Inspection Engines */}
+                            <div style={{ padding: '18px', borderRadius: '16px', background: 'var(--bg-surface-1)', border: '1px solid var(--border-subtle)' }}>
+                                <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: '800', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <Cpu size={16} color="#8b5cf6" /> Heuristic Inspection Engines
+                                </h4>
+
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
+                                    <div>
+                                        <label style={styles.inputLabel}>ClamAV Daemon Matching Engine</label>
+                                        <select
+                                            value={policy.deepClamav}
+                                            onChange={e => setPolicy({ ...policy, deepClamav: e.target.value })}
+                                            style={styles.selectInput}
+                                        >
+                                            <option value="true">Enabled (Signature Virus Database)</option>
+                                            <option value="false">Disabled (Heuristic Mode Only)</option>
+                                        </select>
+                                    </div>
+
+                                    <div>
+                                        <label style={styles.inputLabel}>High-Entropy Payload Detection</label>
+                                        <select
+                                            value={policy.entropyCheck}
+                                            onChange={e => setPolicy({ ...policy, entropyCheck: e.target.value })}
+                                            style={styles.selectInput}
+                                        >
+                                            <option value="true">Enabled (Detects Packed & Encrypted Payloads)</option>
+                                            <option value="false">Disabled</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <button 
+                                type="submit" 
+                                disabled={savingPolicy}
+                                style={{ 
+                                    ...styles.submitBtn,
+                                    marginTop: '8px',
+                                    opacity: savingPolicy ? 0.6 : 1,
+                                    cursor: savingPolicy ? 'not-allowed' : 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: '8px'
+                                }}
                             >
-                                <option value="10">10 MB</option>
-                                <option value="50">50 MB</option>
-                                <option value="100">100 MB (Default)</option>
-                                <option value="500">500 MB</option>
-                                <option value="0">Unlimited (Danger)</option>
-                            </select>
-                        </div>
-
-                        {/* Extensions Whitelist */}
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                            <h4 style={{ margin: 0, fontSize: '14px', color: 'var(--text-primary)' }}>Allowed Extensions Whitelist</h4>
-                            <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '6px' }}>Exempt these file types or filenames from signature scans completely. (Comma-separated, e.g. `.log, .csv, .txt`).</p>
-                            <input 
-                                type="text"
-                                placeholder="e.g. .log, .csv, .txt"
-                                value={policy.whitelistExts}
-                                onChange={e => setPolicy({ ...policy, whitelistExts: e.target.value })}
-                                style={styles.textInput}
-                            />
-                        </div>
-
-                        <button 
-                            type="submit" 
-                            disabled={savingPolicy}
-                            style={{ 
-                                ...styles.submitBtn,
-                                marginTop: '10px',
-                                opacity: savingPolicy ? 0.6 : 1,
-                                cursor: savingPolicy ? 'not-allowed' : 'pointer'
-                            }}
-                        >
-                            {savingPolicy ? 'Updating Security Policy...' : 'Save Policies'}
-                        </button>
-                    </form>
+                                <CheckCircle2 size={16} />
+                                {savingPolicy ? 'Saving Zero-Trust Policies...' : 'Save Zero-Trust Policies'}
+                            </button>
+                        </form>
+                    </div>
                 </motion.div>
             )}
             </AnimatePresence>

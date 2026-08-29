@@ -31,7 +31,9 @@ async function loadFirewallState() {
         );
         const newMap = new Map();
         for (const row of bansRes.rows) {
-            newMap.set(row.ip, row);
+            if (!geoService.isPrivateIp(row.ip)) {
+                newMap.set(row.ip, row);
+            }
         }
         bannedIpsMap = newMap;
 
@@ -48,9 +50,8 @@ async function loadFirewallState() {
     }
 }
 
-// Reload state every 30 seconds automatically
+// Periodic background refresh every 30 seconds
 setInterval(loadFirewallState, 30 * 1000);
-loadFirewallState();
 
 /**
  * Extract clean client IP address from incoming Express request
@@ -70,6 +71,7 @@ function getClientIp(req) {
  * Automatically ban an offending IP into the database and memory cache
  */
 async function autoBanIp(ip, reason, durationHours = 24) {
+    if (!ip || geoService.isPrivateIp(ip)) return;
     const geo = geoService.resolveIp(ip);
     const expiresAt = new Date(Date.now() + durationHours * 60 * 60 * 1000);
 
@@ -118,6 +120,11 @@ function firewallMiddleware(req, res, next) {
     const ip = getClientIp(req);
     const isPrivate = geoService.isPrivateIp(ip);
 
+    // Trusted local / loopback / private intranet requests ALWAYS bypass all firewall, WAF, and geofence restrictions
+    if (isPrivate) {
+        return next();
+    }
+
     // 1. Enforce Active IP Blacklist
     if (bannedIpsMap.has(ip)) {
         const ban = bannedIpsMap.get(ip);
@@ -135,11 +142,6 @@ function firewallMiddleware(req, res, next) {
         }
     }
 
-    // Skip WAF and geofence checks for trusted local / private intranet traffic
-    if (isPrivate) {
-        return next();
-    }
-
     const geo = geoService.resolveIp(ip);
 
     // 2. Enforce Geofence Policy
@@ -147,6 +149,22 @@ function firewallMiddleware(req, res, next) {
         const blockedList = geofenceConfig.blockedCountries || [];
         if (blockedList.includes(geo.country)) {
             logger.warn(`[Firewall Geofence] Blocked request from restricted country ${geo.country} (${ip})`);
+            try {
+                const wafCollector = require('../services/security/wafCollector');
+                wafCollector.ingestEvent({
+                    source: 'express_waf',
+                    sourceIp: ip,
+                    method: req.method,
+                    path: req.originalUrl || req.url,
+                    userAgent: req.headers['user-agent'],
+                    attackType: 'GEOFENCE_VIOLATION',
+                    severity: 'LOW',
+                    action: 'BLOCKED',
+                    statusCode: 403,
+                    ruleId: 'GEOFENCE-BLOCK-01',
+                    ruleMessage: `Geofence block rule triggered for country ${geo.country}`
+                });
+            } catch (_) {}
             return res.status(403).json({
                 error: `Access Denied: Geofence policy restricts traffic from country code ${geo.country}`
             });
@@ -155,6 +173,22 @@ function firewallMiddleware(req, res, next) {
         const allowedList = geofenceConfig.blockedCountries || [];
         if (!allowedList.includes(geo.country)) {
             logger.warn(`[Firewall Geofence] Blocked request from non-whitelisted country ${geo.country} (${ip})`);
+            try {
+                const wafCollector = require('../services/security/wafCollector');
+                wafCollector.ingestEvent({
+                    source: 'express_waf',
+                    sourceIp: ip,
+                    method: req.method,
+                    path: req.originalUrl || req.url,
+                    userAgent: req.headers['user-agent'],
+                    attackType: 'GEOFENCE_VIOLATION',
+                    severity: 'LOW',
+                    action: 'BLOCKED',
+                    statusCode: 403,
+                    ruleId: 'GEOFENCE-ALLOW-01',
+                    ruleMessage: `Geofence whitelist non-match for country ${geo.country}`
+                });
+            } catch (_) {}
             return res.status(403).json({
                 error: `Access Denied: Geofence whitelist restricts traffic from country code ${geo.country}`
             });
@@ -177,6 +211,25 @@ function firewallMiddleware(req, res, next) {
 
             logger.warn(`🚨 [WAF Detection] ${rule.threat} probe from ${ip} targeting ${probeInfo.target}`);
 
+            // Ingest real WAF telemetry event into wafCollector
+            try {
+                const wafCollector = require('../services/security/wafCollector');
+                wafCollector.ingestEvent({
+                    source: 'express_waf',
+                    sourceIp: ip,
+                    method: req.method,
+                    path: req.originalUrl || req.url,
+                    userAgent: req.headers['user-agent'],
+                    attackType: rule.threat,
+                    severity: rule.threat === 'COMMAND_INJECTION' || rule.threat === 'REMOTE_CODE_EXECUTION' ? 'CRITICAL' : 'HIGH',
+                    action: 'BLOCKED',
+                    statusCode: 403,
+                    ruleId: `WAF-${rule.threat}`,
+                    ruleMessage: `OWASP inspection triggered: ${rule.threat} [MITRE ${rule.mitre}]`,
+                    details: { pattern: String(rule.pattern), inspectTarget }
+                });
+            } catch (_) {}
+
             // Calculate scoring for IP
             let currentScore = (suspiciousIpScores.get(ip)?.score || 0) + rule.score;
             suspiciousIpScores.set(ip, {
@@ -184,8 +237,8 @@ function firewallMiddleware(req, res, next) {
                 lastSeen: Date.now()
             });
 
-            // If threat score exceeds 50 (e.g. command injection or 2 quick probes), trigger automatic jail ban
-            if (currentScore >= 50) {
+            // If threat score exceeds threshold in production auto-ban mode
+            if (currentScore >= 50 && process.env.WAF_AUTO_BAN === 'true') {
                 autoBanIp(ip, `WAF Exploit Detection: ${rule.threat} [MITRE ${rule.mitre}] targeting ${probeInfo.target}`, 24);
                 return res.status(403).json({
                     error: 'Access Denied: Hostile security payload detected by WAF engine. IP blacklisted.',
@@ -193,8 +246,10 @@ function firewallMiddleware(req, res, next) {
                 });
             }
 
-            return res.status(400).json({
-                error: 'Bad Request: Malformed or hostile payload rejected by WAF inspection.'
+            return res.status(403).json({
+                error: 'Access Denied: Malformed or hostile payload rejected by WAF inspection.',
+                threat: rule.threat,
+                mitre: rule.mitre
             });
         }
     }
