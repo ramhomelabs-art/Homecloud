@@ -13,9 +13,15 @@ Write-Host "==========================================================" -Foregro
 $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 $isAdmin = $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
-    Write-Error "ERROR: This script must be run as Administrator. Please open PowerShell as Administrator and retry."
+    Write-Host "`n[!] ERROR: Administrator Privileges Required." -ForegroundColor Red
+    Write-Host "---------------------------------------------------------" -ForegroundColor Yellow
+    Write-Host "To install the background agent service on Windows:" -ForegroundColor Cyan
+    Write-Host "1. Press [Win + X] on your keyboard." -ForegroundColor White
+    Write-Host "2. Click 'Terminal (Admin)' or 'Windows PowerShell (Admin)'." -ForegroundColor White
+    Write-Host "3. Paste the command and press Enter.`n" -ForegroundColor White
     exit 1
 }
+
 
 # 2. Check and Auto-Install Node.js LTS if missing
 $nodeInstalled = $false
