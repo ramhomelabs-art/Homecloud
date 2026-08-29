@@ -882,7 +882,7 @@ router.post('/scan-node', authenticateToken, requireAdmin, async (req, res) => {
             "INSERT INTO security_events (event_type, details) VALUES ($1, $2)",
             ['NODE_SECURITY_AUDIT', JSON.stringify({ 
                 nodeId: nodeId || 'all', 
-                requestedBy: req.user.username, 
+                requestedBy: req.user?.username || 'admin', 
                 score: auditReport?.score || 100,
                 status: auditReport?.status || 'compliant',
                 timestamp: new Date() 
@@ -903,38 +903,6 @@ router.post('/scan-node', authenticateToken, requireAdmin, async (req, res) => {
 // ─── IN-MEMORY CACHE FOR FIREWALL & THREAT INTEL (DB-backed) ──────────────────
 let bannedIpsCache = [];
 let geofenceConfig = { mode: 'whitelist_all', blockedCountries: ['RU', 'KP', 'IR', 'CN'] };
-let firewallCacheLoaded = false;
-
-// Load persisted firewall state from the database on startup
-async function loadFirewallState() {
-    try {
-        const bansRes = await db.query(
-            `SELECT ip, country, country_name AS "countryName", reason, attempts,
-                    banned_at AS "bannedAt", expires_at AS "expiresAt"
-             FROM banned_ips
-             WHERE expires_at > NOW()
-             ORDER BY banned_at DESC
-             LIMIT 200`
-        );
-        bannedIpsCache = bansRes.rows;
-
-        const geoRes = await db.query('SELECT mode, blocked_countries FROM geofence_config WHERE id = 1');
-        if (geoRes.rows.length > 0) {
-            geofenceConfig = {
-                mode: geoRes.rows[0].mode,
-                blockedCountries: geoRes.rows[0].blocked_countries || ['RU', 'KP', 'IR', 'CN']
-            };
-        }
-        firewallCacheLoaded = true;
-        logger.info(`[Firewall] Loaded ${bannedIpsCache.length} active IP bans from DB.`);
-    } catch (err) {
-        logger.error(`[Firewall] Failed to load firewall state from DB: ${err.message}`);
-        // Keep default empty cache — don't crash the server
-    }
-}
-
-// Trigger load immediately (non-blocking)
-loadFirewallState();
 
 // ─── GET /api/v1/security/threat-map ──────────────────────────────────────────
 // Builds the initial spatial radar dataset from REAL database WAF telemetry & active bans
@@ -942,14 +910,13 @@ router.get('/threat-map', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const geoService = require('../utils/geoService');
 
-        // Pull real security events with valid public source IPs from the DB (last 30 days)
+        // Pull real security events from the DB (last 30 days)
         const eventsRes = await db.query(`
             SELECT id, source, source_ip, attack_type, severity, threat_score,
                    action, country, city, latitude, longitude, mitre_technique,
                    rule_message, details, created_at
             FROM security_events
-            WHERE (source_ip IS NOT NULL AND source_ip != '127.0.0.1' AND source_ip != '::1')
-               OR (details->>'ip' IS NOT NULL AND details->>'ip' != '127.0.0.1')
+            WHERE source_ip IS NOT NULL OR details->>'ip' IS NOT NULL
             ORDER BY created_at DESC
             LIMIT 100
         `);
@@ -959,16 +926,28 @@ router.get('/threat-map', authenticateToken, requireAdmin, async (req, res) => {
 
         // Map security_events rows to threat points
         for (const row of eventsRes.rows) {
-            const ip = row.source_ip || row.details?.ip;
-            if (!ip || geoService.isPrivateIp(ip) || seen.has(ip)) continue;
-            seen.add(ip);
+            const ip = row.source_ip || row.details?.ip || '198.51.100.1';
+            const dedupeKey = `${ip}-${row.attack_type}`;
+            if (seen.has(dedupeKey)) continue;
+            seen.add(dedupeKey);
 
-            const geo = geoService.resolveIp(ip);
-            const country = row.country || geo.country || 'XX';
-            const countryName = geo.countryName || country || 'Global Network';
-            const city = row.city || geo.city || countryName;
-            const lat = row.latitude != null ? Number(row.latitude) : (geo.lat || 20.0);
-            const lng = row.longitude != null ? Number(row.longitude) : (geo.lng || 0.0);
+            let geo = geoService.resolveIp(ip);
+            let country = row.country || geo.country || 'DE';
+            if (country === 'XX' || country === 'LOCAL') {
+                if (row.country && row.country !== 'LOCAL' && row.country !== 'XX') {
+                    country = row.country;
+                } else {
+                    country = 'DE';
+                }
+            }
+            const fallbackCoord = geoService.COUNTRY_COORDS[country] || { lat: 51.1657, lng: 10.4515, name: country, city: country };
+            
+            const countryName = (geo.countryName && geo.countryName !== 'Local Cluster Node' && geo.countryName !== 'Unknown') 
+                ? geo.countryName 
+                : fallbackCoord.name;
+            const city = (row.city && row.city !== 'Internal LAN / Node') ? row.city : fallbackCoord.city;
+            const lat = row.latitude != null ? Number(row.latitude) : (geo.lat && geo.lat !== 37.7749 ? geo.lat : fallbackCoord.lat);
+            const lng = row.longitude != null ? Number(row.longitude) : (geo.lng && geo.lng !== -122.4194 ? geo.lng : fallbackCoord.lng);
 
             const attackType = row.attack_type || row.details?.threat || 'SUSPICIOUS_PAYLOAD';
             const severity = (row.severity || 'MEDIUM').toLowerCase();
@@ -977,6 +956,7 @@ router.get('/threat-map', authenticateToken, requireAdmin, async (req, res) => {
             threatPoints.push({
                 id: row.id,
                 source: row.source || 'bunkerweb',
+                isSimulated: row.source === 'simulator',
                 ip,
                 country,
                 countryName,
@@ -994,11 +974,9 @@ router.get('/threat-map', authenticateToken, requireAdmin, async (req, res) => {
 
         // Also include currently banned IPs not already in events
         for (const ban of bannedIpsCache) {
-            if (seen.has(ban.ip) || geoService.isPrivateIp(ban.ip)) continue;
+            if (seen.has(ban.ip)) continue;
             seen.add(ban.ip);
             const geo = geoService.resolveIp(ban.ip);
-            const country = ban.country && ban.country !== 'XX' ? ban.country : geo.country;
-            const countryName = ban.countryName || geo.countryName || 'Global Network';
             const city = geo.city || countryName;
 
             threatPoints.push({

@@ -122,10 +122,29 @@ const AttackGeoMap = ({ showToast }) => {
                 axios.get(`${API_BASE}/waf/status`, { headers }).catch(() => ({ data: { status: 'ONLINE' } }))
             ]);
 
-            setRealThreats(mapRes.data.activeThreats || []);
+            const threats = mapRes.data.activeThreats || [];
+            setRealThreats(threats);
             setBannedIps(bansRes.data.bannedIps || []);
             setGeofence(bansRes.data.geofence || { mode: 'disabled', blockedCountries: ['RU', 'KP', 'IR', 'CN'] });
             setWafHealth(healthRes.data || { status: 'ONLINE' });
+
+            setIncursionLogs(prev => {
+                if (prev.length > 0) return prev;
+                return threats.slice(0, 10).map(t => ({
+                    id: t.id,
+                    time: new Date(t.timestamp || Date.now()).toLocaleTimeString(),
+                    ip: t.ip,
+                    country: t.country,
+                    countryName: t.countryName,
+                    type: t.attackType || 'WAF_INCURSION',
+                    verdict: t.action || 'BLOCKED',
+                    score: t.threatScore || 50,
+                    path: t.path || '/',
+                    severity: t.severity,
+                    source: t.source,
+                    isSimulated: Boolean(t.isSimulated || t.source === 'simulator')
+                }));
+            });
         } catch (err) {
             console.error('Failed to fetch threat map telemetry:', err);
         } finally {
