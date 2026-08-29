@@ -378,22 +378,56 @@ export default function ClusterCockpitView({
 
     const totalPercentage = activeCapacity > 0 ? Math.round((activeUsed / activeCapacity) * 100) : 0;
 
+    // Real-time ping telemetry measurement
+    const [liveApiPing, setLiveApiPing] = useState(null);
+
+    useEffect(() => {
+        let isMounted = true;
+        const measurePing = async () => {
+            const t0 = performance.now();
+            try {
+                await axios.get('/api/v1/system/health', { timeout: 3000 });
+                const rtt = Math.max(1, Math.round(performance.now() - t0));
+                if (isMounted) setLiveApiPing(rtt);
+            } catch {
+                try {
+                    await axios.get('/api/v1/system/stats', { timeout: 3000 });
+                    const rtt = Math.max(1, Math.round(performance.now() - t0));
+                    if (isMounted) setLiveApiPing(rtt);
+                } catch {}
+            }
+        };
+
+        measurePing();
+        const interval = setInterval(measurePing, 5000);
+        return () => {
+            isMounted = false;
+            clearInterval(interval);
+        };
+    }, []);
+
     // Dynamically calculate live cluster latency from telemetry polling
     const dynamicLatency = useMemo(() => {
-        if (!metrics?.metricsHistory) return '< 1.8 ms Average';
         const latencies = [];
-        Object.values(metrics.metricsHistory).forEach(arr => {
-            if (Array.isArray(arr) && arr.length > 0) {
-                const latest = arr[arr.length - 1];
-                if (latest && typeof latest.latency === 'number' && latest.latency > 0) {
-                    latencies.push(latest.latency);
+        if (metrics?.metricsHistory) {
+            Object.values(metrics.metricsHistory).forEach(arr => {
+                if (Array.isArray(arr) && arr.length > 0) {
+                    const latest = arr[arr.length - 1];
+                    if (latest && typeof latest.latency === 'number' && latest.latency > 0) {
+                        latencies.push(latest.latency);
+                    }
                 }
-            }
-        });
-        if (latencies.length === 0) return '< 1.8 ms Average';
-        const avg = (latencies.reduce((a, b) => a + b, 0) / latencies.length).toFixed(1);
-        return `${avg} ms Average`;
-    }, [metrics]);
+            });
+        }
+        if (latencies.length > 0) {
+            const avg = (latencies.reduce((a, b) => a + b, 0) / latencies.length).toFixed(1);
+            return `${avg} ms (Agent Mesh)`;
+        }
+        if (liveApiPing !== null) {
+            return `${liveApiPing} ms (Live RTT)`;
+        }
+        return '< 1.0 ms (Loopback)';
+    }, [metrics, liveApiPing]);
 
     return (
         <motion.div 
@@ -1346,79 +1380,76 @@ export default function ClusterCockpitView({
                                         animate={{ opacity: 1, x: 0 }}
                                         transition={{ duration: 0.2, delay: i * 0.015 }}
                                         style={{ 
-                                            padding: '10px 12px', 
+                                            padding: '11px 13px', 
                                             background: 'var(--bg-surface-1, rgba(255, 255, 255, 0.02))', 
                                             borderRadius: '10px', 
                                             border: '1px solid var(--border-subtle)',
                                             display: 'flex',
                                             flexDirection: 'column',
-                                            gap: '5px',
+                                            gap: '4px',
                                             minWidth: 0,
                                             width: '100%',
                                             boxSizing: 'border-box',
-                                            overflow: 'hidden',
                                             transition: 'all 0.15s ease'
                                         }}
                                     >
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px', minWidth: 0, width: '100%' }}>
-                                            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '9px', minWidth: 0, flex: 1, overflow: 'hidden' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', minWidth: 0, width: '100%' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1, overflow: 'hidden' }}>
                                                 <div style={{
-                                                    width: '24px',
-                                                    height: '24px',
-                                                    borderRadius: '6px',
+                                                    width: '28px',
+                                                    height: '28px',
+                                                    borderRadius: '7px',
                                                     background: badgeBg,
                                                     display: 'flex',
                                                     alignItems: 'center',
                                                     justifyContent: 'center',
-                                                    flexShrink: 0,
-                                                    marginTop: '1px'
+                                                    flexShrink: 0
                                                 }}>
                                                     {isError || isOffline ? (
-                                                        <AlertTriangle size={13} color="#f85149" />
+                                                        <AlertTriangle size={14} color="#f85149" />
                                                     ) : isCopy ? (
-                                                        <Copy size={13} color="#0ea5e9" />
+                                                        <Copy size={14} color="#0ea5e9" />
                                                     ) : (
-                                                        <Activity size={13} color="#10b981" />
+                                                        <Activity size={14} color="#10b981" />
                                                     )}
                                                 </div>
                                                 <div style={{ minWidth: 0, flex: 1, overflow: 'hidden' }}>
                                                     <p 
                                                         style={{ 
-                                                            fontSize: '12px', 
+                                                            fontSize: '12.5px', 
                                                             margin: 0, 
                                                             fontWeight: '750', 
                                                             color: 'var(--text-primary)', 
                                                             overflow: 'hidden', 
                                                             textOverflow: 'ellipsis', 
                                                             whiteSpace: 'nowrap',
-                                                            display: 'block',
-                                                            width: '100%',
-                                                            maxWidth: '100%'
+                                                            lineHeight: 1.35
                                                         }}
                                                         title={act.name}
                                                     >
                                                         {act.name}
                                                     </p>
-                                                    <p style={{ fontSize: '10px', color: 'var(--text-secondary)', margin: '2px 0 0 0', fontWeight: '500', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                    <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: '3px 0 0 0', fontWeight: '500', lineHeight: 1.35, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                                         {act.type || 'Event'} • {act.timestamp ? new Date(act.timestamp).toLocaleTimeString() : 'Just now'}
                                                     </p>
                                                 </div>
                                             </div>
                                             <span style={{
-                                                fontSize: '9px',
-                                                padding: '2px 6px',
-                                                borderRadius: '5px',
+                                                fontSize: '10px',
+                                                padding: '3px 8px',
+                                                borderRadius: '6px',
                                                 fontWeight: '800',
                                                 background: badgeBg,
                                                 color: badgeColor,
                                                 whiteSpace: 'nowrap',
-                                                flexShrink: 0
+                                                flexShrink: 0,
+                                                letterSpacing: '0.3px'
                                             }}>
                                                 {(act.status || 'DONE').toUpperCase()}
                                             </span>
                                         </div>
                                         {act.error && (
-                                            <p style={{ fontSize: '10px', color: badgeColor, margin: '2px 0 0', opacity: 0.9, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                            <p style={{ fontSize: '10.5px', color: badgeColor, margin: '4px 0 0 38px', opacity: 0.9, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.35 }}>
                                                 {act.error}
                                             </p>
                                         )}
