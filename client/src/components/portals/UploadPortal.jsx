@@ -25,6 +25,14 @@ const getCleanPortalTitle = (rawTitle, rawPath) => {
     return candidate;
 };
 
+const fmt = (bytes) => {
+    if (bytes === undefined || bytes === null || isNaN(bytes)) return '0 B';
+    if (bytes === 0) return '0 B';
+    const k = 1024, s = ['B','KB','MB','GB','TB','PB'];
+    const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), s.length - 1);
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + s[i];
+};
+
 const UploadPortal = ({ shareId }) => {
     const [info, setInfo]       = useState(null);
     const [error, setError]     = useState('');
