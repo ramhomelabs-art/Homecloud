@@ -27,8 +27,12 @@ RUN npm ci --only=production --legacy-peer-deps || npm install --only=production
 COPY server/ ./
 COPY --from=client-builder /app/client/dist /app/client/dist
 
+# Copy remote cluster agent codebase for auto-provisioning
+COPY agent/ /app/agent/
+
 # Create storage roots
 RUN mkdir -p /var/lib/nexadisk/storage /var/lib/nexadisk/trash /var/lib/nexadisk/backups
+
 
 ENV NODE_ENV=production
 ENV PORT=5000

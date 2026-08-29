@@ -99,17 +99,25 @@ router.get('/script/linux', flexibleAuth, (req, res) => {
 // ── GET /api/v1/provision/download/:os (Offline Standalone ZIP package) ───────
 router.get('/download/:os', flexibleAuth, (req, res) => {
     const osType = req.params.os; // 'windows' or 'linux'
-    const agentDir = path.join(__dirname, '..', '..', 'agent');
+    let agentDir = path.join(__dirname, '..', '..', 'agent');
+    if (!fs.existsSync(agentDir)) {
+        agentDir = path.join(__dirname, '..', 'agent');
+    }
+    if (!fs.existsSync(agentDir)) {
+        agentDir = '/app/agent';
+    }
     const zip = new AdmZip();
 
-    logger.info(`[Provisioning] Generating node agent package for ${osType}...`);
+    logger.info(`[Provisioning] Generating node agent package for ${osType} from ${agentDir}...`);
 
     // 1. Add agent source folder
     if (fs.existsSync(agentDir)) {
+        zip.addLocalFolder(agentDir, '');
         zip.addLocalFolder(agentDir, 'agent');
     } else {
-        logger.warn(`[Provisioning] Agent directory not found at ${agentDir}`);
+        logger.error(`[Provisioning] Agent directory not found at ${agentDir}`);
     }
+
 
     // 2. Add installer templates with resolved master URL and agent key
     const templateDir = path.join(__dirname, '..', 'templates');
