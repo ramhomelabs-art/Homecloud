@@ -474,8 +474,8 @@ export default function Header({
                         {/* Transfer Engine Quick Trigger */}
                         {!guestToken && (
                             <div
-                                onClick={() => setShowOperations && setShowOperations(true)}
-                                title="Open Transfer Engine (Queue, Speedometer & Background Operations)"
+                                onClick={() => setShowOperations && setShowOperations(prev => !prev)}
+                                title="Toggle Transfer Engine (Queue, Speedometer & Background Operations)"
                                 style={{
                                     cursor: 'pointer',
                                     padding: '6px 14px',
