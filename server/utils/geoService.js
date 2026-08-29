@@ -101,27 +101,13 @@ function resolveIp(ip) {
         logger.debug(`[GeoService] GeoIP lookup error for ${cleanIp}: ${err.message}`);
     }
 
-    // Fallback based on test/documentation IP ranges or known IP blocks
-    if (cleanIp.startsWith('203.0.113.') || cleanIp.startsWith('198.51.100.') || cleanIp.startsWith('192.0.2.')) {
-        // Documentation & test probe range (RFC 5737) - map to an active origin test vector
-        return {
-            ip: cleanIp,
-            country: 'US',
-            countryName: 'United States',
-            city: 'Silicon Valley',
-            lat: 37.3861,
-            lng: -122.0839,
-            isPrivate: false
-        };
-    }
-
     return {
         ip: cleanIp,
         country: 'XX',
         countryName: 'External Origin',
         city: 'Global Network',
-        lat: 25.0,
-        lng: 15.0,
+        lat: 20.0,
+        lng: 0.0,
         isPrivate: false
     };
 }

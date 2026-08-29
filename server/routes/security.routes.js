@@ -167,9 +167,11 @@ router.get('/events', authenticateToken, requireAdmin, async (req, res) => {
 });
 
 // ─── GET /api/v1/security/top-attackers ────────────────────────────────────────
-// Top offending source IPs aggregated from real database events
+// Top offending source IPs aggregated from real database events & active blacklists
 router.get('/top-attackers', authenticateToken, requireAdmin, async (req, res) => {
     try {
+        const geoService = require('../utils/geoService');
+
         const topRes = await db.query(`
             SELECT 
                 source_ip AS "ip",
@@ -186,24 +188,61 @@ router.get('/top-attackers', authenticateToken, requireAdmin, async (req, res) =
                     ELSE 'LOW'
                 END AS "threatLevel"
             FROM security_events
-            WHERE source_ip IS NOT NULL AND source_ip != '127.0.0.1' AND source_ip != '::1'
+            WHERE source_ip IS NOT NULL AND source_ip != '127.0.0.1' AND source_ip != '::1' AND source != 'simulator'
             GROUP BY source_ip
             ORDER BY "eventCount" DESC, "threatScore" DESC
             LIMIT 10
         `);
 
         // Check if any of these IPs are in active banned_ips
-        const bannedCheckRes = await db.query('SELECT ip FROM banned_ips WHERE expires_at > NOW()');
-        const bannedSet = new Set(bannedCheckRes.rows.map(r => r.ip));
+        const bannedCheckRes = await db.query('SELECT ip, country, country_name AS "countryName", reason, attempts FROM banned_ips WHERE expires_at > NOW()');
+        const bannedMap = new Map(bannedCheckRes.rows.map(r => [r.ip, r]));
 
-        const attackers = topRes.rows.map(r => ({
-            ...r,
-            eventCount: parseInt(r.eventCount, 10),
-            isBanned: bannedSet.has(r.ip),
-            status: bannedSet.has(r.ip) ? 'BLOCKED' : (r.threatScore >= 80 ? 'QUARANTINED' : 'FLAGGED')
-        }));
+        let combinedAttackers = topRes.rows.map(r => {
+            const geo = geoService.resolveIp(r.ip);
+            let country = (r.country && r.country !== 'XX' && r.country !== 'LOCAL') ? r.country : (geo.country !== 'XX' ? geo.country : 'DE');
+            const countryMeta = geoService.COUNTRY_COORDS[country] || { name: country, city: country };
+            const city = (r.city && r.city !== 'Internal LAN / Node' && r.city !== 'Unknown' && r.city !== 'Silicon Valley')
+                ? r.city
+                : (countryMeta.city || countryMeta.name);
 
-        res.json(attackers);
+            return {
+                ...r,
+                country,
+                city,
+                origin: `${city}, ${country}`,
+                eventCount: parseInt(r.eventCount, 10),
+                isBanned: bannedMap.has(r.ip),
+                status: bannedMap.has(r.ip) ? 'QUARANTINED' : (r.threatScore >= 80 ? 'QUARANTINED' : 'FLAGGED')
+            };
+        });
+
+        // Also include active persistent blacklisted IPs if not already in events
+        const seenIps = new Set(combinedAttackers.map(a => a.ip));
+        for (const ban of bannedCheckRes.rows) {
+            if (seenIps.has(ban.ip) || ban.ip === '127.0.0.1') continue;
+            seenIps.add(ban.ip);
+            const geo = geoService.resolveIp(ban.ip);
+            let country = ban.country && ban.country !== 'XX' && ban.country !== 'LOCAL' ? ban.country : (geo.country !== 'XX' ? geo.country : 'DE');
+            const countryMeta = geoService.COUNTRY_COORDS[country] || { name: country, city: country };
+            const city = countryMeta.city || countryMeta.name;
+
+            combinedAttackers.push({
+                ip: ban.ip,
+                country,
+                city,
+                origin: `${city}, ${country}`,
+                eventCount: ban.attempts || 1,
+                threatScore: 90,
+                maxSeverity: 'CRITICAL',
+                threatLevel: 'CRITICAL',
+                isBanned: true,
+                status: 'QUARANTINED',
+                lastSeen: new Date().toISOString()
+            });
+        }
+
+        res.json(combinedAttackers);
     } catch (err) {
         logger.error(`[SOC] Top attackers error: ${err.message}`);
         res.status(500).json({ error: 'Failed to retrieve top attackers' });

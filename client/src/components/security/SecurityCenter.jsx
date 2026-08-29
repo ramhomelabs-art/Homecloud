@@ -1029,7 +1029,7 @@ function SecurityCenter({ showToast: externalToast }) {
                                                 {topAttackers.map((att) => (
                                                     <tr key={att.ip} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                                                         <td style={{ padding: '8px 12px', fontFamily: 'var(--font-mono)', fontWeight: '700', color: 'var(--text-primary)' }}>{att.ip}</td>
-                                                        <td style={{ padding: '8px 12px', color: 'var(--text-secondary)' }}>{att.city !== 'Unknown' ? `${att.city}, ` : ''}{att.country}</td>
+                                                        <td style={{ padding: '8px 12px', color: 'var(--text-secondary)' }}>{att.origin || (att.city !== 'Unknown' ? `${att.city}, ` : '') + att.country}</td>
                                                         <td style={{ padding: '8px 12px', fontWeight: '700' }}>{att.eventCount}</td>
                                                         <td style={{ padding: '8px 12px' }}>
                                                             <span style={{ 
