@@ -12,9 +12,55 @@ const FolderPickerModal = ({ agents, onClose, onSelect, showToast, initialNode =
     const [selectedFolderPath, setSelectedFolderPath] = useState(initialPath);
     const [currentPathInput, setCurrentPathInput] = useState(initialPath);
 
+    const [networkShares, setNetworkShares] = useState([]);
+    const [cloudMounts, setCloudMounts] = useState([]);
+
     useEffect(() => {
-        setCurrentPathInput(currentPath);
-    }, [currentPath]);
+        const fetchMounts = async () => {
+            try {
+                const token = localStorage.getItem('token');
+                const headers = token ? { Authorization: `Bearer ${token}` } : {};
+                const [netRes, cloudRes] = await Promise.allSettled([
+                    axios.get(`${API_BASE}/v1/network/list`, { headers }),
+                    axios.get(`${API_BASE}/v1/cloud/mounts`, { headers })
+                ]);
+                if (netRes.status === 'fulfilled' && Array.isArray(netRes.value.data)) {
+                    setNetworkShares(netRes.value.data);
+                }
+                if (cloudRes.status === 'fulfilled' && Array.isArray(cloudRes.value.data?.mounts)) {
+                    setCloudMounts(cloudRes.value.data.mounts);
+                }
+            } catch (err) {}
+        };
+        fetchMounts();
+    }, []);
+
+    const handleDropdownChange = (e) => {
+        const val = e.target.value;
+        if (val.startsWith('node:')) {
+            const nodeId = val.replace('node:', '');
+            setSelectedNode(nodeId);
+            fetchFolders('');
+        } else if (val.startsWith('share:') || val.startsWith('cloud:')) {
+            const targetPath = val.substring(val.indexOf(':') + 1);
+            setSelectedNode('local');
+            setCurrentPathInput(targetPath);
+            fetchFolders(targetPath);
+        }
+    };
+
+    const getDropdownValue = () => {
+        if (currentPath && (currentPath.startsWith('\\\\') || currentPath.startsWith('//') || currentPath.startsWith('smb:'))) {
+            const matched = networkShares.find(s => {
+                const cleanS = (s.path || '').replace(/\\/g, '/').toLowerCase();
+                const cleanC = currentPath.replace(/\\/g, '/').toLowerCase();
+                return cleanC.startsWith(cleanS);
+            });
+            if (matched) return `share:${matched.path}`;
+        }
+        return `node:${selectedNode}`;
+    };
+
 
     const handlePathInputSubmit = () => {
         fetchFolders(currentPathInput);
@@ -115,14 +161,14 @@ const FolderPickerModal = ({ agents, onClose, onSelect, showToast, initialNode =
                     </button>
                 </div>
 
-                {/* Node Selector */}
+                {/* Node & Share Selector */}
                 <div style={{ marginBottom: '14px' }}>
-                    <label className="m-label" style={{ display: 'block', marginBottom: '6px', fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>Target Storage Node</label>
+                    <label className="m-label" style={{ display: 'block', marginBottom: '6px', fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>Target Storage Endpoint / Node</label>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'var(--bg-surface-2)', border: '1px solid var(--border-subtle)', borderRadius: '10px', padding: '6px 12px' }}>
                         <Server size={15} color="var(--primary)" />
                         <select
-                            value={selectedNode}
-                            onChange={e => setSelectedNode(e.target.value)}
+                            value={getDropdownValue()}
+                            onChange={handleDropdownChange}
                             disabled={lockNode}
                             style={{ 
                                 background: 'transparent', 
@@ -136,13 +182,36 @@ const FolderPickerModal = ({ agents, onClose, onSelect, showToast, initialNode =
                                 opacity: lockNode ? 0.6 : 1
                             }}
                         >
-                            <option value="local">Local Master Node</option>
-                            {(agents || []).filter(a => a.status === 'approved').map(a => (
-                                <option key={a.id} value={a.id}>{a.hostname} (Remote Agent)</option>
-                            ))}
+                            <optgroup label="Physical & Cluster Storage Nodes">
+                                <option value="node:local">🏠 Local Master Node</option>
+                                {(agents || []).filter(a => a.status === 'approved').map(a => (
+                                    <option key={a.id} value={`node:${a.id}`}>🖥️ {a.hostname} (Remote Agent)</option>
+                                ))}
+                            </optgroup>
+
+                            {networkShares.length > 0 && (
+                                <optgroup label="Mounted Network Shares (SMB / CIFS / NFS)">
+                                    {networkShares.map(s => (
+                                        <option key={s.id || s.path} value={`share:${s.path}`}>
+                                            🌐 [{s.type || 'SMB'}] {s.label} ({s.path})
+                                        </option>
+                                    ))}
+                                </optgroup>
+                            )}
+
+                            {cloudMounts.length > 0 && (
+                                <optgroup label="Cloud Storage Mounts">
+                                    {cloudMounts.map(c => (
+                                        <option key={c.id || c.mount_path || c.remote_path} value={`cloud:${c.mount_path || c.remote_path}`}>
+                                            ☁️ [{c.provider?.toUpperCase() || 'CLOUD'}] {c.name || c.mount_path}
+                                        </option>
+                                    ))}
+                                </optgroup>
+                            )}
                         </select>
                     </div>
                 </div>
+
 
                 {/* Current path display / back button */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
