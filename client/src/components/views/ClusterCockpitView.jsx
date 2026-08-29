@@ -82,7 +82,8 @@ const LiquidWaveGaugeCard = ({
     };
 
     const cfg = themeConfig[theme] || themeConfig.blue;
-    const waveHeight = Math.max(55, Math.min(105, 45 + (clamped / 100) * 55));
+    // Dynamic liquid fill level directly proportional to % (15% min baseline, 100% full at 100%)
+    const waveHeightPercent = Math.max(14, Math.min(100, clamped));
 
     return (
         <motion.div
@@ -157,17 +158,21 @@ const LiquidWaveGaugeCard = ({
                 {sublabel}
             </div>
 
-            {/* Animated Flowing Liquid Wave Container */}
-            <div style={{
-                position: 'absolute',
-                bottom: 0,
-                left: 0,
-                right: 0,
-                height: `${waveHeight}px`,
-                overflow: 'hidden',
-                pointerEvents: 'none',
-                zIndex: 1
-            }}>
+            {/* Animated Flowing Liquid Wave Container filling dynamically with % */}
+            <motion.div 
+                initial={{ height: '14%' }}
+                animate={{ height: `${waveHeightPercent}%` }}
+                transition={{ duration: 1.2, ease: "easeOut" }}
+                style={{
+                    position: 'absolute',
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    overflow: 'hidden',
+                    pointerEvents: 'none',
+                    zIndex: 1
+                }}
+            >
                 <svg
                     viewBox="0 0 400 120"
                     preserveAspectRatio="none"
@@ -182,7 +187,7 @@ const LiquidWaveGaugeCard = ({
                     <defs>
                         <linearGradient id={`waveGrad-${theme}`} x1="0" y1="0" x2="0" y2="1">
                             <stop offset="0%" stopColor={cfg.waveGradStart} stopOpacity="0.85" />
-                            <stop offset="100%" stopColor={cfg.waveGradEnd} stopOpacity="0.4" />
+                            <stop offset="100%" stopColor={cfg.waveGradEnd} stopOpacity="0.45" />
                         </linearGradient>
                     </defs>
 
@@ -199,13 +204,13 @@ const LiquidWaveGaugeCard = ({
                         d="M 0,30 Q 50,55 100,30 T 200,30 T 300,30 T 400,30 L 400,120 L 0,120 Z"
                         fill={`url(#waveGrad-${theme})`}
                         stroke={cfg.stroke}
-                        strokeWidth="1"
-                        strokeOpacity="0.4"
+                        strokeWidth="1.2"
+                        strokeOpacity="0.5"
                         animate={{ x: [-200, 0] }}
                         transition={{ duration: 5, repeat: Infinity, ease: "linear" }}
                     />
                 </svg>
-            </div>
+            </motion.div>
         </motion.div>
     );
 };
