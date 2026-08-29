@@ -2280,6 +2280,13 @@ function App() {
         return acc;
     }, { total: 0, used: 0 });
 
+    if (nodeFilter === 'all') {
+        (networkShares || []).forEach(ns => {
+            stats.total += (ns.size || 0);
+            stats.used += (ns.used || 0);
+        });
+    }
+
     const totalPercentage = stats.total > 0 ? Math.round((stats.used / stats.total) * 100) : 0;
 
     // Calculate aggregate cluster CPU and memory averages of all online approved nodes
@@ -2389,6 +2396,7 @@ function App() {
                                 fetchAllData={fetchAllData}
                                 showToast={showToast}
                                 navigateTo={navigateTo}
+                                onOpenHeatmap={() => setShowHeatmapModal(true)}
                             />
                         )}
 

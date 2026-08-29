@@ -2,9 +2,14 @@ import React, { useState } from 'react';
 import { 
     Cpu, Server, HardDrive, Globe, Activity, RefreshCw, 
     ShieldCheck, Zap, Radio, ArrowUpRight, ArrowDownRight, 
-    Layers, Disc, CheckCircle2, AlertTriangle, Database
+    Layers, Disc, CheckCircle2, AlertTriangle, Database,
+    Maximize2, Search, Trash2, FileText, Copy, Download,
+    Upload, ShieldAlert, Sparkles, PieChart, ExternalLink
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import ClusterStorageModal from '../modals/ClusterStorageModal';
+import FleetEventsModal from '../modals/FleetEventsModal';
+import axios from 'axios';
 
 // Formatting helpers
 const formatBytes = (bytes) => {
@@ -21,18 +26,19 @@ const formatGB = (gbVal) => {
     return `${gbVal.toFixed(1)} GB`;
 };
 
-// Liquid Wave Metric Card Component matching Screenshot 2
+// Liquid Wave Metric Card Component
 const LiquidWaveGaugeCard = ({
     title,
     sublabel,
     value,
     statusText,
     theme = 'amber', // 'amber' | 'blue' | 'purple' | 'emerald'
-    icon: Icon
+    icon: Icon,
+    onClick,
+    badgeHint
 }) => {
     const clamped = Math.min(100, Math.max(0, value || 0));
 
-    // Theme definitions matching Screenshot 2
     const themeConfig = {
         amber: {
             iconBg: '#fef3c7',
@@ -81,7 +87,6 @@ const LiquidWaveGaugeCard = ({
     };
 
     const cfg = themeConfig[theme] || themeConfig.blue;
-    // Dynamic liquid fill level directly proportional to % (14% min baseline, 100% full at 100%)
     const waveHeightPercent = Math.max(14, Math.min(100, clamped));
 
     return (
@@ -89,6 +94,7 @@ const LiquidWaveGaugeCard = ({
             className="st-card shadow-premium"
             whileHover={{ scale: 1.02, y: -2 }}
             transition={{ duration: 0.2 }}
+            onClick={onClick}
             style={{
                 background: 'var(--bg-surface-0, #ffffff)',
                 border: '1px solid var(--border-subtle)',
@@ -100,8 +106,10 @@ const LiquidWaveGaugeCard = ({
                 position: 'relative',
                 overflow: 'hidden',
                 height: '190px',
-                boxShadow: '0 4px 20px rgba(0, 0, 0, 0.04)'
+                boxShadow: '0 4px 20px rgba(0, 0, 0, 0.04)',
+                cursor: onClick ? 'pointer' : 'default'
             }}
+            title={onClick ? `${title} (Click to inspect details)` : undefined}
         >
             {/* Top Header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', position: 'relative', zIndex: 2 }}>
@@ -125,20 +133,35 @@ const LiquidWaveGaugeCard = ({
                     </span>
                 </div>
 
-                {statusText && (
-                    <span style={{
-                        fontSize: '10px',
-                        fontWeight: '700',
-                        padding: '3px 8px',
-                        borderRadius: '7px',
-                        background: cfg.badgeBg,
-                        color: cfg.badgeColor,
-                        letterSpacing: '0.2px',
-                        flexShrink: 0
-                    }}>
-                        {statusText}
-                    </span>
-                )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    {badgeHint && (
+                        <span style={{
+                            fontSize: '9px',
+                            fontWeight: '800',
+                            padding: '2px 6px',
+                            borderRadius: '5px',
+                            background: 'rgba(0,0,0,0.06)',
+                            color: 'var(--text-secondary)',
+                            textTransform: 'uppercase'
+                        }}>
+                            {badgeHint}
+                        </span>
+                    )}
+                    {statusText && (
+                        <span style={{
+                            fontSize: '10px',
+                            fontWeight: '700',
+                            padding: '3px 8px',
+                            borderRadius: '7px',
+                            background: cfg.badgeBg,
+                            color: cfg.badgeColor,
+                            letterSpacing: '0.2px',
+                            flexShrink: 0
+                        }}>
+                            {statusText}
+                        </span>
+                    )}
+                </div>
             </div>
 
             {/* Centered Large Metric */}
@@ -228,17 +251,33 @@ export default function ClusterCockpitView({
     metrics = {},
     fetchAllData,
     showToast,
-    navigateTo
+    navigateTo,
+    onOpenHeatmap
 }) {
     const [chartMode, setChartMode] = useState('network'); // 'network' or 'disk'
     const [hoveredDataPoint, setHoveredDataPoint] = useState(null);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [clearedAt, setClearedAt] = useState(0);
 
-    const handleClearActivities = () => {
+    // Modal state for storage breakdown & full fleet events
+    const [showStorageModal, setShowStorageModal] = useState(false);
+    const [showFleetEventsModal, setShowFleetEventsModal] = useState(false);
+
+    // Inline event stream filters
+    const [streamCategory, setStreamCategory] = useState('all'); // 'all', 'transfers', 'alerts'
+    const [streamSearch, setStreamSearch] = useState('');
+
+    const handleClearActivities = async () => {
         setClearedAt(Date.now());
         if (setActivityHistory) setActivityHistory([]);
-        if (showToast) showToast('Fleet event log cleared', 'info');
+        try {
+            const token = localStorage.getItem('token');
+            const headers = token ? { Authorization: `Bearer ${token}` } : {};
+            await axios.post('/api/v1/files/activities/clear', {}, { headers });
+        } catch (e) {
+            console.warn('Failed to clear activities on server', e);
+        }
+        if (showToast) showToast('Fleet event stream & audit log cleared', 'info');
     };
 
     // Calculate cluster averages
@@ -249,8 +288,6 @@ export default function ClusterCockpitView({
     const avgMemory = onlineApprovedNodes.length > 0
         ? Math.round(onlineApprovedNodes.reduce((sum, n) => sum + (n.memory || 0), 0) / onlineApprovedNodes.length)
         : 0;
-
-    const totalPercentage = stats.total > 0 ? Math.round((stats.used / stats.total) * 100) : 0;
 
     // Refresh Telemetry
     const handleRefresh = async () => {
@@ -266,48 +303,6 @@ export default function ClusterCockpitView({
         ? localHistory.map(entry => ({ rx: entry.rx || 0.0, tx: entry.tx || 0.0, timestamp: entry.timestamp }))
         : Array.from({ length: 30 }, (_, i) => ({ rx: 0.0, tx: 0.0, timestamp: Date.now() - (29 - i) * 2000 }));
 
-    const rawNetMax = Math.max(...netHistory.map(d => Math.max(d.rx, d.tx)), 1.0);
-    const netMaxVal = rawNetMax > 20 ? Math.ceil(rawNetMax / 10) * 10 : (rawNetMax > 5 ? Math.ceil(rawNetMax / 5) * 5 : 5);
-
-    const svgWidth = 600;
-    const svgHeight = 130;
-    const padTop = 15;
-    const padBot = 15;
-    const chartHeight = svgHeight - padTop - padBot;
-    const divisor = Math.max(1, netHistory.length - 1);
-
-    // SVG Points
-    const rxPoints = netHistory.map((d, i) => {
-        const x = (i / divisor) * svgWidth;
-        const y = svgHeight - padBot - ((d.rx || 0) / netMaxVal) * chartHeight;
-        return { x: Number.isFinite(x) ? x : 0, y: Number.isFinite(y) ? y : svgHeight - padBot, val: d.rx, d };
-    });
-
-    const txPoints = netHistory.map((d, i) => {
-        const x = (i / divisor) * svgWidth;
-        const y = svgHeight - padBot - ((d.tx || 0) / netMaxVal) * chartHeight;
-        return { x: Number.isFinite(x) ? x : 0, y: Number.isFinite(y) ? y : svgHeight - padBot, val: d.tx, d };
-    });
-
-    // Smooth Bezier Curve Path Generator
-    const createSmoothPath = (pts) => {
-        if (pts.length === 0) return '';
-        let path = `M ${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
-        for (let i = 0; i < pts.length - 1; i++) {
-            const p0 = pts[i];
-            const p1 = pts[i + 1];
-            const mx = (p0.x + p1.x) / 2;
-            path += ` C ${mx.toFixed(1)},${p0.y.toFixed(1)} ${mx.toFixed(1)},${p1.y.toFixed(1)} ${p1.x.toFixed(1)},${p1.y.toFixed(1)}`;
-        }
-        return path;
-    };
-
-    const rxLine = createSmoothPath(rxPoints);
-    const rxArea = `${rxLine} L ${svgWidth},${svgHeight - padBot} L 0,${svgHeight - padBot} Z`;
-    
-    const txLine = createSmoothPath(txPoints);
-    const txArea = `${txLine} L ${svgWidth},${svgHeight - padBot} L 0,${svgHeight - padBot} Z`;
-
     // Compile all mounted volumes
     const mounts = [];
     if (localStorageInfo && localStorageInfo.disks) {
@@ -316,7 +311,7 @@ export default function ClusterCockpitView({
                 id: `local-${d.mount}`,
                 name: d.mount,
                 label: d.mount === 'C:\\' || d.mount === '/' ? 'System Root (/)' : (d.label || `Storage (${d.mount})`),
-                nodeName: 'Debian Primary Host',
+                nodeName: 'Primary Host',
                 type: 'Local Partition',
                 size: d.size || 0,
                 used: d.used || 0,
@@ -364,9 +359,24 @@ export default function ClusterCockpitView({
         });
     });
 
-    const grandTotalCapacity = mounts.reduce((sum, m) => sum + m.size, 0);
-    const grandTotalUsed = mounts.reduce((sum, m) => sum + m.used, 0);
+    const grandTotalCapacity = mounts.reduce((sum, m) => sum + (m.size || 0), 0);
+    const grandTotalUsed = mounts.reduce((sum, m) => sum + (m.used || 0), 0);
     const grandTotalFree = Math.max(0, grandTotalCapacity - grandTotalUsed);
+
+    // Active storage capacity based on node filter
+    const activeCapacity = nodeFilter === 'all'
+        ? (grandTotalCapacity > 0 ? grandTotalCapacity : stats.total)
+        : (nodeFilter === 'master'
+            ? (localStorageInfo?.disks || []).reduce((s, d) => s + (d.size || 0), 0)
+            : agentStorage.reduce((s, a) => s + (a.disks || []).reduce((ds, d) => ds + (d.size || 0), 0), 0));
+
+    const activeUsed = nodeFilter === 'all'
+        ? (grandTotalUsed > 0 ? grandTotalUsed : stats.used)
+        : (nodeFilter === 'master'
+            ? (localStorageInfo?.disks || []).reduce((s, d) => s + (d.used || 0), 0)
+            : agentStorage.reduce((s, a) => s + (a.disks || []).reduce((ds, d) => ds + (d.used || 0), 0), 0));
+
+    const totalPercentage = activeCapacity > 0 ? Math.round((activeUsed / activeCapacity) * 100) : 0;
 
     return (
         <motion.div 
@@ -375,6 +385,28 @@ export default function ClusterCockpitView({
             transition={{ duration: 0.4 }}
             style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}
         >
+            {/* Storage Modal & Full Audit Modal */}
+            <ClusterStorageModal
+                isOpen={showStorageModal}
+                onClose={() => setShowStorageModal(false)}
+                mounts={mounts}
+                localStorageInfo={localStorageInfo}
+                agentStorage={agentStorage}
+                networkShares={networkShares}
+                onRefresh={fetchAllData}
+                navigateTo={navigateTo}
+                onOpenHeatmap={onOpenHeatmap}
+            />
+
+            <FleetEventsModal
+                isOpen={showFleetEventsModal}
+                onClose={() => setShowFleetEventsModal(false)}
+                activities={activities}
+                activityHistory={activityHistory}
+                onClear={handleClearActivities}
+                showToast={showToast}
+            />
+
             {/* Cockpit Top Header & Toolbar */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
                 <div>
@@ -479,10 +511,17 @@ export default function ClusterCockpitView({
                     </div>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div 
+                    onClick={() => setShowStorageModal(true)}
+                    style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}
+                    title="Click to view all storage pool allocations"
+                >
                     <Database size={18} color="var(--accent-gold)" />
                     <div>
-                        <span style={{ fontSize: '10px', fontWeight: '800', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Fleet Allocations</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ fontSize: '10px', fontWeight: '800', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Fleet Allocations</span>
+                            <ArrowUpRight size={11} color="var(--accent-gold)" />
+                        </div>
                         <div style={{ fontSize: '13px', fontWeight: '800', color: 'var(--text-primary)' }}>{mounts.length} Active Mounts</div>
                     </div>
                 </div>
@@ -499,18 +538,20 @@ export default function ClusterCockpitView({
             </div>
 
             {/* Main Cockpit Telemetry Grid */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1.55fr 1fr', gap: '24px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1.45fr 1.05fr', gap: '24px' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
                     
                     {/* 4 Liquid Wave Fluid Metric Cards matching User Reference */}
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '16px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '16px' }}>
                         <LiquidWaveGaugeCard
                             title="STORAGE"
                             value={totalPercentage}
-                            sublabel={`${formatGB(stats.used / 1e9)} / ${formatGB(stats.total / 1e9)}`}
+                            sublabel={`${formatBytes(activeUsed)} / ${formatBytes(activeCapacity)}`}
                             statusText={totalPercentage > 85 ? 'High' : 'Normal'}
                             theme="amber"
                             icon={HardDrive}
+                            onClick={() => setShowStorageModal(true)}
+                            badgeHint="Inspect"
                         />
                         <LiquidWaveGaugeCard
                             title="CPU"
@@ -634,7 +675,7 @@ export default function ClusterCockpitView({
                             { label: `0 MB/s`, y: baseZeroY }
                         ];
 
-                        // X-axis time ticks (6-8 intervals)
+                        // X-axis time ticks
                         const timeIntervalCount = 6;
                         const xTicks = Array.from({ length: timeIntervalCount + 1 }, (_, idx) => {
                             const sampleIdx = Math.round((idx / timeIntervalCount) * (numPoints - 1));
@@ -646,8 +687,6 @@ export default function ClusterCockpitView({
 
                         const curRx = netHistory[netHistory.length - 1]?.rx || 0.0;
                         const curTx = netHistory[netHistory.length - 1]?.tx || 0.0;
-                        const peakRx = Math.max(...netHistory.map(d => d.rx || 0), 0);
-                        const peakTx = Math.max(...netHistory.map(d => d.tx || 0), 0);
 
                         return (
                             <div 
@@ -723,13 +762,11 @@ export default function ClusterCockpitView({
                                 >
                                     <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" style={{ width: '100%', height: '100%', display: 'block' }}>
                                         <defs>
-                                            {/* Download Area Gradient (Blue/Cyan) */}
                                             <linearGradient id="areaGradDownload" x1="0" y1="0" x2="0" y2="1">
                                                 <stop offset="0%" stopColor="#0ea5e9" stopOpacity="0.45" />
                                                 <stop offset="100%" stopColor="#0ea5e9" stopOpacity="0.08" />
                                             </linearGradient>
                                             
-                                            {/* Upload Area Gradient (Amber/Orange) */}
                                             <linearGradient id="areaGradUpload" x1="0" y1="0" x2="0" y2="1">
                                                 <stop offset="0%" stopColor="#f59e0b" stopOpacity="0.65" />
                                                 <stop offset="100%" stopColor="#f59e0b" stopOpacity="0.15" />
@@ -806,7 +843,7 @@ export default function ClusterCockpitView({
                                             </g>
                                         ))}
 
-                                        {/* Series 1: Download Filled Area & Curve (Rendered first) */}
+                                        {/* Series 1: Download Filled Area & Curve */}
                                         {rxFilledArea && (
                                             <motion.path 
                                                 d={rxFilledArea} 
@@ -827,7 +864,7 @@ export default function ClusterCockpitView({
                                             />
                                         )}
 
-                                        {/* Series 2: Upload Filled Area & Curve (Rendered over download) */}
+                                        {/* Series 2: Upload Filled Area & Curve */}
                                         {txFilledArea && (
                                             <motion.path 
                                                 d={txFilledArea} 
@@ -907,35 +944,54 @@ export default function ClusterCockpitView({
                                     Mounted Storage Pools
                                 </h3>
                                 <p style={{ margin: '2px 0 0', fontSize: '11.5px', color: 'var(--text-secondary)' }}>
-                                    Debian partitions, remote agent physical drives, and cluster network volumes
+                                    Partitions, remote agent physical drives, and cluster network volumes
                                 </p>
                             </div>
-                            <span style={{ 
-                                fontSize: '11px', 
-                                fontWeight: '800', 
-                                background: 'rgba(242, 201, 76, 0.1)', 
-                                color: 'var(--accent-gold)', 
-                                padding: '4px 12px', 
-                                borderRadius: '20px',
-                                border: '1px solid rgba(242, 201, 76, 0.25)'
-                            }}>
-                                {mounts.length} Allocations
-                            </span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <button
+                                    onClick={() => setShowStorageModal(true)}
+                                    style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '5px',
+                                        fontSize: '11px',
+                                        fontWeight: '800',
+                                        background: 'rgba(242, 201, 76, 0.1)',
+                                        color: 'var(--accent-gold)',
+                                        padding: '4px 12px',
+                                        borderRadius: '20px',
+                                        border: '1px solid rgba(242, 201, 76, 0.25)',
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    <span>Inspect {mounts.length} Pools</span>
+                                    <Maximize2 size={12} />
+                                </button>
+                            </div>
                         </div>
 
                         {/* Storage Pool Bar */}
                         {grandTotalCapacity > 0 && (
-                            <div className="st-card shadow-premium" style={{ 
-                                padding: '16px 20px', 
-                                background: 'var(--bg-surface-1)', 
-                                border: '1px solid var(--border-subtle)', 
-                                borderRadius: '14px',
-                                marginBottom: '16px' 
-                            }}>
+                            <div 
+                                className="st-card shadow-premium" 
+                                onClick={() => setShowStorageModal(true)}
+                                style={{ 
+                                    padding: '16px 20px', 
+                                    background: 'var(--bg-surface-1)', 
+                                    border: '1px solid var(--border-subtle)', 
+                                    borderRadius: '14px',
+                                    marginBottom: '16px',
+                                    cursor: 'pointer'
+                                }}
+                                title="Click to view detailed storage breakdown"
+                            >
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                                    <span style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                                        Cluster Storage Distribution
-                                    </span>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                        <span style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                            Cluster Storage Distribution
+                                        </span>
+                                        <ArrowUpRight size={13} color="var(--accent-gold)" />
+                                    </div>
                                     <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: '700' }}>
                                         {formatBytes(grandTotalFree)} Free / {formatBytes(grandTotalCapacity)} Total
                                     </span>
@@ -969,7 +1025,7 @@ export default function ClusterCockpitView({
                         )}
 
                         {/* Mount Cards Grid */}
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '14px' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '14px' }}>
                             {mounts.map((m, idx) => {
                                 let IconComp = HardDrive;
                                 if (m.type.includes('Agent')) IconComp = Server;
@@ -1053,59 +1109,147 @@ export default function ClusterCockpitView({
                     </div>
                 </div>
 
-                {/* Right Column: Live Event Stream & Audit Log */}
+                {/* Right Column: Fleet Event Stream & Audit Log */}
                 <div 
                     className="st-card shadow-premium" 
                     style={{ 
                         display: 'flex', 
                         flexDirection: 'column', 
                         height: 'fit-content',
-                        maxHeight: '680px',
                         background: 'var(--bg-surface-0, #ffffff)',
                         border: '1px solid var(--border-subtle)',
                         borderRadius: '18px',
-                        padding: '20px',
+                        padding: '18px 20px',
                         boxSizing: 'border-box',
-                        position: 'sticky',
-                        top: '20px',
                         boxShadow: '0 4px 20px rgba(0, 0, 0, 0.04)'
                     }} 
                 >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexShrink: 0 }}>
+                    {/* Header with Live Pulse Badge & Actions */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', flexShrink: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <Activity size={18} color="var(--accent-gold)" />
-                            <h3 style={{ fontSize: '16px', fontWeight: '850', margin: 0, color: 'var(--text-primary)', letterSpacing: '-0.3px' }}>
-                                Fleet Event Stream & Audits
-                            </h3>
+                            <div style={{
+                                width: '32px',
+                                height: '32px',
+                                borderRadius: '9px',
+                                background: 'rgba(245, 158, 11, 0.12)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center'
+                            }}>
+                                <Activity size={17} color="var(--accent-gold, #f59e0b)" />
+                            </div>
+                            <div>
+                                <h3 style={{ fontSize: '15.5px', fontWeight: '850', margin: 0, color: 'var(--text-primary)', letterSpacing: '-0.3px' }}>
+                                    Fleet Event Stream
+                                </h3>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '1px' }}>
+                                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10b981', display: 'inline-block' }} />
+                                    <span style={{ fontSize: '10.5px', color: 'var(--text-secondary)', fontWeight: '600' }}>Live Cluster Telemetry</span>
+                                </div>
+                            </div>
                         </div>
-                        <button 
-                            onClick={handleClearActivities} 
-                            style={{ 
-                                background: 'var(--bg-surface-2, rgba(0,0,0,0.04))', 
-                                border: '1px solid var(--border-subtle)', 
-                                color: 'var(--text-secondary)', 
-                                cursor: 'pointer', 
-                                fontSize: '11px',
-                                fontWeight: '700',
-                                padding: '4px 10px',
-                                borderRadius: '6px',
-                                transition: 'all 0.2s ease'
-                            }}
-                        >
-                            Clear
-                        </button>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <button
+                                onClick={() => setShowFleetEventsModal(true)}
+                                style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '5px',
+                                    background: 'var(--bg-surface-2, rgba(0,0,0,0.04))',
+                                    border: '1px solid var(--border-subtle)',
+                                    color: 'var(--text-secondary)',
+                                    padding: '5px 9px',
+                                    borderRadius: '7px',
+                                    fontSize: '11px',
+                                    fontWeight: '700',
+                                    cursor: 'pointer'
+                                }}
+                                title="Expand Full Audit Log Modal"
+                            >
+                                <Maximize2 size={12} />
+                                <span>Audit Log</span>
+                            </button>
+                            <button 
+                                onClick={handleClearActivities} 
+                                style={{ 
+                                    background: 'var(--bg-surface-2, rgba(0,0,0,0.04))', 
+                                    border: '1px solid var(--border-subtle)', 
+                                    color: 'var(--text-secondary)', 
+                                    cursor: 'pointer', 
+                                    fontSize: '11px',
+                                    fontWeight: '700',
+                                    padding: '5px 9px',
+                                    borderRadius: '7px',
+                                    transition: 'all 0.2s ease'
+                                }}
+                                title="Clear fleet activity stream"
+                            >
+                                Clear
+                            </button>
+                        </div>
                     </div>
 
+                    {/* Inline Filter Pills and Search */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginBottom: '14px', flexWrap: 'wrap' }}>
+                        <div style={{ display: 'flex', gap: '5px', background: 'var(--bg-surface-1, rgba(0,0,0,0.03))', padding: '3px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+                            {[
+                                { id: 'all', label: 'All' },
+                                { id: 'transfers', label: 'Transfers' },
+                                { id: 'alerts', label: 'Alerts' }
+                            ].map(tab => (
+                                <button
+                                    key={tab.id}
+                                    onClick={() => setStreamCategory(tab.id)}
+                                    style={{
+                                        padding: '4px 10px',
+                                        fontSize: '11px',
+                                        fontWeight: '750',
+                                        borderRadius: '6px',
+                                        border: 'none',
+                                        cursor: 'pointer',
+                                        background: streamCategory === tab.id ? 'var(--accent-gold, #f59e0b)' : 'transparent',
+                                        color: streamCategory === tab.id ? '#000000' : 'var(--text-secondary)',
+                                        transition: 'all 0.15s ease'
+                                    }}
+                                >
+                                    {tab.label}
+                                </button>
+                            ))}
+                        </div>
+
+                        <div style={{ position: 'relative', minWidth: '140px', flex: '1 1 140px' }}>
+                            <Search size={12} color="var(--text-secondary)" style={{ position: 'absolute', left: '9px', top: '50%', transform: 'translateY(-50%)' }} />
+                            <input
+                                type="text"
+                                placeholder="Filter stream..."
+                                value={streamSearch}
+                                onChange={(e) => setStreamSearch(e.target.value)}
+                                style={{
+                                    width: '100%',
+                                    background: 'var(--bg-surface-1, rgba(0,0,0,0.02))',
+                                    border: '1px solid var(--border-subtle)',
+                                    borderRadius: '7px',
+                                    padding: '4px 8px 4px 26px',
+                                    fontSize: '11px',
+                                    color: 'var(--text-primary)',
+                                    outline: 'none'
+                                }}
+                            />
+                        </div>
+                    </div>
+
+                    {/* Event Rows Scroll Container */}
                     <div style={{ 
                         overflowY: 'auto', 
-                        maxHeight: '580px', 
-                        paddingRight: '6px',
+                        maxHeight: '480px', 
+                        paddingRight: '4px',
                         display: 'flex',
                         flexDirection: 'column',
-                        gap: '4px'
+                        gap: '8px'
                     }}>
                         {(() => {
-                            const combinedActivities = [
+                            const rawList = [
                                 ...activityHistory,
                                 ...activities.map(a => ({
                                     id: a.id,
@@ -1115,24 +1259,48 @@ export default function ClusterCockpitView({
                                     timestamp: a.timestamp,
                                     error: typeof a.status === 'string' && a.status.length < 80 ? a.status : null
                                 }))
-                            ].filter(a => !clearedAt || (new Date(a.timestamp || 0).getTime() > clearedAt))
-                             .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))
-                             .slice(0, 30);
+                            ].filter(a => !clearedAt || (new Date(a.timestamp || 0).getTime() > clearedAt));
 
-                            if (combinedActivities.length === 0) {
+                            const filteredList = rawList.filter(act => {
+                                const nameLow = (act.name || '').toLowerCase();
+                                const typeLow = (act.type || '').toLowerCase();
+                                const statusLow = (act.status || '').toLowerCase();
+
+                                if (streamSearch) {
+                                    const match = nameLow.includes(streamSearch.toLowerCase()) || 
+                                                  typeLow.includes(streamSearch.toLowerCase()) ||
+                                                  statusLow.includes(streamSearch.toLowerCase());
+                                    if (!match) return false;
+                                }
+
+                                if (streamCategory === 'transfers') {
+                                    return typeLow.includes('file') || typeLow.includes('copy') || typeLow.includes('transfer') ||
+                                           nameLow.includes('copy') || nameLow.includes('.mkv') || nameLow.includes('.mp4') || nameLow.includes('.zip');
+                                }
+                                if (streamCategory === 'alerts') {
+                                    return statusLow === 'error' || statusLow === 'alert' || statusLow === 'warning' ||
+                                           typeLow.includes('security') || typeLow.includes('node') || nameLow.includes('offline');
+                                }
+                                return true;
+                            })
+                            .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))
+                            .slice(0, 30);
+
+                            if (filteredList.length === 0) {
                                 return (
-                                    <div style={{ textAlign: 'center', padding: '60px 0', opacity: 0.4 }}>
-                                        <Activity size={36} color="var(--text-secondary)" />
-                                        <p style={{ fontSize: '13px', marginTop: '12px', color: 'var(--text-secondary)', fontWeight: '600' }}>
-                                            No recent fleet events recorded
+                                    <div style={{ textAlign: 'center', padding: '50px 0', opacity: 0.5 }}>
+                                        <Activity size={32} color="var(--text-secondary)" />
+                                        <p style={{ fontSize: '12.5px', marginTop: '10px', color: 'var(--text-secondary)', fontWeight: '600' }}>
+                                            No fleet events matching filter
                                         </p>
                                     </div>
                                 );
                             }
 
-                            return combinedActivities.map((act, i) => {
-                                const isSuccess = act.status === 'Completed';
+                            return filteredList.map((act, i) => {
+                                const isSuccess = act.status === 'Completed' || act.status === 'Done';
                                 const isAlert = act.status === 'Alert' || act.status === 'Warning';
+                                const isError = act.status === 'Error' || act.status === 'Failed';
                                 const badgeBg = isSuccess 
                                     ? 'rgba(16, 185, 129, 0.12)' 
                                     : isAlert 
@@ -1140,43 +1308,83 @@ export default function ClusterCockpitView({
                                     : 'rgba(248, 81, 73, 0.12)';
                                 const badgeColor = isSuccess ? '#10b981' : isAlert ? 'var(--accent-gold)' : '#f85149';
 
+                                const nameLower = (act.name || '').toLowerCase();
+                                const isCopy = nameLower.includes('copy');
+                                const isOffline = nameLower.includes('offline');
+
                                 return (
                                     <motion.div 
                                         key={act.id || i} 
-                                        initial={{ opacity: 0, x: 10 }}
+                                        initial={{ opacity: 0, x: 8 }}
                                         animate={{ opacity: 1, x: 0 }}
-                                        transition={{ duration: 0.2, delay: i * 0.02 }}
+                                        transition={{ duration: 0.2, delay: i * 0.015 }}
                                         style={{ 
-                                            marginBottom: '10px', 
-                                            padding: '12px 14px', 
-                                            background: 'rgba(255, 255, 255, 0.02)', 
+                                            padding: '10px 12px', 
+                                            background: 'var(--bg-surface-1, rgba(255, 255, 255, 0.02))', 
                                             borderRadius: '10px', 
-                                            border: '1px solid var(--border-subtle)' 
+                                            border: '1px solid var(--border-subtle)',
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            gap: '5px',
+                                            transition: 'all 0.15s ease'
                                         }}
                                     >
                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
-                                            <div style={{ minWidth: 0, flex: 1 }}>
-                                                <p style={{ fontSize: '12.5px', margin: 0, fontWeight: '700', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                                    {act.name}
-                                                </p>
-                                                <p style={{ fontSize: '10px', color: 'var(--text-secondary)', margin: '3px 0 0 0', fontWeight: '500' }}>
-                                                    {act.type || 'Event'} • {act.timestamp ? new Date(act.timestamp).toLocaleTimeString() : 'Just now'}
-                                                </p>
+                                            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '9px', minWidth: 0, flex: 1 }}>
+                                                <div style={{
+                                                    width: '24px',
+                                                    height: '24px',
+                                                    borderRadius: '6px',
+                                                    background: badgeBg,
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    flexShrink: 0,
+                                                    marginTop: '1px'
+                                                }}>
+                                                    {isError || isOffline ? (
+                                                        <AlertTriangle size={13} color="#f85149" />
+                                                    ) : isCopy ? (
+                                                        <Copy size={13} color="#0ea5e9" />
+                                                    ) : (
+                                                        <Activity size={13} color="#10b981" />
+                                                    )}
+                                                </div>
+                                                <div style={{ minWidth: 0, flex: 1 }}>
+                                                    <p 
+                                                        style={{ 
+                                                            fontSize: '12px', 
+                                                            margin: 0, 
+                                                            fontWeight: '750', 
+                                                            color: 'var(--text-primary)', 
+                                                            overflow: 'hidden', 
+                                                            textOverflow: 'ellipsis', 
+                                                            whiteSpace: 'nowrap' 
+                                                        }}
+                                                        title={act.name}
+                                                    >
+                                                        {act.name}
+                                                    </p>
+                                                    <p style={{ fontSize: '10px', color: 'var(--text-secondary)', margin: '2px 0 0 0', fontWeight: '500' }}>
+                                                        {act.type || 'Event'} • {act.timestamp ? new Date(act.timestamp).toLocaleTimeString() : 'Just now'}
+                                                    </p>
+                                                </div>
                                             </div>
                                             <span style={{
                                                 fontSize: '9px',
-                                                padding: '2px 7px',
+                                                padding: '2px 6px',
                                                 borderRadius: '5px',
                                                 fontWeight: '800',
                                                 background: badgeBg,
                                                 color: badgeColor,
-                                                whiteSpace: 'nowrap'
+                                                whiteSpace: 'nowrap',
+                                                flexShrink: 0
                                             }}>
                                                 {(act.status || 'DONE').toUpperCase()}
                                             </span>
                                         </div>
                                         {act.error && (
-                                            <p style={{ fontSize: '10.5px', color: badgeColor, margin: '6px 0 0', opacity: 0.9 }}>
+                                            <p style={{ fontSize: '10px', color: badgeColor, margin: '2px 0 0', opacity: 0.9 }}>
                                                 {act.error}
                                             </p>
                                         )}
@@ -1184,6 +1392,27 @@ export default function ClusterCockpitView({
                                 );
                             });
                         })()}
+                    </div>
+
+                    {/* Footer view all link */}
+                    <div style={{ marginTop: '10px', textAlign: 'center', borderTop: '1px solid var(--border-subtle)', paddingTop: '10px' }}>
+                        <button
+                            onClick={() => setShowFleetEventsModal(true)}
+                            style={{
+                                background: 'transparent',
+                                border: 'none',
+                                color: 'var(--accent-gold, #f59e0b)',
+                                fontSize: '11px',
+                                fontWeight: '750',
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                            }}
+                        >
+                            <span>Open Detailed Audit Log ({activities.length + activityHistory.length} events)</span>
+                            <ArrowUpRight size={12} />
+                        </button>
                     </div>
                 </div>
             </div>
