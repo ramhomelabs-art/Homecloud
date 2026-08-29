@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { 
     ResponsiveContainer, PieChart, Pie, Cell, Tooltip,
-    AreaChart, Area, XAxis, YAxis, CartesianGrid, Legend 
+    AreaChart, Area, LineChart, Line, XAxis, YAxis, CartesianGrid, Legend 
 } from 'recharts';
 import FolderPickerModal from '../modals/FolderPickerModal';
 import AttackGeoMap from './AttackGeoMap';
