@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { exec, spawn } = require('child_process');
 const axios = require('axios');
 const FormData = require('form-data');
 const AdmZip = require('adm-zip');
@@ -7,10 +8,280 @@ const db = require('../config/database');
 const taskQueue = require('../utils/taskQueue');
 const clusterService = require('../services/clusterService');
 const syncService = require('../services/syncService');
+const storageProvider = require('../utils/storageProvider');
+const cryptoHelper = require('../utils/cryptoHelper');
 const logger = require('../utils/logger');
 
 // Set to track active sync tasks and avoid overlapping runs
 const activeSyncs = new Set();
+
+// Helper to detect SMB paths
+const isSmbPath = (p) => {
+    if (!p || typeof p !== 'string') return false;
+    const clean = p.trim();
+    return clean.startsWith('\\\\') || clean.startsWith('//') || clean.startsWith('smb://');
+};
+
+// Retrieve SMB credentials from database
+const getSmbDetails = async (rawPath) => {
+    const sharesRes = await db.query('SELECT * FROM network_shares');
+    let clean = rawPath.trim().replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
+    const parts = clean.split('/');
+    const host = parts[0];
+    const share = parts[1] || '';
+    const internal = parts.slice(2).join('/');
+    const unc = `//${host}/${share}`;
+
+    const matched = sharesRes.rows.find(row => {
+        let cleanRow = (row.path || '').replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
+        const rowParts = cleanRow.split('/');
+        return rowParts[0]?.toLowerCase() === host.toLowerCase() && 
+               (rowParts[1] || '').toLowerCase() === share.toLowerCase();
+    });
+
+    const user = matched?.username || '';
+    let pass = '';
+    if (matched?.password) {
+        try { pass = cryptoHelper.decrypt(matched.password); } catch (e) { pass = matched.password; }
+    }
+
+    return { host, share, internal, unc, user, pass };
+};
+
+// SMB Directory creation
+const createSmbDirectory = async (targetPath) => {
+    const smb = await getSmbDetails(targetPath);
+    if (!smb.internal) return true;
+
+    const env = { ...process.env, PASSWD: smb.pass || '' };
+    const safeUser = (smb.user || '').replace(/[;&|`$<>\\"']/g, '');
+    const safeShare = smb.unc.replace(/[;&|`$<>\\"']/g, '');
+    const winInternal = smb.internal.replace(/\//g, '\\');
+    const mkdirCmd = `mkdir "${winInternal.replace(/"/g, '')}"`;
+
+    const cmd = safeUser
+        ? `smbclient "${safeShare}" -U "${safeUser}" -t 15 -c '${mkdirCmd}'`
+        : `smbclient "${safeShare}" -N -t 15 -c '${mkdirCmd}'`;
+
+    return new Promise((resolve) => {
+        exec(cmd, { env, timeout: 20000 }, () => {
+            resolve(true); // Directory may already exist
+        });
+    });
+};
+
+// SMB File/Directory deletion
+const deleteSmbFile = async (filePath) => {
+    const smb = await getSmbDetails(filePath);
+    if (!smb.internal) return true;
+
+    const env = { ...process.env, PASSWD: smb.pass || '' };
+    const safeUser = (smb.user || '').replace(/[;&|`$<>\\"']/g, '');
+    const safeShare = smb.unc.replace(/[;&|`$<>\\"']/g, '');
+    const delCmd = `del "${smb.internal.replace(/"/g, '')}"`;
+
+    const cmd = safeUser
+        ? `smbclient "${safeShare}" -U "${safeUser}" -t 15 -c '${delCmd}'`
+        : `smbclient "${safeShare}" -N -t 15 -c '${delCmd}'`;
+
+    return new Promise((resolve, reject) => {
+        exec(cmd, { env, timeout: 20000 }, (err, stdout, stderr) => {
+            if (err) {
+                const rmdirCmd = safeUser
+                    ? `smbclient "${safeShare}" -U "${safeUser}" -t 15 -c 'rmdir "${smb.internal.replace(/"/g, '')}"'`
+                    : `smbclient "${safeShare}" -N -t 15 -c 'rmdir "${smb.internal.replace(/"/g, '')}"'`;
+                exec(rmdirCmd, { env, timeout: 20000 }, (rErr) => {
+                    if (rErr) return reject(new Error(`SMB delete failed: ${(stderr || stdout || err.message).trim()}`));
+                    resolve(true);
+                });
+                return;
+            }
+            resolve(true);
+        });
+    });
+};
+
+// SMB Copy File (SMB <-> SMB, Local -> SMB, SMB -> Local)
+const smbCopyFile = async (srcPath, destPath) => {
+    const isSrcSmb = isSmbPath(srcPath);
+    const isDestSmb = isSmbPath(destPath);
+
+    if (isSrcSmb && isDestSmb) {
+        const src = await getSmbDetails(srcPath);
+        const dest = await getSmbDetails(destPath);
+
+        let destInternal = dest.internal;
+        if (!destInternal || destInternal.endsWith('/') || !destInternal.includes('.')) {
+            destInternal = `${destInternal.replace(/\/+$/, '')}/${path.basename(srcPath.replace(/\\/g, '/'))}`.replace(/^\//, '');
+        }
+
+        const srcEnv = { ...process.env, PASSWD: src.pass || '' };
+        const destEnv = { ...process.env, PASSWD: dest.pass || '' };
+
+        const safeSrcUser = (src.user || '').replace(/[;&|`$<>\\"']/g, '');
+        const safeSrcShare = src.unc.replace(/[;&|`$<>\\"']/g, '');
+        const safeDestUser = (dest.user || '').replace(/[;&|`$<>\\"']/g, '');
+        const safeDestShare = dest.unc.replace(/[;&|`$<>\\"']/g, '');
+
+        const getArgs = safeSrcUser
+            ? ['-U', safeSrcUser, safeSrcShare, '-t', '45', '-c', `get "${src.internal.replace(/"/g, '')}" -`]
+            : ['-N', safeSrcShare, '-t', '45', '-c', `get "${src.internal.replace(/"/g, '')}" -`];
+
+        const putArgs = safeDestUser
+            ? ['-U', safeDestUser, safeDestShare, '-t', '45', '-c', `put - "${destInternal.replace(/"/g, '')}"`]
+            : ['-N', safeDestShare, '-t', '45', '-c', `put - "${destInternal.replace(/"/g, '')}"`];
+
+        return new Promise((resolve, reject) => {
+            const getProc = spawn('smbclient', getArgs, { env: srcEnv });
+            const putProc = spawn('smbclient', putArgs, { env: destEnv });
+
+            let bytes = 0;
+            getProc.stdout.on('data', chunk => { bytes += chunk.length; });
+            getProc.stdout.pipe(putProc.stdin);
+
+            let putErr = '';
+            putProc.stderr.on('data', d => { putErr += d.toString(); });
+            putProc.on('close', code => {
+                if (code === 0) resolve(bytes || 1);
+                else reject(new Error(putErr || `SMB copy failed with code ${code}`));
+            });
+            getProc.on('error', reject);
+            putProc.on('error', reject);
+        });
+    } else if (isSrcSmb && !isDestSmb) {
+        const src = await getSmbDetails(srcPath);
+        const srcEnv = { ...process.env, PASSWD: src.pass || '' };
+        const safeSrcUser = (src.user || '').replace(/[;&|`$<>\\"']/g, '');
+        const safeSrcShare = src.unc.replace(/[;&|`$<>\\"']/g, '');
+
+        const getArgs = safeSrcUser
+            ? ['-U', safeSrcUser, safeSrcShare, '-t', '45', '-c', `get "${src.internal.replace(/"/g, '')}" -`]
+            : ['-N', safeSrcShare, '-t', '45', '-c', `get "${src.internal.replace(/"/g, '')}" -`];
+
+        const resolvedDest = storageProvider.resolvePath(destPath);
+        const finalDestFile = fs.existsSync(resolvedDest) && fs.statSync(resolvedDest).isDirectory()
+            ? path.join(resolvedDest, path.basename(srcPath.replace(/\\/g, '/')))
+            : resolvedDest;
+
+        return new Promise((resolve, reject) => {
+            const getProc = spawn('smbclient', getArgs, { env: srcEnv });
+            const outStream = fs.createWriteStream(finalDestFile);
+            let bytes = 0;
+            getProc.stdout.on('data', chunk => { bytes += chunk.length; });
+            getProc.stdout.pipe(outStream);
+            outStream.on('finish', () => resolve(bytes || 1));
+            outStream.on('error', reject);
+            getProc.on('error', reject);
+        });
+    } else if (!isSrcSmb && isDestSmb) {
+        const dest = await getSmbDetails(destPath);
+        let destInternal = dest.internal;
+        if (!destInternal || destInternal.endsWith('/') || !destInternal.includes('.')) {
+            destInternal = `${destInternal.replace(/\/+$/, '')}/${path.basename(srcPath.replace(/\\/g, '/'))}`.replace(/^\//, '');
+        }
+
+        const destEnv = { ...process.env, PASSWD: dest.pass || '' };
+        const safeDestUser = (dest.user || '').replace(/[;&|`$<>\\"']/g, '');
+        const safeDestShare = dest.unc.replace(/[;&|`$<>\\"']/g, '');
+
+        const putArgs = safeDestUser
+            ? ['-U', safeDestUser, safeDestShare, '-t', '45', '-c', `put - "${destInternal.replace(/"/g, '')}"`]
+            : ['-N', safeDestShare, '-t', '45', '-c', `put - "${destInternal.replace(/"/g, '')}"`];
+
+        const resolvedSrc = storageProvider.resolvePath(srcPath);
+        return new Promise((resolve, reject) => {
+            const inStream = fs.createReadStream(resolvedSrc);
+            const putProc = spawn('smbclient', putArgs, { env: destEnv });
+
+            let bytes = 0;
+            inStream.on('data', chunk => { bytes += chunk.length; });
+            inStream.pipe(putProc.stdin);
+
+            let putErr = '';
+            putProc.stderr.on('data', d => { putErr += d.toString(); });
+            putProc.on('close', code => {
+                if (code === 0) resolve(bytes || 1);
+                else reject(new Error(putErr || `SMB upload failed with code ${code}`));
+            });
+            inStream.on('error', reject);
+            putProc.on('error', reject);
+        });
+    }
+};
+
+// Recursive scan on SMB share
+const scanSmbDirectory = async (rawPath) => {
+    const results = [];
+    const smb = await getSmbDetails(rawPath);
+
+    const env = { ...process.env, PASSWD: smb.pass || '' };
+    const safeUser = (smb.user || '').replace(/[;&|`$<>\\"']/g, '');
+    const safeShare = smb.unc.replace(/[;&|`$<>\\"']/g, '');
+    const baseInternal = smb.internal.replace(/^[\\\/]+/, '').replace(/\\/g, '/');
+
+    const listDir = (subPath) => {
+        return new Promise((resolve) => {
+            const internalSub = subPath ? subPath.replace(/^[\\\/]+/, '').replace(/\\/g, '/') : '';
+            const cdCmd = internalSub ? `cd "${internalSub.replace(/"/g, '')}"; ` : '';
+            const listCmd = `${cdCmd}ls`;
+
+            const cmd = safeUser
+                ? `smbclient "${safeShare}" -U "${safeUser}" -t 15 -c '${listCmd}'`
+                : `smbclient "${safeShare}" -N -t 15 -c '${listCmd}'`;
+
+            exec(cmd, { env, timeout: 20000 }, (err, stdout) => {
+                if (err || !stdout) return resolve([]);
+                const lines = stdout.split('\n');
+                const items = [];
+                for (let line of lines) {
+                    line = line.trim();
+                    if (!line || line.startsWith('Domain=') || line.startsWith('OS=') || line.startsWith('Server=')) continue;
+                    const match = line.match(/^(.+?)\s+([DAHRSVN]+)\s+(\d+)\s+([A-Za-z0-9:\s]+)$/);
+                    if (match) {
+                        const name = match[1].trim();
+                        const attr = match[2].trim();
+                        const size = parseInt(match[3], 10) || 0;
+                        const dateStr = match[4].trim();
+                        if (name === '.' || name === '..') continue;
+                        items.push({
+                            name,
+                            isDir: attr.includes('D'),
+                            size,
+                            modified: new Date(dateStr).getTime() || Date.now()
+                        });
+                    }
+                }
+                resolve(items);
+            });
+        });
+    };
+
+    const walk = async (currentSub) => {
+        const items = await listDir(currentSub);
+        for (const item of items) {
+            const itemSub = currentSub ? `${currentSub}/${item.name}` : item.name;
+            if (item.isDir) {
+                await walk(itemSub);
+            } else {
+                let rel = itemSub;
+                if (baseInternal && rel.startsWith(baseInternal)) {
+                    rel = rel.slice(baseInternal.length).replace(/^\/+/, '');
+                }
+                const fullItemPath = `\\\\${smb.host}\\${smb.share}\\${itemSub.replace(/\//g, '\\')}`;
+                results.push({
+                    relPath: rel.replace(/\\/g, '/'),
+                    absPath: fullItemPath,
+                    size: item.size,
+                    modified: item.modified,
+                    isDirectory: false
+                });
+            }
+        }
+    };
+
+    await walk(baseInternal);
+    return results;
+};
 
 // Helper to sanitize media names during sync
 function sanitizeMediaName(filename) {
@@ -49,8 +320,11 @@ const sanitizeRelPath = (relPath) => {
     return parts.join('/');
 };
 
-const getNodeSeparator = (node) => {
-    if (!node || node === 'local') {
+const getNodeSeparator = (node, customPath = '') => {
+    if (isSmbPath(customPath)) {
+        return '\\';
+    }
+    if (!node || node === 'local' || node === 'master' || node === 'Master Node') {
         return process.platform === 'win32' ? '\\' : '/';
     }
     const agent = clusterService.agents[node];
@@ -70,7 +344,7 @@ const getRelativePath = (basePath, filePath) => {
 };
 
 const joinPathsForNode = (node, basePath, relPath) => {
-    const sep = getNodeSeparator(node);
+    const sep = getNodeSeparator(node, basePath);
     const cleanBase = basePath.replace(/[/\\]/g, sep);
     const cleanRel = relPath.replace(/[/\\]/g, sep);
     if (cleanBase.endsWith(sep)) {
@@ -80,14 +354,17 @@ const joinPathsForNode = (node, basePath, relPath) => {
 };
 
 const getParentDirForNode = (node, filePath) => {
-    const sep = getNodeSeparator(node);
+    const sep = getNodeSeparator(node, filePath);
     const parts = filePath.split(sep);
     if (parts.length <= 1) return filePath;
     return parts.slice(0, -1).join(sep);
 };
 
 const ensureDirExistsOnNode = async (node, dirPath) => {
-    const isLocal = !node || node === 'local';
+    if (isSmbPath(dirPath)) {
+        return createSmbDirectory(dirPath);
+    }
+    const isLocal = !node || node === 'local' || node === 'master' || node === 'Master Node';
     if (isLocal) {
         if (!fs.existsSync(dirPath)) {
             fs.mkdirSync(dirPath, { recursive: true });
@@ -102,7 +379,10 @@ const ensureDirExistsOnNode = async (node, dirPath) => {
 };
 
 const deleteFileOnNode = async (node, filePath) => {
-    const isLocal = !node || node === 'local';
+    if (isSmbPath(filePath)) {
+        return deleteSmbFile(filePath);
+    }
+    const isLocal = !node || node === 'local' || node === 'master' || node === 'Master Node';
     if (isLocal) {
         if (fs.existsSync(filePath)) {
             const stats = fs.statSync(filePath);
@@ -120,7 +400,10 @@ const deleteFileOnNode = async (node, filePath) => {
 };
 
 const scanDirectory = async (node, dirPath) => {
-    const isLocal = !node || node === 'local';
+    if (isSmbPath(dirPath)) {
+        return scanSmbDirectory(dirPath);
+    }
+    const isLocal = !node || node === 'local' || node === 'master' || node === 'Master Node';
 
     if (isLocal) {
         const results = [];
@@ -178,8 +461,11 @@ const scanDirectory = async (node, dirPath) => {
 };
 
 const copyFileBetweenNodes = async (srcNode, srcPath, destNode, destPath, mtime) => {
-    const srcIsLocal = !srcNode || srcNode === 'local';
-    const destIsLocal = !destNode || destNode === 'local';
+    if (isSmbPath(srcPath) || isSmbPath(destPath)) {
+        return smbCopyFile(srcPath, destPath);
+    }
+    const srcIsLocal = !srcNode || srcNode === 'local' || srcNode === 'master' || srcNode === 'Master Node';
+    const destIsLocal = !destNode || destNode === 'local' || destNode === 'master' || destNode === 'Master Node';
     let bytes = 0;
 
     if (srcIsLocal && destIsLocal) {
@@ -228,6 +514,7 @@ const copyFileBetweenNodes = async (srcNode, srcPath, destNode, destPath, mtime)
         if (!targetAgent) throw new Error(`Destination Agent ${destNode} not found or offline`);
 
         const downloadUrl = `${sourceAgent.url}/api/v1/files/download?path=${encodeURIComponent(srcPath)}`;
+
         const downloadResponse = await axios({
             method: 'get',
             url: downloadUrl,
