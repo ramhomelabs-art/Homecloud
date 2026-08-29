@@ -216,7 +216,52 @@ const deleteSmbFile = async (targetPath) => {
     });
 };
 
+const createSmbDirectory = async (targetPath) => {
+
+    const sharesRes = await db.query('SELECT * FROM network_shares');
+    let clean = targetPath.trim().replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
+    const parts = clean.split('/');
+    const host = parts[0];
+    const shareName = parts[1] || '';
+    const uncShare = `//${host}/${shareName}`;
+    const internalPath = parts.slice(2).join('/');
+
+    const matchedShare = sharesRes.rows.find(row => {
+        let cleanRow = (row.path || '').replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
+        const rowParts = cleanRow.split('/');
+        return rowParts[0]?.toLowerCase() === host.toLowerCase() && 
+               (rowParts[1] || '').toLowerCase() === shareName.toLowerCase();
+    });
+
+    const user = matchedShare?.username || '';
+    let pass = '';
+    if (matchedShare?.password) {
+        try { pass = cryptoHelper.decrypt(matchedShare.password); } catch (e) { pass = matchedShare.password; }
+    }
+
+    const env = { ...process.env, PASSWD: pass || '' };
+    const safeUser = (user || '').replace(/[;&|`$<>\\"']/g, '');
+    const safeShare = uncShare.replace(/[;&|`$<>\\"']/g, '');
+    const winInternal = internalPath.replace(/\//g, '\\');
+    const mkdirCmd = `mkdir "${winInternal.replace(/"/g, '')}"`;
+
+    const cmd = safeUser
+        ? `smbclient "${safeShare}" -U "${safeUser}" -t 15 -c '${mkdirCmd}'`
+        : `smbclient "${safeShare}" -N -t 15 -c '${mkdirCmd}'`;
+
+    return new Promise((resolve, reject) => {
+        exec(cmd, { env, timeout: 20000 }, (err, stdout, stderr) => {
+            if (err) {
+                const errMsg = (stderr || stdout || err.message || '').trim();
+                return reject(new Error(`SMB mkdir failed: ${errMsg}`));
+            }
+            resolve(true);
+        });
+    });
+};
+
 const smbRenameOrMove = async (srcPath, destPath) => {
+
     try {
         const sharesRes = await db.query('SELECT * FROM network_shares');
         let cleanSrc = srcPath.trim().replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
@@ -895,9 +940,22 @@ router.post(['/mkdir', '/create/folder'], requireRole(['Admin', 'Operator', 'Pow
         }
     }
 
+    const isSmb = folder && (folder.startsWith('\\\\') || folder.startsWith('//') || folder.startsWith('smb://'));
+
+    if (isSmb) {
+        try {
+            await createSmbDirectory(folder);
+            clearDirSizeCache();
+            return res.json({ message: 'Directory created successfully on SMB share' });
+        } catch (smbErr) {
+            return res.status(500).json({ error: smbErr.message });
+        }
+    }
+
     try {
         const resolved = await vaultService.resolveVaultPath(req, folder);
         await storageProvider.mkdir(resolved);
+
         res.json({ message: 'Directory created successfully' });
     } catch (err) {
         if (err.statusCode === 403) {
@@ -1433,8 +1491,47 @@ router.post('/upload', upload.array('files'), async (req, res) => {
 
     try {
         const baseFolder = targetPath || '';
+        const isSmbTarget = baseFolder && (baseFolder.startsWith('\\\\') || baseFolder.startsWith('//') || baseFolder.startsWith('smb://'));
+
+        if (isSmbTarget) {
+            for (const file of req.files) {
+                let scanResult;
+                try {
+                    scanResult = await securityService.deepScan(file.path, file.originalname);
+                } catch (err) {
+                    scanResult = { verdict: 'clean' };
+                }
+
+                if (scanResult.verdict === 'malicious') {
+                    try { fs.unlinkSync(file.path); } catch (e) {}
+                    return res.status(400).json({
+                        error: `Security Scan Blocked: File is malicious (Score: ${scanResult.score}). Threats: ${scanResult.threats.join(', ')}`
+                    });
+                }
+
+                try {
+                    const cleanBase = baseFolder.replace(/\/+$/, '').replace(/\\+$/, '');
+                    const finalSmbDest = `${cleanBase}\\${file.originalname}`;
+                    await smbCopyFile(file.path, finalSmbDest);
+                    try { fs.unlinkSync(file.path); } catch (e) {}
+                    results.push({ name: file.originalname, status: 'uploaded' });
+                } catch (upErr) {
+                    errors.push(`${file.originalname}: Upload failed: ${upErr.message}`);
+                    try { fs.unlinkSync(file.path); } catch (e) {}
+                }
+            }
+
+            if (errors.length > 0) {
+                return res.status(500).json({ error: `Upload issues: ${errors.join(', ')}` });
+            }
+
+            clearDirSizeCache();
+            return res.json({ message: 'Uploaded successfully to SMB share', results });
+        }
+
         const resolvedBase = await vaultService.resolveVaultPath(req, baseFolder);
         await storageProvider.mkdir(resolvedBase);
+
 
         for (const file of req.files) {
             let scanResult;
