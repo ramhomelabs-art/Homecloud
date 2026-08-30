@@ -436,6 +436,7 @@ router.post('/quarantine/approve', authenticateToken, requireAdmin, async (req, 
         await securityService.approveQuarantine(id, req.user.id);
         res.json({ success: true, message: 'File restored from quarantine.' });
     } catch (err) {
+        logger.error(`[Quarantine Approve Error] ${err.message}`, err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -447,6 +448,7 @@ router.post('/quarantine/reject', authenticateToken, requireAdmin, async (req, r
         await securityService.rejectQuarantine(id, req.user.id);
         res.json({ success: true, message: 'Quarantined file deleted securely.' });
     } catch (err) {
+        logger.error(`[Quarantine Reject Error] ${err.message}`, err);
         res.status(500).json({ error: err.message });
     }
 });

@@ -442,23 +442,30 @@ class SecurityService {
     async approveQuarantine(id, reviewerId) {
         const record = await this.getRecordById(id);
         if (!record) throw new Error('Quarantine record not found');
-        if (record.status !== 'pending') throw new Error('File is already reviewed');
-
-        if (!fs.existsSync(record.quarantine_path)) {
-            throw new Error('Quarantined source file no longer exists on disk');
+        if (record.status !== 'pending') {
+            logger.info(`[SecurityService] Quarantine record ${id} is already in state: ${record.status}`);
+            return true;
         }
 
-        // Deliver approved file from quarantine to final destination (Agent / SMB / Local)
-        let rawTarget = record.target_path || '';
-        // Extract destination directory from target_path
-        const targetDir = path.dirname(rawTarget);
-        const { deliverFileToDestination } = require('../utils/fileHelpers');
-        await deliverFileToDestination(record.quarantine_path, targetDir, record.original_name);
+        const qPath = record.quarantine_path;
+        if (qPath && fs.existsSync(qPath)) {
+            // Deliver approved file from quarantine to final destination (Agent / SMB / Local)
+            let rawTarget = record.target_path || '';
+            // Cross-platform dirname extraction handling both \ and /
+            const normTarget = String(rawTarget).replace(/\\/g, '/');
+            const lastSlash = normTarget.lastIndexOf('/');
+            const targetDir = lastSlash !== -1 ? normTarget.substring(0, lastSlash) : normTarget;
+
+            const { deliverFileToDestination } = require('../utils/fileHelpers');
+            await deliverFileToDestination(qPath, targetDir, record.original_name);
+        } else {
+            logger.warn(`[SecurityService] Quarantined source file missing from disk (${qPath}). Marking database record as approved.`);
+        }
 
         // Update database
         await db.query(
             "UPDATE quarantine SET status = 'approved', reviewed_at = CURRENT_TIMESTAMP, reviewed_by = $1 WHERE id = $2",
-            [reviewerId, id]
+            [reviewerId || null, id]
         );
 
         // Log to security_events
@@ -499,15 +506,18 @@ class SecurityService {
     async rejectQuarantine(id, reviewerId) {
         const record = await this.getRecordById(id);
         if (!record) throw new Error('Quarantine record not found');
-        if (record.status !== 'pending') throw new Error('File is already reviewed');
+        if (record.status !== 'pending') {
+            logger.info(`[SecurityService] Quarantine record ${id} is already in state: ${record.status}`);
+            return true;
+        }
 
-        if (fs.existsSync(record.quarantine_path)) {
+        if (record.quarantine_path && fs.existsSync(record.quarantine_path)) {
             await secureShred(record.quarantine_path);
         }
 
         await db.query(
             "UPDATE quarantine SET status = 'rejected', reviewed_at = CURRENT_TIMESTAMP, reviewed_by = $1 WHERE id = $2",
-            [reviewerId, id]
+            [reviewerId || null, id]
         );
 
         // Log to security_events
