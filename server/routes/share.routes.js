@@ -75,6 +75,13 @@ const isShareAuthorized = (req, share) => {
 // Resolve paths across Windows UNC, drive letters, Linux mounts, and StorageProvider uploads
 const resolveSharedPath = (p) => {
     if (!p) return null;
+
+    // 0. SMB / Network Share Path Preservation (UNC, IP host, smb://)
+    const cleanSmb = (p || '').replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
+    const isSmbShare = (p.startsWith('\\\\') || p.startsWith('//') || p.startsWith('smb://') || /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\//.test(cleanSmb));
+    if (isSmbShare) {
+        return `//${cleanSmb}`;
+    }
     
     // 1. Direct path check (Windows or native path)
     try {

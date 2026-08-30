@@ -77,12 +77,19 @@ class SecurityQueue extends EventEmitter {
             } 
             else {
                 // Clean -> Move to destination
-                const isSmb = (targetDir || '').startsWith('\\\\') || (targetDir || '').startsWith('//') || (targetDir || '').startsWith('smb://');
+                let rawTarget = targetDir || '';
+                const cleanSmb = rawTarget.replace(/\\/g, '/').replace(/^.*?uploads\//i, '').replace(/^(smb:)?\/+/, '');
+                const isSmb = rawTarget.startsWith('\\\\') || 
+                              rawTarget.startsWith('//') || 
+                              rawTarget.startsWith('smb://') || 
+                              /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\//.test(cleanSmb) ||
+                              /uploads[\\\/]\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}[\\\/]/i.test(rawTarget);
+
                 if (isSmb) {
                     const { uploadFileToSmb } = require('../utils/fileHelpers');
-                    await uploadFileToSmb(stagedPath, targetDir, originalName);
+                    await uploadFileToSmb(stagedPath, cleanSmb, originalName);
                     try { fs.unlinkSync(stagedPath); } catch (_) {}
-                    logger.info(`[SecurityQueue] File ${originalName} is clean. Uploaded directly to SMB destination: ${targetDir}`);
+                    logger.info(`[SecurityQueue] File ${originalName} is clean. Uploaded directly to SMB destination: ${cleanSmb}`);
                 } else {
                     if (!fs.existsSync(targetDir)) {
                         fs.mkdirSync(targetDir, { recursive: true });

@@ -449,9 +449,16 @@ class SecurityService {
         }
 
         // Move from quarantine to final target
-        const isSmb = (record.target_path || '').startsWith('\\\\') || (record.target_path || '').startsWith('//') || (record.target_path || '').startsWith('smb://');
+        let rawTarget = record.target_path || '';
+        const cleanSmb = rawTarget.replace(/\\/g, '/').replace(/^.*?uploads\//i, '').replace(/^(smb:)?\/+/, '');
+        const isSmb = rawTarget.startsWith('\\\\') || 
+                      rawTarget.startsWith('//') || 
+                      rawTarget.startsWith('smb://') || 
+                      /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\//.test(cleanSmb) ||
+                      /uploads[\\\/]\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}[\\\/]/i.test(rawTarget);
+
         if (isSmb) {
-            const targetDir = path.dirname(record.target_path.replace(/\\/g, '/'));
+            const targetDir = path.dirname(cleanSmb);
             const { uploadFileToSmb } = require('../utils/fileHelpers');
             await uploadFileToSmb(record.quarantine_path, targetDir, record.original_name);
             try { fs.unlinkSync(record.quarantine_path); } catch (_) {}

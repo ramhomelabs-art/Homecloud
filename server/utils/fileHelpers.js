@@ -124,7 +124,7 @@ const uploadFileToSmb = async (localFilePath, sharePath, fileName) => {
     const db = require('../config/database');
     const cryptoHelper = require('./crypto');
     const sharesRes = await db.query('SELECT * FROM network_shares');
-    let clean = (sharePath || '').trim().replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
+    let clean = (sharePath || '').trim().replace(/\\/g, '/').replace(/^.*?uploads\//i, '').replace(/^(smb:)?\/+/, '');
     const parts = clean.split('/');
     const host = parts[0];
     const shareName = parts[1] || '';

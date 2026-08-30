@@ -78,19 +78,27 @@ router.post('/drop', authenticateUpload, upload.array('files'), async (req, res)
     const { share } = req;
     const subPath = req.body.path || '';
 
-    let baseDir = share.path;
-    try {
-        const stats = fs.statSync(baseDir);
-        if (!stats.isDirectory()) baseDir = path.dirname(baseDir);
-    } catch (e) {}
+    let baseDir = share.path || '';
+    const cleanSmb = baseDir.replace(/\\/g, '/').replace(/^.*?uploads\//i, '').replace(/^(smb:)?\/+/, '');
+    const isSmb = baseDir.startsWith('\\\\') || baseDir.startsWith('//') || baseDir.startsWith('smb://') || /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\//.test(cleanSmb);
 
-    const targetDir = path.join(baseDir, subPath);
-    const normalizedTarget = path.normalize(targetDir).toLowerCase();
-    const normalizedBase = path.normalize(baseDir).toLowerCase();
+    let targetDir = '';
+    if (isSmb) {
+        targetDir = subPath ? `//${cleanSmb}/${subPath.replace(/^[\\\/]+/, '').replace(/\\/g, '/')}` : `//${cleanSmb}`;
+    } else {
+        try {
+            const stats = fs.statSync(baseDir);
+            if (!stats.isDirectory()) baseDir = path.dirname(baseDir);
+        } catch (e) {}
 
-    if (!normalizedTarget.startsWith(normalizedBase)) {
-        req.files.forEach(f => { try { fs.unlinkSync(f.path); } catch (e) {} });
-        return res.status(403).json({ error: 'Path traversal forbidden' });
+        targetDir = path.join(baseDir, subPath);
+        const normalizedTarget = path.normalize(targetDir).toLowerCase();
+        const normalizedBase = path.normalize(baseDir).toLowerCase();
+
+        if (!normalizedTarget.startsWith(normalizedBase)) {
+            req.files.forEach(f => { try { fs.unlinkSync(f.path); } catch (e) {} });
+            return res.status(403).json({ error: 'Path traversal forbidden' });
+        }
     }
 
     if (!req.files || req.files.length === 0) {
@@ -100,7 +108,7 @@ router.post('/drop', authenticateUpload, upload.array('files'), async (req, res)
     const results = [];
 
     try {
-        if (!fs.existsSync(targetDir)) {
+        if (!isSmb && !fs.existsSync(targetDir)) {
             fs.mkdirSync(targetDir, { recursive: true });
         }
 
