@@ -419,7 +419,16 @@ app.get(['/api/v1/health', '/api/v1/system/health', '/api/v1/system/stats', '/he
 app.get('/.well-known/appspecific/com.chrome.devtools.json', (req, res) => res.json({}));
 
 // --- STATIC FRONTEND SERVING ---
-const clientDist = path.join(__dirname, '..', 'client', 'dist');
+let clientDist = path.join(__dirname, '..', 'client', 'dist');
+if (!fs.existsSync(clientDist)) {
+    if (fs.existsSync(path.join(__dirname, 'client', 'dist'))) {
+        clientDist = path.join(__dirname, 'client', 'dist');
+    } else if (fs.existsSync('/app/client/dist')) {
+        clientDist = '/app/client/dist';
+    } else if (fs.existsSync(path.join(__dirname, 'dist'))) {
+        clientDist = path.join(__dirname, 'dist');
+    }
+}
 const mobileDist = path.join(__dirname, '..', 'mobile');
 
 app.use('/mobile', express.static(mobileDist));

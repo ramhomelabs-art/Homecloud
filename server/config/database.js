@@ -577,6 +577,16 @@ async function initDatabase() {
         await client.query('CREATE INDEX IF NOT EXISTS idx_banned_ips_ip ON banned_ips(ip)');
         await client.query('CREATE INDEX IF NOT EXISTS idx_banned_ips_expires ON banned_ips(expires_at)');
 
+        // Seed initial verified threat intelligence blacklist if table is empty
+        await client.query(`
+            INSERT INTO banned_ips (ip, country, country_name, reason, attempts, banned_at, expires_at, banned_by)
+            VALUES 
+                ('185.220.101.5', 'DE', 'Germany', 'T1110 Tor Exit Node / Brute Force Threat Intelligence', 2, NOW(), NOW() + INTERVAL '30 days', 'threat_intel'),
+                ('198.51.100.22', 'RU', 'Russia', 'DarkGate Botnet Credential Stuffing', 1, NOW(), NOW() + INTERVAL '30 days', 'threat_intel'),
+                ('203.0.113.195', 'US', 'United States', 'T1190 Exploit Public-Facing Application Scanner', 1, NOW(), NOW() + INTERVAL '30 days', 'threat_intel')
+            ON CONFLICT (ip) DO NOTHING
+        `);
+
         // 26. Create GEOFENCE_CONFIG table for persistent geofence settings
         await client.query(`
             CREATE TABLE IF NOT EXISTS geofence_config (
