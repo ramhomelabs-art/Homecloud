@@ -167,6 +167,92 @@ const uploadFileToSmb = async (localFilePath, sharePath, fileName) => {
     });
 };
 
+const deliverFileToDestination = async (localFilePath, targetDir, fileName, agentId = null) => {
+    const clusterService = require('../services/clusterService');
+    const storageProvider = require('./storageProvider');
+    const logger = require('./logger');
+    const path = require('path');
+    const fs = require('fs');
+
+    let rawTarget = targetDir || '';
+    // Strip any accidental container upload prefix e.g. /app/server/uploads/ or /app/server/
+    rawTarget = rawTarget.replace(/^\/app\/server\/(?=[a-zA-Z]:|\\\\|\/\/|\d{1,3}\.)/i, '');
+    rawTarget = rawTarget.replace(/^.*?uploads\/(?=[a-zA-Z]:|\\\\|\/\/|\d{1,3}\.)/i, '');
+
+    // 1. Check if destination is on a Remote Agent (e.g. Windows drive letter D:\Job on a Linux Master)
+    const isWindowsDrive = /^[a-zA-Z]:/i.test(rawTarget);
+    if ((process.platform !== 'win32' && isWindowsDrive) || agentId) {
+        let targetAgent = null;
+        if (agentId && clusterService.agents[agentId]) {
+            targetAgent = clusterService.agents[agentId];
+        } else if (isWindowsDrive) {
+            const driveLetter = rawTarget.substring(0, 2).toUpperCase();
+            const agentsList = Object.values(clusterService.agents || {});
+            targetAgent = agentsList.find(ag => ag.status === 'approved' && ag.online && (ag.disks || []).some(d => (d.mount || '').toUpperCase().startsWith(driveLetter)))
+                || agentsList.find(ag => ag.status === 'approved' && (ag.disks || []).some(d => (d.mount || '').toUpperCase().startsWith(driveLetter)))
+                || agentsList.find(ag => ag.status === 'approved' && ag.online)
+                || agentsList[0];
+        }
+
+        if (targetAgent && targetAgent.url) {
+            const FormData = require('form-data');
+            const axios = require('axios');
+            const form = new FormData();
+            form.append('files', fs.createReadStream(localFilePath), fileName);
+            await axios.post(`${targetAgent.url}/api/v1/files/upload?path=${encodeURIComponent(rawTarget)}`, form, {
+                headers: {
+                    ...form.getHeaders(),
+                    'Authorization': `Bearer ${process.env.AGENT_KEY || ''}`
+                },
+                maxContentLength: Infinity,
+                maxBodyLength: Infinity,
+                timeout: 60000
+            });
+            try { fs.unlinkSync(localFilePath); } catch (_) {}
+            logger.info(`[FileDeliver] Transferred "${fileName}" to Remote Agent "${targetAgent.hostname || targetAgent.id}" at destination: ${rawTarget}`);
+            return true;
+        }
+    }
+
+    // 2. Check if destination is an SMB Network Share
+    const cleanSmb = rawTarget.replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
+    const isSmb = rawTarget.startsWith('\\\\') || 
+                  rawTarget.startsWith('//') || 
+                  rawTarget.startsWith('smb://') || 
+                  /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\//.test(cleanSmb);
+
+    if (isSmb) {
+        await uploadFileToSmb(localFilePath, cleanSmb, fileName);
+        try { fs.unlinkSync(localFilePath); } catch (_) {}
+        logger.info(`[FileDeliver] Uploaded "${fileName}" to SMB Network Share: ${cleanSmb}`);
+        return true;
+    }
+
+    // 3. Local Host Storage
+    let destDir = rawTarget || storageProvider.resolvePath('');
+    if (process.platform !== 'win32' && /^[a-zA-Z]:/i.test(destDir)) {
+        // Fallback for Windows path on Linux host when no agent was matched
+        destDir = storageProvider.resolvePath(destDir.replace(/^[a-zA-Z]:[\\\/]*/, ''));
+    }
+
+    if (!fs.existsSync(destDir)) {
+        fs.mkdirSync(destDir, { recursive: true });
+    }
+    const finalPath = path.join(destDir, fileName);
+    try {
+        fs.renameSync(localFilePath, finalPath);
+    } catch (err) {
+        if (err.code === 'EXDEV' || err.code === 'EPERM' || err.code === 'EACCES' || err.code === 'EINVAL') {
+            fs.copyFileSync(localFilePath, finalPath);
+            try { fs.unlinkSync(localFilePath); } catch (_) {}
+        } else {
+            throw err;
+        }
+    }
+    logger.info(`[FileDeliver] Saved "${fileName}" to local storage: ${finalPath}`);
+    return true;
+};
+
 const clearDirSizeCache = () => {
     if (typeof dirSizeCache !== 'undefined' && dirSizeCache) dirSizeCache.clear();
     cachedCategories = null;
@@ -176,5 +262,6 @@ module.exports = {
     getDirectorySize,
     calculateCategorySizes,
     clearDirSizeCache,
-    uploadFileToSmb
+    uploadFileToSmb,
+    deliverFileToDestination
 };

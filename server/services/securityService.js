@@ -448,39 +448,12 @@ class SecurityService {
             throw new Error('Quarantined source file no longer exists on disk');
         }
 
-        // Move from quarantine to final target
+        // Deliver approved file from quarantine to final destination (Agent / SMB / Local)
         let rawTarget = record.target_path || '';
-        const cleanSmb = rawTarget.replace(/\\/g, '/').replace(/^.*?uploads\//i, '').replace(/^(smb:)?\/+/, '');
-        const isSmb = rawTarget.startsWith('\\\\') || 
-                      rawTarget.startsWith('//') || 
-                      rawTarget.startsWith('smb://') || 
-                      /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\//.test(cleanSmb) ||
-                      /uploads[\\\/]\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}[\\\/]/i.test(rawTarget);
-
-        if (isSmb) {
-            const targetDir = path.dirname(cleanSmb);
-            const { uploadFileToSmb } = require('../utils/fileHelpers');
-            await uploadFileToSmb(record.quarantine_path, targetDir, record.original_name);
-            try { fs.unlinkSync(record.quarantine_path); } catch (_) {}
-            logger.info(`[SecurityService] Quarantined file ${record.original_name} approved and uploaded to SMB destination: ${targetDir}`);
-        } else {
-            // Ensure target directory exists
-            const destDir = path.dirname(record.target_path);
-            if (!fs.existsSync(destDir)) {
-                fs.mkdirSync(destDir, { recursive: true });
-            }
-
-            try {
-                fs.renameSync(record.quarantine_path, record.target_path);
-            } catch (err) {
-                if (err.code === 'EXDEV') {
-                    fs.copyFileSync(record.quarantine_path, record.target_path);
-                    fs.unlinkSync(record.quarantine_path);
-                } else {
-                    throw err;
-                }
-            }
-        }
+        // Extract destination directory from target_path
+        const targetDir = path.dirname(rawTarget);
+        const { deliverFileToDestination } = require('../utils/fileHelpers');
+        await deliverFileToDestination(record.quarantine_path, targetDir, record.original_name);
 
         // Update database
         await db.query(
