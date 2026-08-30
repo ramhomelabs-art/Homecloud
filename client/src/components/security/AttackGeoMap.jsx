@@ -914,12 +914,12 @@ const AttackGeoMap = ({ showToast }) => {
                     </div>
 
                     <div style={{ display: 'flex', gap: '10px', alignItems: 'center', minWidth: 0, flex: 1 }}>
-                        {incursionLogs.length === 0 ? (
+                        {(incursionLogs.length > 0 ? incursionLogs : allThreats).length === 0 ? (
                             <span style={{ fontSize: '11px', color: '#94a3b8' }}>Awaiting live WAF security events... System secure.</span>
                         ) : (
-                            incursionLogs.slice(0, 4).map(log => (
+                            (incursionLogs.length > 0 ? incursionLogs : allThreats).slice(0, 5).map(log => (
                                 <div 
-                                    key={log.id} 
+                                    key={log.id || log.ip} 
                                     style={{ 
                                         display: 'flex', 
                                         alignItems: 'center', 
@@ -927,7 +927,7 @@ const AttackGeoMap = ({ showToast }) => {
                                         background: 'rgba(255,255,255,0.06)', 
                                         padding: '4px 10px', 
                                         borderRadius: '6px',
-                                        border: `1px solid ${log.verdict === 'BLOCKED' ? 'rgba(239,68,68,0.35)' : 'rgba(245,158,11,0.35)'}`,
+                                        border: `1px solid ${log.verdict === 'BLOCKED' || log.action === 'BLOCKED' ? 'rgba(239,68,68,0.35)' : 'rgba(245,158,11,0.35)'}`,
                                         fontSize: '11px',
                                         whiteSpace: 'nowrap',
                                         flexShrink: 0
@@ -935,9 +935,9 @@ const AttackGeoMap = ({ showToast }) => {
                                 >
                                     <span>{COUNTRY_FLAGS[log.country] || '🌐'}</span>
                                     <span style={{ fontWeight: '700', color: '#f8fafc' }}>{log.ip}</span>
-                                    <span style={{ color: '#94a3b8', fontSize: '10.5px' }}>({log.countryName || log.country})</span>
-                                    <span style={{ color: log.verdict === 'BLOCKED' ? '#ef4444' : '#f59e0b', fontWeight: '800' }}>[{log.type}]</span>
-                                    <span style={{ color: '#94a3b8', fontSize: '10px' }}>{log.time}</span>
+                                    <span style={{ color: '#94a3b8', fontSize: '10.5px' }}>({log.countryName || COUNTRY_NAMES[log.country] || log.country})</span>
+                                    <span style={{ color: log.verdict === 'BLOCKED' || log.action === 'BLOCKED' ? '#ef4444' : '#f59e0b', fontWeight: '800' }}>[{log.type || log.attackType || 'BLOCKED'}]</span>
+                                    <span style={{ color: '#94a3b8', fontSize: '10px' }}>{log.time || new Date(log.timestamp || Date.now()).toLocaleTimeString()}</span>
                                 </div>
                             ))
                         )}

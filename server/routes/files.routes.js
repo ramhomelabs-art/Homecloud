@@ -2520,10 +2520,17 @@ router.post('/storage/tree', async (req, res) => {
             physPath = reqPath;
             if (/^[a-zA-Z]:$/i.test(physPath)) physPath += path.sep;
         } else {
-            physPath = storageProvider.resolvePath(reqPath);
+            physPath = storageProvider.resolvePath(reqPath || '');
         }
 
-        if (!fs.existsSync(physPath)) return res.status(404).json({ error: `Path not found: ${reqPath || 'storage root'}` });
+        if (!fs.existsSync(physPath)) {
+            try {
+                fs.mkdirSync(physPath, { recursive: true });
+            } catch (_) {
+                physPath = storageProvider.resolvePath('');
+                if (!fs.existsSync(physPath)) fs.mkdirSync(physPath, { recursive: true });
+            }
+        }
 
         const topFiles = [];
         const typeCategories = {
