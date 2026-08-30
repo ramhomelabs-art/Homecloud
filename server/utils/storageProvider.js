@@ -9,7 +9,7 @@ const { getDirectorySize } = require('./fileHelpers');
 class StorageProvider {
     constructor() {
         this.type = process.env.STORAGE_TYPE || 'local'; // 'local' or 's3'
-        this.localBase = process.env.LOCAL_STORAGE_BASE || path.resolve(__dirname, '..', 'uploads');
+        this.localBase = process.env.LOCAL_STORAGE_BASE || process.env.STORAGE_ROOT || path.resolve(__dirname, '..', 'uploads');
         
         if (this.type === 's3') {
             AWS.config.update({
