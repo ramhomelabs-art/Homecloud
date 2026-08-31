@@ -3489,26 +3489,6 @@ function App() {
             />
             {contextMenu && <div className="cm-overlay" onClick={() => setContextMenu(null)} />}
 
-            {/* Global Transfer Engine & Speedometer Drawer */}
-            <TransferQueueDrawer 
-                transfers={operations.map(op => ({
-                    id: op.id,
-                    name: op.name || 'File Operation',
-                    type: op.type || 'upload',
-                    status: (op.status === 'In Progress' || op.status === 'Preparing' || op.status === 'Scanning...') ? 'active' : (op.status === 'Completed' ? 'completed' : (op.status === 'Failed' ? 'failed' : 'active')),
-                    progress: op.progress || 0,
-                    transferred: op.bytesTransferred || 0,
-                    size: op.totalBytes || 0,
-                    speed: op.speed || 0,
-                    eta: op.eta || 0,
-                    source: op.type === 'upload' ? 'Local Client' : (selectedDevice?.name || 'Local Master'),
-                    destination: selectedDevice?.name || 'NexaDisk Storage'
-                }))}
-                onCancelTransfer={cancelOperation}
-                onClearCompleted={() => setOperations(prev => prev.filter(o => o.status !== 'Completed' && o.status !== 'Failed'))}
-            />
-
-
             {
                 shareModal && (
                     <ShareModal

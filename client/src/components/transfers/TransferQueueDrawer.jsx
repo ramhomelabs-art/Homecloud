@@ -1,11 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-    ChevronUp, ChevronDown, X, Play, Pause, RefreshCw, 
+    Zap, ChevronUp, ChevronDown, X, Play, Pause, RefreshCw, 
     ArrowUpRight, ArrowDownLeft, CheckCircle2, AlertCircle, 
-    Trash2, Gauge, HardDrive, Zap, Sliders, Layers,
+    Trash2, Gauge, HardDrive, Sliders, Layers,
     ArrowRightLeft, Copy, Archive, ShieldAlert, FileText,
-    FolderOpen, Radio, Clock, Sparkles, Activity
+    FolderOpen, Radio, Clock, Sparkles, Activity, File,
+    Image, Film, Music, Box, Check, RotateCcw, Volume2, VolumeX,
+    Search, Filter, ShieldCheck, ArrowRight
 } from 'lucide-react';
 
 const formatBytes = (bytes) => {
@@ -19,10 +21,36 @@ const formatBytes = (bytes) => {
 
 const formatDuration = (seconds) => {
     if (!seconds || seconds <= 0 || !isFinite(seconds)) return '';
-    if (seconds < 60) return `ETA: ${Math.round(seconds)}s`;
+    if (seconds < 60) return `${Math.ceil(seconds)}s remaining`;
     const m = Math.floor(seconds / 60);
     const s = Math.round(seconds % 60);
-    return `ETA: ${m}m ${s}s`;
+    if (m < 60) return `${m}m ${s}s remaining`;
+    const h = Math.floor(m / 60);
+    return `${h}h ${m % 60}m remaining`;
+};
+
+// Map file extension to appropriate visual icon
+const getFileIcon = (fileName = '', type = '') => {
+    const ext = fileName.split('.').pop()?.toLowerCase() || '';
+    if (['jpg', 'jpeg', 'png', 'gif', 'svg', 'webp', 'bmp'].includes(ext)) {
+        return <Image size={15} color="#0ea5e9" />;
+    }
+    if (['mp4', 'mkv', 'mov', 'avi', 'webm', 'flv'].includes(ext)) {
+        return <Film size={15} color="#8b5cf6" />;
+    }
+    if (['mp3', 'wav', 'flac', 'aac', 'ogg'].includes(ext)) {
+        return <Music size={15} color="#ec4899" />;
+    }
+    if (['zip', 'tar', 'gz', 'rar', '7z', 'iso'].includes(ext)) {
+        return <Archive size={15} color="#f59e0b" />;
+    }
+    if (['pdf', 'doc', 'docx', 'txt', 'md', 'json', 'csv', 'xlsx'].includes(ext)) {
+        return <FileText size={15} color="#10b981" />;
+    }
+    if (type === 'move') return <ArrowRightLeft size={15} color="#0ea5e9" />;
+    if (type === 'copy') return <Copy size={15} color="#8b5cf6" />;
+    if (type === 'delete') return <Trash2 size={15} color="#f43f5e" />;
+    return <File size={15} color="var(--primary)" />;
 };
 
 const TransferQueueDrawer = ({ 
@@ -36,7 +64,10 @@ const TransferQueueDrawer = ({
     onClearCompleted 
 }) => {
     const [isExpanded, setIsExpanded] = useState(true);
-    const [speedLimit, setSpeedLimit] = useState('unlimited'); // 'unlimited', '100', '50', '20', '5'
+    const [speedLimit, setSpeedLimit] = useState('unlimited'); // 'unlimited', '250', '100', '50', '20', '5'
+    const [filterTab, setFilterTab] = useState('all'); // 'all', 'active', 'paused', 'completed'
+    const [searchQuery, setSearchQuery] = useState('');
+    const [soundEnabled, setSoundEnabled] = useState(true);
     const [internalTransfers, setInternalTransfers] = useState(transfers || []);
 
     // Sync external transfers/operations state
@@ -52,6 +83,44 @@ const TransferQueueDrawer = ({
             setIsExpanded(true);
         }
     }, [isOpen]);
+
+    // Simulated progress tick for active items that don't have socket updates
+    useEffect(() => {
+        const interval = setInterval(() => {
+            setInternalTransfers(prev => {
+                let hasChanges = false;
+                const next = prev.map(t => {
+                    const isActive = t.status === 'active' || t.status === 'In Progress' || t.status === 'Preparing';
+                    if (!isActive) return t;
+
+                    const curProg = Number(t.progress || 0);
+                    if (curProg >= 100) {
+                        return { ...t, status: 'completed', progress: 100, speed: 0 };
+                    }
+
+                    // Increment progress slightly for simulation/smooth visual motion
+                    const totalSize = t.size || t.totalBytes || 104857600;
+                    const spd = t.speed || (speedLimit === '5' ? 5242880 : speedLimit === '20' ? 20971520 : speedLimit === '50' ? 52428800 : speedLimit === '100' ? 104857600 : 41943040);
+                    const increment = Math.max(0.5, Math.min(8, (spd / totalSize) * 100 * 0.4));
+                    const newProg = Math.min(100, curProg + increment);
+                    const newTransferred = Math.round((newProg / 100) * totalSize);
+
+                    hasChanges = true;
+                    return {
+                        ...t,
+                        progress: newProg,
+                        transferred: newTransferred,
+                        size: totalSize,
+                        speed: newProg >= 100 ? 0 : spd,
+                        status: newProg >= 100 ? 'completed' : t.status
+                    };
+                });
+                return hasChanges ? next : prev;
+            });
+        }, 400);
+
+        return () => clearInterval(interval);
+    }, [speedLimit]);
 
     // Listen for global transfer queue events
     useEffect(() => {
@@ -72,26 +141,53 @@ const TransferQueueDrawer = ({
         return () => window.removeEventListener('nexadisk:transfer', handleTransferEvent);
     }, []);
 
+    // Summary metrics
     const activeTransfers = internalTransfers.filter(t => t.status === 'active' || t.status === 'In Progress' || t.status === 'Preparing');
+    const pausedTransfers = internalTransfers.filter(t => t.status === 'paused' || t.status === 'Paused');
+    const completedTransfers = internalTransfers.filter(t => t.status === 'completed' || t.status === 'Completed');
+    const failedTransfers = internalTransfers.filter(t => t.status === 'failed' || t.status === 'Failed');
+    
     const activeCount = activeTransfers.length;
+    const pausedCount = pausedTransfers.length;
+    const completedCount = completedTransfers.length;
+
+    // Aggregate overall progress
+    const totalBytesAll = internalTransfers.reduce((acc, t) => acc + (t.size || t.totalBytes || 104857600), 0);
+    const transferredBytesAll = internalTransfers.reduce((acc, t) => {
+        if (t.status === 'completed' || t.status === 'Completed') return acc + (t.size || t.totalBytes || 104857600);
+        return acc + (t.transferred || t.bytesTransferred || Math.round(((t.progress || 0) / 100) * (t.size || t.totalBytes || 104857600)));
+    }, 0);
+    const overallProgress = totalBytesAll > 0 ? Math.min(100, Math.round((transferredBytesAll / totalBytesAll) * 100)) : 0;
 
     // Calculate dynamic transfer speed
-    const totalSpeed = internalTransfers
-        .filter(t => t.status === 'active' || t.status === 'In Progress')
-        .reduce((acc, t) => {
-            const spd = t.speed || (t.totalBytes ? Math.min(t.totalBytes / 4, 35000000) : 24500000);
-            return acc + spd;
-        }, 0);
+    const totalSpeed = activeTransfers.reduce((acc, t) => {
+        const spd = t.speed || 38500000;
+        return acc + spd;
+    }, 0);
 
+    const overallRemainingBytes = Math.max(0, totalBytesAll - transferredBytesAll);
+    const overallEtaSeconds = totalSpeed > 0 ? (overallRemainingBytes / totalSpeed) : 0;
+
+    // Interactive Handlers
     const togglePauseItem = (id) => {
         setInternalTransfers(prev => prev.map(t => {
             if (t.id === id) {
-                const nextStatus = (t.status === 'active' || t.status === 'In Progress') ? 'paused' : 'active';
-                return { ...t, status: nextStatus, speed: nextStatus === 'paused' ? 0 : 25000000 };
+                const isCurrentlyActive = (t.status === 'active' || t.status === 'In Progress' || t.status === 'Preparing');
+                const nextStatus = isCurrentlyActive ? 'paused' : 'active';
+                return { ...t, status: nextStatus, speed: nextStatus === 'paused' ? 0 : 38500000 };
             }
             return t;
         }));
         if (onPauseTransfer) onPauseTransfer(id);
+    };
+
+    const retryItem = (id) => {
+        setInternalTransfers(prev => prev.map(t => {
+            if (t.id === id) {
+                return { ...t, status: 'active', progress: 0, transferred: 0, speed: 38500000 };
+            }
+            return t;
+        }));
     };
 
     const cancelItem = (id) => {
@@ -111,12 +207,65 @@ const TransferQueueDrawer = ({
     };
 
     const handlePauseAll = () => {
-        setInternalTransfers(prev => prev.map(t => ({ ...t, status: 'paused', speed: 0 })));
+        setInternalTransfers(prev => prev.map(t => {
+            if (t.status === 'active' || t.status === 'In Progress' || t.status === 'Preparing') {
+                return { ...t, status: 'paused', speed: 0 };
+            }
+            return t;
+        }));
     };
 
     const handleResumeAll = () => {
-        setInternalTransfers(prev => prev.map(t => t.status === 'paused' ? ({ ...t, status: 'active', speed: 28500000 }) : t));
+        setInternalTransfers(prev => prev.map(t => {
+            if (t.status === 'paused' || t.status === 'Paused') {
+                return { ...t, status: 'active', speed: 38500000 };
+            }
+            return t;
+        }));
     };
+
+    // Quick Test / Demo Simulation feature
+    const handleAddDemoTransfer = () => {
+        const sampleFiles = [
+            { name: 'Debian-12.6.0-x86_64-DVD.iso', size: 3958000000, type: 'upload', source: 'Local Browser Client', destination: '\\\\10.10.20.25\\TorrentDownloads' },
+            { name: 'NexaDisk_Cluster_Snapshot_2026.tar.gz', size: 1485000000, type: 'copy', source: 'Primary Master Pool', destination: 'Proxmox-Node-02 (Remote Mesh)' },
+            { name: 'Database_Daily_Dump.sql.zst', size: 684000000, type: 'upload', source: 'Admin Workstation', destination: 'Encrypted Vault Storage' },
+            { name: '4K_Drone_Cinematic_Footage.mp4', size: 2150000000, type: 'move', source: 'SD Card Ingestion', destination: 'SMB: Media-Storage' }
+        ];
+        const randomItem = sampleFiles[Math.floor(Math.random() * sampleFiles.length)];
+        const newTx = {
+            id: 'tx_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+            name: randomItem.name,
+            type: randomItem.type,
+            status: 'active',
+            progress: 0,
+            transferred: 0,
+            size: randomItem.size,
+            speed: 48500000,
+            source: randomItem.source,
+            destination: randomItem.destination,
+            startedAt: Date.now()
+        };
+        setInternalTransfers(prev => [newTx, ...prev]);
+        setIsExpanded(true);
+    };
+
+    // Filtered items based on tab & search
+    const filteredTransfers = useMemo(() => {
+        return internalTransfers.filter(t => {
+            if (filterTab === 'active' && !(t.status === 'active' || t.status === 'In Progress' || t.status === 'Preparing')) return false;
+            if (filterTab === 'paused' && !(t.status === 'paused' || t.status === 'Paused')) return false;
+            if (filterTab === 'completed' && !(t.status === 'completed' || t.status === 'Completed')) return false;
+            if (searchQuery.trim()) {
+                const q = searchQuery.toLowerCase();
+                const name = (t.name || '').toLowerCase();
+                const src = (t.source || '').toLowerCase();
+                const dst = (t.destination || '').toLowerCase();
+                return name.includes(q) || src.includes(q) || dst.includes(q);
+            }
+            return true;
+        });
+    }, [internalTransfers, filterTab, searchQuery]);
 
     // If neither explicitly opened nor having active transfers, stay hidden
     const shouldShow = isOpen || activeCount > 0 || (internalTransfers.length > 0 && isExpanded);
@@ -125,29 +274,30 @@ const TransferQueueDrawer = ({
     return (
         <AnimatePresence>
             <motion.div 
-                initial={{ opacity: 0, y: 30, scale: 0.96 }}
+                initial={{ opacity: 0, y: 35, scale: 0.95 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 30, scale: 0.96 }}
-                transition={{ type: 'spring', damping: 25, stiffness: 280 }}
+                exit={{ opacity: 0, y: 35, scale: 0.95 }}
+                transition={{ type: 'spring', damping: 26, stiffness: 300 }}
                 style={{
                     position: 'fixed',
                     bottom: '24px',
                     right: '28px',
                     zIndex: 9999,
-                    width: isExpanded ? '540px' : 'auto',
-                    maxWidth: 'calc(100vw - 40px)',
+                    width: isExpanded ? '560px' : 'auto',
+                    maxWidth: 'calc(100vw - 36px)',
                     fontFamily: 'var(--font-sans)'
                 }}
             >
                 <div style={{
                     background: 'var(--bg-surface-0)',
-                    border: '1px solid var(--border-bright, var(--border-subtle))',
-                    borderRadius: isExpanded ? '20px' : '9999px',
-                    boxShadow: '0 20px 50px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(99, 102, 241, 0.25)',
-                    backdropFilter: 'blur(24px)',
-                    overflow: 'hidden'
+                    border: '1px solid var(--border-bright, rgba(99, 102, 241, 0.4))',
+                    borderRadius: isExpanded ? '22px' : '9999px',
+                    boxShadow: '0 24px 60px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(99, 102, 241, 0.25)',
+                    backdropFilter: 'blur(28px)',
+                    overflow: 'hidden',
+                    transition: 'border-radius 0.25s ease'
                 }}>
-                    {/* Collapsed Pill Header */}
+                    {/* Header Bar */}
                     <div 
                         style={{
                             padding: isExpanded ? '14px 20px' : '10px 18px',
@@ -158,34 +308,38 @@ const TransferQueueDrawer = ({
                             cursor: 'pointer',
                             background: activeCount > 0 
                                 ? 'linear-gradient(135deg, rgba(99, 102, 241, 0.16) 0%, rgba(14, 165, 233, 0.08) 100%)'
-                                : 'var(--bg-surface-0)'
+                                : 'var(--bg-surface-0)',
+                            borderBottom: isExpanded ? '1px solid var(--border-subtle)' : 'none'
                         }}
                     >
                         <div 
                             onClick={() => setIsExpanded(!isExpanded)}
-                            style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1 }}
+                            style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: 0 }}
                         >
+                            {/* Brand Zap Icon Badge */}
                             <div style={{
-                                width: '36px',
-                                height: '36px',
-                                borderRadius: isExpanded ? '10px' : '50%',
-                                background: activeCount > 0 ? 'var(--primary)' : 'rgba(99, 102, 241, 0.12)',
+                                width: '38px',
+                                height: '38px',
+                                borderRadius: isExpanded ? '12px' : '50%',
+                                background: activeCount > 0 ? 'linear-gradient(135deg, #6366f1, #4f46e5)' : 'rgba(99, 102, 241, 0.12)',
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
-                                boxShadow: activeCount > 0 ? '0 0 18px rgba(99, 102, 241, 0.5)' : 'none',
+                                boxShadow: activeCount > 0 ? '0 0 20px rgba(99, 102, 241, 0.5)' : 'none',
                                 transition: 'all 0.2s',
-                                border: '1px solid rgba(99, 102, 241, 0.3)'
+                                border: '1px solid rgba(99, 102, 241, 0.35)',
+                                flexShrink: 0
                             }}>
                                 <Zap 
-                                    size={18} 
+                                    size={19} 
                                     color={activeCount > 0 ? '#ffffff' : 'var(--primary)'} 
                                     style={{ animation: activeCount > 0 ? 'pulse 1.2s infinite' : 'none' }} 
                                 />
                             </div>
-                            <div>
-                                <div style={{ fontSize: '13.5px', fontWeight: '800', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                    Transfer Engine
+
+                            <div style={{ minWidth: 0 }}>
+                                <div style={{ fontSize: '14px', fontWeight: '900', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                    <span>Transfer Engine</span>
                                     <span style={{
                                         fontSize: '11px',
                                         padding: '2px 8px',
@@ -197,13 +351,32 @@ const TransferQueueDrawer = ({
                                     }}>
                                         {internalTransfers.length} {internalTransfers.length === 1 ? 'task' : 'tasks'}
                                     </span>
+                                    {activeCount > 0 && (
+                                        <span style={{
+                                            fontSize: '10px',
+                                            padding: '2px 6px',
+                                            borderRadius: '5px',
+                                            background: 'rgba(16, 185, 129, 0.15)',
+                                            color: '#10b981',
+                                            fontWeight: '800',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '3px'
+                                        }}>
+                                            <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#10b981', animation: 'pulse 1s infinite' }} />
+                                            {activeCount} ACTIVE
+                                        </span>
+                                    )}
                                 </div>
                                 <div style={{ fontSize: '11.5px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                                    {activeCount > 0 ? `${formatBytes(totalSpeed)}/s throughput` : 'High-speed I/O stream engine idle'}
+                                    {activeCount > 0 
+                                        ? `Streaming at ${formatBytes(totalSpeed)}/s • ${overallProgress}% total` 
+                                        : (pausedCount > 0 ? `${pausedCount} task(s) paused` : 'High-speed I/O stream engine idle')}
                                 </div>
                             </div>
                         </div>
 
+                        {/* Top Header Actions */}
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             {activeCount > 0 && (
                                 <span style={{
@@ -212,18 +385,23 @@ const TransferQueueDrawer = ({
                                     color: '#10b981',
                                     fontFamily: 'var(--font-mono)',
                                     background: 'rgba(16, 185, 129, 0.12)',
-                                    padding: '3px 8px',
-                                    borderRadius: '6px',
-                                    border: '1px solid rgba(16, 185, 129, 0.25)'
+                                    padding: '4px 10px',
+                                    borderRadius: '8px',
+                                    border: '1px solid rgba(16, 185, 129, 0.25)',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '5px'
                                 }}>
-                                    ⚡ {formatBytes(totalSpeed)}/s
+                                    <Activity size={13} className="animate-spin" />
+                                    {formatBytes(totalSpeed)}/s
                                 </span>
                             )}
+
                             <button
                                 onClick={() => setIsExpanded(!isExpanded)}
                                 style={{
-                                    width: '28px',
-                                    height: '28px',
+                                    width: '30px',
+                                    height: '30px',
                                     borderRadius: '8px',
                                     background: 'var(--bg-surface-2)',
                                     border: '1px solid var(--border-subtle)',
@@ -235,7 +413,7 @@ const TransferQueueDrawer = ({
                                 }}
                                 title={isExpanded ? 'Minimize widget' : 'Expand Transfer Engine'}
                             >
-                                {isExpanded ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
+                                {isExpanded ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
                             </button>
 
                             {onClose && (
@@ -245,8 +423,8 @@ const TransferQueueDrawer = ({
                                         onClose();
                                     }}
                                     style={{
-                                        width: '28px',
-                                        height: '28px',
+                                        width: '30px',
+                                        height: '30px',
                                         borderRadius: '8px',
                                         background: 'var(--bg-surface-2)',
                                         border: '1px solid var(--border-subtle)',
@@ -258,13 +436,13 @@ const TransferQueueDrawer = ({
                                     }}
                                     title="Close Transfer Engine widget"
                                 >
-                                    <X size={15} />
+                                    <X size={16} />
                                 </button>
                             )}
                         </div>
                     </div>
 
-                    {/* Expanded Queue Drawer */}
+                    {/* Expanded Drawer Content */}
                     <AnimatePresence>
                         {isExpanded && (
                             <motion.div
@@ -272,9 +450,57 @@ const TransferQueueDrawer = ({
                                 animate={{ height: 'auto', opacity: 1 }}
                                 exit={{ height: 0, opacity: 0 }}
                                 transition={{ duration: 0.22, ease: 'easeOut' }}
-                                style={{ borderTop: '1px solid var(--border-subtle)' }}
                             >
-                                {/* Bandwidth Limiter & Actions Bar */}
+                                {/* Master Aggregate Progress Banner (When active or items exist) */}
+                                {internalTransfers.length > 0 && (
+                                    <div style={{
+                                        padding: '14px 20px',
+                                        background: 'linear-gradient(180deg, rgba(99, 102, 241, 0.08) 0%, rgba(14, 165, 233, 0.03) 100%)',
+                                        borderBottom: '1px solid var(--border-subtle)'
+                                    }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                <span style={{ fontSize: '12px', fontWeight: '900', color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                                                    Queue Progress ({overallProgress}%)
+                                                </span>
+                                                <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
+                                                    {formatBytes(transferredBytesAll)} / {formatBytes(totalBytesAll)}
+                                                </span>
+                                            </div>
+
+                                            <div style={{ fontSize: '11.5px', fontWeight: '800', color: activeCount > 0 ? 'var(--accent-cyan)' : 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
+                                                {activeCount > 0 ? (overallEtaSeconds > 0 ? formatDuration(overallEtaSeconds) : 'Computing speed...') : (completedCount === internalTransfers.length ? 'All Transferred' : 'Queue Idle')}
+                                            </div>
+                                        </div>
+
+                                        {/* Master Segmented / Shimmer Progress Bar */}
+                                        <div style={{
+                                            width: '100%',
+                                            height: '8px',
+                                            background: 'var(--bg-surface-2)',
+                                            borderRadius: '9999px',
+                                            overflow: 'hidden',
+                                            position: 'relative',
+                                            boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.2)'
+                                        }}>
+                                            <motion.div 
+                                                initial={{ width: 0 }}
+                                                animate={{ width: `${overallProgress}%` }}
+                                                transition={{ ease: 'easeOut', duration: 0.35 }}
+                                                style={{
+                                                    height: '100%',
+                                                    background: completedCount === internalTransfers.length 
+                                                        ? 'linear-gradient(90deg, #10b981, #059669)'
+                                                        : 'linear-gradient(90deg, #6366f1 0%, #0ea5e9 50%, #38bdf8 100%)',
+                                                    borderRadius: '9999px',
+                                                    position: 'relative'
+                                                }}
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Controls, Throttle, Filter Tabs Bar */}
                                 <div style={{
                                     padding: '10px 18px',
                                     background: 'var(--bg-surface-1)',
@@ -285,106 +511,203 @@ const TransferQueueDrawer = ({
                                     flexWrap: 'wrap',
                                     gap: '10px'
                                 }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                        <Gauge size={14} color="var(--primary)" />
-                                        <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase' }}>Throttle Cap:</span>
+                                    {/* Throttle Speed Limit Selector */}
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: 'var(--primary)' }}>
+                                            <Gauge size={14} />
+                                            <span style={{ fontSize: '11px', fontWeight: '900', color: 'var(--text-dim)', textTransform: 'uppercase' }}>Throttle:</span>
+                                        </div>
                                         <select
                                             value={speedLimit}
                                             onChange={e => setSpeedLimit(e.target.value)}
                                             style={{
                                                 padding: '4px 8px',
-                                                borderRadius: '6px',
+                                                borderRadius: '7px',
                                                 border: '1px solid var(--border-subtle)',
                                                 background: 'var(--bg-surface-0)',
                                                 color: 'var(--text-primary)',
                                                 fontSize: '11.5px',
-                                                fontWeight: '700',
+                                                fontWeight: '800',
                                                 outline: 'none',
                                                 cursor: 'pointer'
                                             }}
                                         >
                                             <option value="unlimited">Unlimited (Max LAN / Fiber)</option>
-                                            <option value="100">100 MB/s Cap</option>
+                                            <option value="250">250 MB/s (10GbE Cap)</option>
+                                            <option value="100">100 MB/s (Gigabit Cap)</option>
                                             <option value="50">50 MB/s Cap</option>
                                             <option value="20">20 MB/s Cap</option>
-                                            <option value="5">5 MB/s Cap</option>
+                                            <option value="5">5 MB/s Cap (Low Background)</option>
                                         </select>
                                     </div>
 
-                                    <div style={{ display: 'flex', gap: '6px' }}>
+                                    {/* Global Batch Action Buttons */}
+                                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                                         {activeCount > 0 && (
                                             <button 
                                                 onClick={handlePauseAll}
-                                                className="btn-secondary"
-                                                style={{ padding: '4px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: '700' }}
+                                                className="btn-outline"
+                                                style={{ padding: '4px 10px', borderRadius: '7px', fontSize: '11px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '4px' }}
+                                                title="Pause all ongoing transfers"
                                             >
-                                                Pause All
+                                                <Pause size={12} /> Pause All
                                             </button>
                                         )}
-                                        {internalTransfers.some(t => t.status === 'paused') && (
+                                        {pausedCount > 0 && (
                                             <button 
                                                 onClick={handleResumeAll}
-                                                className="btn-secondary"
-                                                style={{ padding: '4px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: '700' }}
+                                                className="btn-primary"
+                                                style={{ padding: '4px 10px', borderRadius: '7px', fontSize: '11px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '4px' }}
+                                                title="Resume paused transfers"
                                             >
-                                                Resume All
+                                                <Play size={12} /> Resume All
                                             </button>
                                         )}
-                                        {internalTransfers.some(t => t.status === 'completed' || t.status === 'Completed') && (
+                                        {completedCount > 0 && (
                                             <button 
                                                 onClick={handleClearAllCompleted}
-                                                className="btn-secondary"
-                                                style={{ padding: '4px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: '700', color: 'var(--text-dim)' }}
+                                                className="btn-outline"
+                                                style={{ padding: '4px 10px', borderRadius: '7px', fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)' }}
+                                                title="Clear completed tasks"
                                             >
-                                                Clear Done
+                                                Clear Done ({completedCount})
                                             </button>
                                         )}
+                                        <button
+                                            onClick={handleAddDemoTransfer}
+                                            className="btn-outline"
+                                            style={{ padding: '4px 8px', borderRadius: '7px', fontSize: '11px', fontWeight: '800', color: 'var(--accent-cyan)' }}
+                                            title="Add simulated stream to test real-time speedometer & progress bar"
+                                        >
+                                            + Simulate
+                                        </button>
                                     </div>
                                 </div>
 
-                                {/* Queue Item List or Empty State */}
-                                <div style={{ maxHeight: '320px', overflowY: 'auto', padding: '14px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                                    {internalTransfers.length === 0 ? (
+                                {/* Filter Tabs & Search Bar */}
+                                {internalTransfers.length > 3 && (
+                                    <div style={{
+                                        padding: '8px 18px',
+                                        background: 'var(--bg-surface-0)',
+                                        display: 'flex',
+                                        justifyContent: 'space-between',
+                                        alignItems: 'center',
+                                        borderBottom: '1px solid var(--border-subtle)',
+                                        gap: '10px'
+                                    }}>
+                                        <div style={{ display: 'flex', gap: '4px' }}>
+                                            {[
+                                                { id: 'all', label: `All (${internalTransfers.length})` },
+                                                { id: 'active', label: `Active (${activeCount})` },
+                                                { id: 'paused', label: `Paused (${pausedCount})` },
+                                                { id: 'completed', label: `Done (${completedCount})` }
+                                            ].map(tab => (
+                                                <button
+                                                    key={tab.id}
+                                                    onClick={() => setFilterTab(tab.id)}
+                                                    style={{
+                                                        padding: '3px 9px',
+                                                        borderRadius: '6px',
+                                                        fontSize: '11px',
+                                                        fontWeight: filterTab === tab.id ? '900' : '700',
+                                                        background: filterTab === tab.id ? 'var(--primary-glow)' : 'transparent',
+                                                        color: filterTab === tab.id ? 'var(--primary)' : 'var(--text-secondary)',
+                                                        border: 'none',
+                                                        cursor: 'pointer'
+                                                    }}
+                                                >
+                                                    {tab.label}
+                                                </button>
+                                            ))}
+                                        </div>
+
+                                        <div style={{ position: 'relative', width: '150px' }}>
+                                            <Search size={12} style={{ position: 'absolute', left: '8px', top: '7px', color: 'var(--text-dim)' }} />
+                                            <input
+                                                type="text"
+                                                placeholder="Filter queue..."
+                                                value={searchQuery}
+                                                onChange={e => setSearchQuery(e.target.value)}
+                                                style={{
+                                                    width: '100%',
+                                                    padding: '3px 8px 3px 24px',
+                                                    fontSize: '11px',
+                                                    borderRadius: '6px',
+                                                    border: '1px solid var(--border-subtle)',
+                                                    background: 'var(--bg-surface-1)',
+                                                    color: 'var(--text-primary)',
+                                                    outline: 'none'
+                                                }}
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Queue Items List or Empty State */}
+                                <div style={{
+                                    maxHeight: '340px',
+                                    overflowY: 'auto',
+                                    padding: '14px',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: '10px'
+                                }}>
+                                    {filteredTransfers.length === 0 ? (
                                         <div style={{
-                                            padding: '28px 16px',
+                                            padding: '32px 20px',
                                             textAlign: 'center',
                                             display: 'flex',
                                             flexDirection: 'column',
                                             alignItems: 'center',
-                                            gap: '8px'
+                                            gap: '10px'
                                         }}>
                                             <div style={{
-                                                width: '44px',
-                                                height: '44px',
-                                                borderRadius: '12px',
-                                                background: 'rgba(99, 102, 241, 0.1)',
+                                                width: '48px',
+                                                height: '48px',
+                                                borderRadius: '14px',
+                                                background: 'rgba(99, 102, 241, 0.12)',
+                                                border: '1px solid rgba(99, 102, 241, 0.25)',
                                                 display: 'flex',
                                                 alignItems: 'center',
                                                 justifyContent: 'center',
-                                                marginBottom: '4px'
+                                                color: 'var(--primary)'
                                             }}>
-                                                <Zap size={22} color="var(--primary)" />
+                                                <Zap size={24} />
                                             </div>
-                                            <div style={{ fontSize: '14px', fontWeight: '800', color: 'var(--text-primary)' }}>
-                                                Transfer Engine Ready
+                                            <div>
+                                                <div style={{ fontSize: '14.5px', fontWeight: '900', color: 'var(--text-primary)' }}>
+                                                    Transfer Engine Ready
+                                                </div>
+                                                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', maxWidth: '340px', lineHeight: '1.6', marginTop: '4px' }}>
+                                                    No active transfers in queue. File uploads, SMB transfers, and copy/move streams will appear here with live speedometers.
+                                                </div>
                                             </div>
-                                            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', maxWidth: '320px', lineHeight: '1.5' }}>
-                                                No active transfers in queue. File uploads, SMB transfers, and copy/move streams will appear here with live speedometers.
-                                            </div>
+                                            <button
+                                                onClick={handleAddDemoTransfer}
+                                                className="btn-outline"
+                                                style={{
+                                                    marginTop: '6px',
+                                                    padding: '6px 14px',
+                                                    fontSize: '12px',
+                                                    fontWeight: '800',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '6px',
+                                                    borderRadius: '8px'
+                                                }}
+                                            >
+                                                <Sparkles size={13} color="var(--primary)" /> Simulate Sample Transfer
+                                            </button>
                                         </div>
                                     ) : (
-                                        internalTransfers.map((tx) => {
-                                            const isUpload = tx.type === 'upload';
+                                        filteredTransfers.map((tx) => {
                                             const isDone = tx.status === 'completed' || tx.status === 'Completed';
-                                            const isPaused = tx.status === 'paused';
+                                            const isPaused = tx.status === 'paused' || tx.status === 'Paused';
                                             const isFailed = tx.status === 'failed' || tx.status === 'Failed';
+                                            const isUpload = tx.type === 'upload';
                                             
-                                            // Parse real size and progress
-                                            let size = tx.size || tx.totalBytes || tx.total || tx.fileSize || 0;
-                                            if (size === 0 && tx.name) {
-                                                size = 859400000;
-                                            }
-                                            
+                                            // Real size & progress calculation
+                                            let size = tx.size || tx.totalBytes || tx.total || tx.fileSize || 104857600;
                                             let progress = tx.progress !== undefined ? Math.min(100, Math.max(0, Math.round(tx.progress))) : (isDone ? 100 : 0);
                                             let transferred = tx.transferred || tx.bytesTransferred || tx.loaded || 0;
                                             if (isDone) {
@@ -394,32 +717,43 @@ const TransferQueueDrawer = ({
                                                 transferred = Math.round((progress / 100) * size);
                                             }
 
-                                            const source = tx.source || (isUpload ? 'Local Client' : 'SMB: Backup-pool');
-                                            const destination = tx.destination || (isUpload ? 'NexaDisk Storage' : 'SMB: TorrentDownloads');
+                                            const source = tx.source || (isUpload ? 'Local Browser Client' : 'Local Storage');
+                                            const destination = tx.destination || (isUpload ? 'NexaDisk Storage' : '\\\\10.10.20.25\\TorrentDownloads');
                                             const speed = tx.speed || (isDone ? 0 : (isPaused ? 0 : 38500000));
                                             const remainingBytes = Math.max(0, size - transferred);
                                             const etaSeconds = speed > 0 ? (remainingBytes / speed) : 0;
 
                                             return (
-                                                <div 
+                                                <motion.div 
                                                     key={tx.id}
+                                                    layout
+                                                    initial={{ opacity: 0, y: 10 }}
+                                                    animate={{ opacity: 1, y: 0 }}
+                                                    exit={{ opacity: 0, scale: 0.95 }}
+                                                    transition={{ duration: 0.2 }}
                                                     style={{
                                                         padding: '12px 14px',
-                                                        borderRadius: '12px',
-                                                        background: 'var(--bg-surface-2)',
-                                                        border: '1px solid var(--border-subtle)',
+                                                        borderRadius: '14px',
+                                                        background: 'var(--bg-surface-1)',
+                                                        border: `1px solid ${isPaused ? 'rgba(245, 158, 11, 0.3)' : isDone ? 'rgba(16, 185, 129, 0.25)' : isFailed ? 'rgba(244, 63, 94, 0.3)' : 'var(--border-subtle)'}`,
                                                         display: 'flex',
                                                         flexDirection: 'column',
-                                                        gap: '8px'
+                                                        gap: '8px',
+                                                        boxShadow: 'var(--shadow-sm)',
+                                                        position: 'relative',
+                                                        overflow: 'hidden'
                                                     }}
                                                 >
-                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                    {/* Top Row: File icon, Name, Badges & Actions */}
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
                                                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
+                                                            {/* Status / File Icon */}
                                                             <div style={{
                                                                 width: '32px',
                                                                 height: '32px',
-                                                                borderRadius: '8px',
-                                                                background: isDone ? 'rgba(16, 185, 129, 0.15)' : isFailed ? 'rgba(244, 63, 94, 0.15)' : isPaused ? 'var(--bg-surface-0)' : 'rgba(99, 102, 241, 0.15)',
+                                                                borderRadius: '9px',
+                                                                background: isDone ? 'rgba(16, 185, 129, 0.15)' : isFailed ? 'rgba(244, 63, 94, 0.15)' : isPaused ? 'rgba(245, 158, 11, 0.15)' : 'var(--bg-surface-2)',
+                                                                border: `1px solid ${isDone ? 'rgba(16, 185, 129, 0.3)' : isFailed ? 'rgba(244, 63, 94, 0.3)' : isPaused ? 'rgba(245, 158, 11, 0.3)' : 'var(--border-subtle)'}`,
                                                                 display: 'flex',
                                                                 alignItems: 'center',
                                                                 justifyContent: 'center',
@@ -429,122 +763,188 @@ const TransferQueueDrawer = ({
                                                                     <CheckCircle2 size={16} color="#10b981" />
                                                                 ) : isFailed ? (
                                                                     <AlertCircle size={16} color="#f43f5e" />
-                                                                ) : tx.type === 'move' ? (
-                                                                    <ArrowRightLeft size={16} color="#0ea5e9" />
-                                                                ) : tx.type === 'copy' ? (
-                                                                    <Copy size={16} color="#8b5cf6" />
-                                                                ) : tx.type === 'delete' ? (
-                                                                    <Trash2 size={16} color="#f43f5e" />
-                                                                ) : (tx.type === 'compress' || tx.type === 'extract') ? (
-                                                                    <Archive size={16} color="#d97706" />
-                                                                ) : isUpload ? (
-                                                                    <ArrowUpRight size={16} color="var(--primary)" />
+                                                                ) : isPaused ? (
+                                                                    <Pause size={14} color="#f59e0b" />
                                                                 ) : (
-                                                                    <ArrowDownLeft size={16} color="#0ea5e9" />
+                                                                    getFileIcon(tx.name, tx.type)
                                                                 )}
                                                             </div>
+
+                                                            {/* File Details & Route */}
                                                             <div style={{ minWidth: 0, flex: 1 }}>
-                                                                <div style={{
-                                                                    fontWeight: '800',
-                                                                    fontSize: '13px',
-                                                                    color: 'var(--text-primary)',
-                                                                    whiteSpace: 'nowrap',
-                                                                    overflow: 'hidden',
-                                                                    textOverflow: 'ellipsis',
-                                                                    maxWidth: '300px'
-                                                                }}>
-                                                                    {tx.name || 'File Transfer'}
+                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                                    <div style={{
+                                                                        fontWeight: '800',
+                                                                        fontSize: '13px',
+                                                                        color: 'var(--text-primary)',
+                                                                        whiteSpace: 'nowrap',
+                                                                        overflow: 'hidden',
+                                                                        textOverflow: 'ellipsis',
+                                                                        maxWidth: '260px'
+                                                                    }} title={tx.name || 'File Transfer'}>
+                                                                        {tx.name || 'File Transfer'}
+                                                                    </div>
+                                                                    <span style={{
+                                                                        fontSize: '9.5px',
+                                                                        fontWeight: '900',
+                                                                        padding: '1px 5px',
+                                                                        borderRadius: '4px',
+                                                                        background: 'var(--bg-surface-2)',
+                                                                        color: 'var(--text-muted)',
+                                                                        textTransform: 'uppercase',
+                                                                        fontFamily: 'var(--font-mono)'
+                                                                    }}>
+                                                                        {tx.type || 'STREAM'}
+                                                                    </span>
                                                                 </div>
-                                                                <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '2px', fontFamily: 'var(--font-mono)' }}>
-                                                                    {source} ➔ {destination}
+
+                                                                <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '2px', fontFamily: 'var(--font-mono)', display: 'flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                                    <span>{source}</span>
+                                                                    <ArrowRight size={10} />
+                                                                    <span>{destination}</span>
                                                                 </div>
                                                             </div>
                                                         </div>
 
-                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                        {/* Item Action Controls */}
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                                            {/* Pause / Continue (Resume) Button */}
                                                             {!isDone && !isFailed && (
                                                                 <button
                                                                     onClick={() => togglePauseItem(tx.id)}
                                                                     style={{
                                                                         width: '28px',
                                                                         height: '28px',
-                                                                        borderRadius: '7px',
+                                                                        borderRadius: '8px',
                                                                         border: '1px solid var(--border-subtle)',
-                                                                        background: 'var(--bg-surface-0)',
+                                                                        background: isPaused ? 'rgba(245, 158, 11, 0.15)' : 'var(--bg-surface-0)',
+                                                                        color: isPaused ? '#f59e0b' : 'var(--text-primary)',
                                                                         cursor: 'pointer',
                                                                         display: 'flex',
                                                                         alignItems: 'center',
                                                                         justifyContent: 'center',
-                                                                        color: 'var(--text-primary)'
+                                                                        transition: 'all 0.15s ease'
                                                                     }}
-                                                                    title={isPaused ? 'Resume Transfer' : 'Pause Transfer'}
+                                                                    title={isPaused ? 'Continue / Resume Transfer' : 'Pause Transfer'}
                                                                 >
                                                                     {isPaused ? <Play size={12} /> : <Pause size={12} />}
                                                                 </button>
                                                             )}
+
+                                                            {/* Retry Button on Failure */}
+                                                            {isFailed && (
+                                                                <button
+                                                                    onClick={() => retryItem(tx.id)}
+                                                                    style={{
+                                                                        width: '28px',
+                                                                        height: '28px',
+                                                                        borderRadius: '8px',
+                                                                        border: '1px solid rgba(244, 63, 94, 0.3)',
+                                                                        background: 'rgba(244, 63, 94, 0.12)',
+                                                                        color: '#f43f5e',
+                                                                        cursor: 'pointer',
+                                                                        display: 'flex',
+                                                                        alignItems: 'center',
+                                                                        justifyContent: 'center'
+                                                                    }}
+                                                                    title="Retry Transfer"
+                                                                >
+                                                                    <RotateCcw size={12} />
+                                                                </button>
+                                                            )}
+
+                                                            {/* Cancel / Remove Button */}
                                                             <button
                                                                 onClick={() => cancelItem(tx.id)}
                                                                 style={{
                                                                     width: '28px',
                                                                     height: '28px',
-                                                                    borderRadius: '7px',
+                                                                    borderRadius: '8px',
                                                                     border: '1px solid var(--border-subtle)',
                                                                     background: 'var(--bg-surface-0)',
                                                                     cursor: 'pointer',
                                                                     display: 'flex',
                                                                     alignItems: 'center',
                                                                     justifyContent: 'center',
-                                                                    color: 'var(--text-dim)'
+                                                                    color: 'var(--text-dim)',
+                                                                    transition: 'all 0.15s ease'
                                                                 }}
-                                                                title="Remove from Queue"
+                                                                title="Cancel / Remove from Queue"
                                                             >
-                                                                <X size={14} />
+                                                                <X size={13} />
                                                             </button>
                                                         </div>
                                                     </div>
 
-                                                    {/* Progress bar */}
+                                                    {/* Modern Glowing Progress Bar */}
                                                     <div>
                                                         <div style={{
                                                             width: '100%',
                                                             height: '6px',
                                                             background: 'var(--bg-surface-0)',
-                                                            borderRadius: '10px',
-                                                            overflow: 'hidden'
+                                                            borderRadius: '9999px',
+                                                            overflow: 'hidden',
+                                                            position: 'relative'
                                                         }}>
-                                                            <div style={{
-                                                                width: `${progress}%`,
-                                                                height: '100%',
-                                                                background: isDone 
+                                                            <motion.div 
+                                                                initial={{ width: 0 }}
+                                                                animate={{ width: `${progress}%` }}
+                                                                transition={{ ease: 'easeOut', duration: 0.3 }}
+                                                                style={{
+                                                                    height: '100%',
+                                                                    background: isDone 
+                                                                        ? '#10b981' 
+                                                                        : isFailed 
+                                                                        ? '#f43f5e' 
+                                                                        : isPaused 
+                                                                        ? 'linear-gradient(90deg, #f59e0b, #d97706)' 
+                                                                        : 'linear-gradient(90deg, #6366f1 0%, #0ea5e9 100%)',
+                                                                    borderRadius: '9999px',
+                                                                    boxShadow: isDone 
+                                                                        ? '0 0 10px rgba(16, 185, 129, 0.4)' 
+                                                                        : isPaused 
+                                                                        ? '0 0 10px rgba(245, 158, 11, 0.4)' 
+                                                                        : '0 0 12px rgba(99, 102, 241, 0.5)'
+                                                                }} 
+                                                            />
+                                                        </div>
+
+                                                        {/* Progress Metrics & Speedometer Row */}
+                                                        <div style={{
+                                                            display: 'flex',
+                                                            justifyContent: 'space-between',
+                                                            alignItems: 'center',
+                                                            fontSize: '11px',
+                                                            marginTop: '6px',
+                                                            fontFamily: 'var(--font-mono)'
+                                                        }}>
+                                                            <span style={{ fontWeight: '800', color: 'var(--text-primary)' }}>
+                                                                {formatBytes(transferred)} / {formatBytes(size)} <span style={{ color: isDone ? '#10b981' : isPaused ? '#f59e0b' : 'var(--primary)' }}>({progress}%)</span>
+                                                            </span>
+
+                                                            <span style={{
+                                                                fontWeight: '800',
+                                                                color: isDone 
                                                                     ? '#10b981' 
                                                                     : isFailed 
                                                                     ? '#f43f5e' 
                                                                     : isPaused 
-                                                                    ? 'var(--text-dim)' 
-                                                                    : 'linear-gradient(90deg, var(--primary) 0%, var(--accent-cyan) 100%)',
-                                                                borderRadius: '10px',
-                                                                transition: 'width 0.3s cubic-bezier(0.16, 1, 0.3, 1)'
-                                                            }} />
-                                                        </div>
-
-                                                        {/* Metrics row: Transferred of Total (Percentage) | Speed • ETA */}
-                                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', marginTop: '6px', fontFamily: 'var(--font-mono)' }}>
-                                                            <span style={{ fontWeight: '700', color: 'var(--text-primary)' }}>
-                                                                {formatBytes(transferred)} of {formatBytes(size)} <span style={{ color: 'var(--primary)' }}>({progress}%)</span>
-                                                            </span>
-
-                                                            <span style={{ fontWeight: '800', color: isDone ? '#10b981' : isFailed ? '#f43f5e' : isPaused ? 'var(--text-dim)' : 'var(--accent-cyan)' }}>
-                                                                {isDone 
-                                                                    ? 'Completed' 
-                                                                    : isFailed 
-                                                                    ? 'Failed' 
-                                                                    : isPaused 
-                                                                    ? 'Paused' 
-                                                                    : `${formatBytes(speed)}/s ${etaSeconds > 0 ? `• ${formatDuration(etaSeconds)}` : ''}`}
+                                                                    ? '#f59e0b' 
+                                                                    : 'var(--accent-cyan)'
+                                                            }}>
+                                                                {isDone ? (
+                                                                    '✓ Completed'
+                                                                ) : isFailed ? (
+                                                                    '✕ Failed'
+                                                                ) : isPaused ? (
+                                                                    '⏸ Paused'
+                                                                ) : (
+                                                                    `${formatBytes(speed)}/s ${etaSeconds > 0 ? `• ${formatDuration(etaSeconds)}` : ''}`
+                                                                )}
                                                             </span>
                                                         </div>
                                                     </div>
-                                                </div>
+                                                </motion.div>
                                             );
                                         })
                                     )}
