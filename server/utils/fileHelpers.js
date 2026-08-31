@@ -194,15 +194,36 @@ const deliverFileToDestination = async (localFilePath, targetDir, fileName, agen
                 || agentsList[0];
         }
 
+        // Database Fallback: If memory cache is empty, query persistent_agents table directly
+        if (!targetAgent) {
+            try {
+                const db = require('../config/database');
+                const dbRes = await db.query("SELECT * FROM persistent_agents WHERE status = 'approved' ORDER BY lastseen DESC");
+                if (dbRes.rows.length > 0) {
+                    if (agentId) {
+                        targetAgent = dbRes.rows.find(r => r.id === agentId) || dbRes.rows[0];
+                    } else if (isWindowsDrive) {
+                        const driveLetter = rawTarget.substring(0, 2).toUpperCase();
+                        targetAgent = dbRes.rows.find(r => (r.compliance_report?.disks || []).some(d => (d.mount || '').toUpperCase().startsWith(driveLetter)))
+                            || dbRes.rows[0];
+                    }
+                }
+            } catch (dbErr) {
+                logger.error(`[FileDeliver] DB Agent lookup fallback failed: ${dbErr.message}`);
+            }
+        }
+
         if (targetAgent && targetAgent.url) {
             const FormData = require('form-data');
             const axios = require('axios');
             const form = new FormData();
             form.append('files', fs.createReadStream(localFilePath), fileName);
+            const agentSecret = process.env.AGENT_KEY || 'nexadisk_enterprise_agent_secret_key_change_in_production';
             await axios.post(`${targetAgent.url}/api/v1/files/upload?path=${encodeURIComponent(rawTarget)}`, form, {
                 headers: {
                     ...form.getHeaders(),
-                    'Authorization': `Bearer ${process.env.AGENT_KEY || ''}`
+                    'Authorization': `Bearer ${agentSecret}`,
+                    'x-agent-key': agentSecret
                 },
                 maxContentLength: Infinity,
                 maxBodyLength: Infinity,
