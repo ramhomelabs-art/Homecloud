@@ -866,14 +866,6 @@ router.post('/stream', async (req, res) => {
 const multer = require('multer');
 const securityQueue = require('../services/securityQueue');
 
-const checkShareActive = (share) => {
-    if (!share) return 'Share link not found or expired';
-    if (share.expires_at && new Date(share.expires_at) < new Date()) {
-        return 'This share link has expired';
-    }
-    return null;
-};
-
 const upload = multer({
     dest: securityQueue.getStagingDir(),
     limits: { fileSize: 5 * 1024 * 1024 * 1024 } // 5GB max
