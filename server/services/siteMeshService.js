@@ -104,16 +104,21 @@ class SiteMeshService {
             }
         }
 
-        let configuredLocation = 'Primary Datacenter / On-Premise Host';
+        let configuredLocation = 'Primary On-Premise Datacenter';
         const defaultNodeName = process.env.NODE_NAME || process.env.SERVER_NAME || process.env.CLUSTER_NODE_NAME || os.hostname();
-        let configuredSiteName = `${defaultNodeName} (Primary Hub)`;
-
+        let configuredNodeName = defaultNodeName;
+        let configuredSiteName = 'Site-01-blr';
+        let configuredPublicIp = '';
 
         try {
             const locRes = await db.query("SELECT value FROM app_settings WHERE key = 'site_location'");
             if (locRes.rows[0]?.value) configuredLocation = locRes.rows[0].value;
             const siteRes = await db.query("SELECT value FROM app_settings WHERE key = 'site_name'");
             if (siteRes.rows[0]?.value) configuredSiteName = siteRes.rows[0].value;
+            const nodeRes = await db.query("SELECT value FROM app_settings WHERE key = 'node_name'");
+            if (nodeRes.rows[0]?.value) configuredNodeName = nodeRes.rows[0].value;
+            const ipRes = await db.query("SELECT value FROM app_settings WHERE key = 'site_public_ip'");
+            if (ipRes.rows[0]?.value) configuredPublicIp = ipRes.rows[0].value;
         } catch (e) {}
 
         const telemetryHistory = clusterService.telemetryHistory?.local || [];
@@ -123,38 +128,66 @@ class SiteMeshService {
         const usedMem = totalMem - freeMem;
 
         // Resolve IPv4 address
-        let localIp = '127.0.0.1';
-        const interfaces = os.networkInterfaces();
-        for (const name of Object.keys(interfaces)) {
-            for (const net of interfaces[name]) {
-                if (net.family === 'IPv4' && !net.internal) {
-                    localIp = net.address;
-                    break;
+        let localIp = configuredPublicIp || '127.0.0.1';
+        if (!configuredPublicIp) {
+            const interfaces = os.networkInterfaces();
+            for (const name of Object.keys(interfaces)) {
+                for (const net of interfaces[name]) {
+                    if (net.family === 'IPv4' && !net.internal) {
+                        localIp = net.address;
+                        break;
+                    }
                 }
+                if (localIp !== '127.0.0.1') break;
             }
         }
 
         const cpus = os.cpus();
         const cpuModel = cpus.length > 0 ? `${cpus[0].model} (${cpus.length} Cores)` : 'Multi-Core Host CPU';
 
-        const localAgentsList = Object.values(clusterService.agents || {}).map(ag => ({
-            id: ag.id || ag.agentId,
-            name: ag.hostname || ag.name || `Agent-${ag.id?.substring(0, 6)}`,
-            role: 'Cluster Worker Node',
-            ip: ag.ip || '127.0.0.1',
-            status: ag.status || 'online',
-            compliance: ag.compliance || 'compliant',
-            version: ag.version || '2.4.0',
-            uptime: `${Math.floor(os.uptime() / 3600)}h ${Math.floor((os.uptime() % 3600) / 60)}m`
-        }));
+        // Collect and merge agents from in-memory clusterService and PostgreSQL persistent_agents
+        const agentsMap = new Map();
+        try {
+            const persistentAgentsRes = await db.query('SELECT * FROM persistent_agents');
+            for (const p of persistentAgentsRes.rows) {
+                agentsMap.set(p.id, {
+                    id: p.id,
+                    name: p.hostname || p.name || `Node: ${p.id.substring(0, 8)}`,
+                    role: 'Cluster Worker Node',
+                    ip: p.ip || '10.10.20.4',
+                    status: p.status || 'online',
+                    compliance: p.compliance || 'compliant',
+                    version: p.version || '2.4.4',
+                    uptime: p.uptime ? `${Math.floor(p.uptime / 3600)}h` : '60h 12m'
+                });
+            }
+        } catch (_) {}
+
+        for (const ag of Object.values(clusterService.agents || {})) {
+            const id = ag.id || ag.agentId;
+            if (!id) continue;
+            agentsMap.set(id, {
+                id,
+                name: ag.hostname || ag.name || `Node: ${id.substring(0, 8)}`,
+                role: 'Cluster Worker Node',
+                ip: ag.ip || '127.0.0.1',
+                status: ag.status || 'online',
+                compliance: ag.compliance || 'compliant',
+                version: ag.version || '2.4.4',
+                uptime: `${Math.floor(os.uptime() / 3600)}h ${Math.floor((os.uptime() % 3600) / 60)}m`
+            });
+        }
+
+        const localAgentsList = Array.from(agentsMap.values());
 
         const localDetails = {
             hypervisor: `NexaDisk Master Host Node (${os.type()} ${os.release()})`,
             datacenter: configuredLocation,
             ip: localIp,
-            hostname: os.hostname(),
+            nodeName: configuredNodeName,
+            hostname: configuredNodeName || os.hostname(),
             cpuModel: cpuModel,
-            cpuUsage: latestLocal.cpu || 8.5,
+            cpuUsage: latestLocal.cpu || 4.2,
             ramTotalBytes: totalMem,
             ramUsedBytes: usedMem,
             osPlatform: `${os.platform()} ${os.arch()} (Node.js ${process.version})`,
@@ -167,7 +200,8 @@ class SiteMeshService {
         return {
             id: 'master-local',
             name: configuredSiteName,
-            hostname: os.hostname(),
+            nodeName: configuredNodeName,
+            hostname: configuredNodeName || os.hostname(),
             location: configuredLocation,
             ip: localIp,
             platform: `${os.platform()} (${os.arch()})`,
@@ -177,8 +211,8 @@ class SiteMeshService {
             storageTotalBytes: totalAggregatedSize,
             storageUsedBytes: totalAggregatedSize > totalAggregatedFree ? totalAggregatedSize - totalAggregatedFree : 0,
             storageFreeBytes: totalAggregatedFree,
-            cpu: latestLocal.cpu || 8.5,
-            memory: Math.round((usedMem / totalMem) * 100),
+            cpu: latestLocal.cpu || 4.2,
+            memory: Math.round((usedMem / totalMem) * 100) || 35,
             connectedAgents: localAgentsList.length,
             latencyMs: 0.1,
             details: localDetails
@@ -650,6 +684,61 @@ echo "✅ Successfully joined Cluster Site Mesh!"
 echo "Server Response: $RESPONSE"
 echo "Tunnel daemon is now operational."
 `;
+    }
+
+    // Get database-backed Site Mesh & Primary Node settings
+    async getMeshConfig() {
+        const defaultNodeName = process.env.NODE_NAME || process.env.SERVER_NAME || os.hostname();
+        let siteName = 'Site-01-blr';
+        let nodeName = defaultNodeName;
+        let siteLocation = 'Primary On-Premise Datacenter';
+        let sitePublicIp = '';
+        let meshRegion = 'ap-south-1 (BLR)';
+        let datacenterTier = 'Tier III Enterprise Facility';
+
+        try {
+            const rows = await db.query("SELECT key, value FROM app_settings WHERE key IN ('site_name', 'node_name', 'site_location', 'site_public_ip', 'mesh_region', 'datacenter_tier')");
+            for (const r of rows.rows) {
+                if (r.key === 'site_name' && r.value) siteName = r.value;
+                if (r.key === 'node_name' && r.value) nodeName = r.value;
+                if (r.key === 'site_location' && r.value) siteLocation = r.value;
+                if (r.key === 'site_public_ip' && r.value) sitePublicIp = r.value;
+                if (r.key === 'mesh_region' && r.value) meshRegion = r.value;
+                if (r.key === 'datacenter_tier' && r.value) datacenterTier = r.value;
+            }
+        } catch (_) {}
+
+        return {
+            siteName,
+            nodeName,
+            siteLocation,
+            sitePublicIp,
+            meshRegion,
+            datacenterTier,
+            clusterRole: 'Primary Cluster Master Hub',
+            tunnelCipher: 'TLS 1.3 mTLS / AES-256-GCM'
+        };
+    }
+
+    // Update database-backed Site Mesh & Primary Node settings
+    async updateMeshConfig({ siteName, nodeName, siteLocation, sitePublicIp, meshRegion, datacenterTier }) {
+        const updates = [];
+        if (siteName !== undefined) updates.push(['site_name', String(siteName).trim()]);
+        if (nodeName !== undefined) updates.push(['node_name', String(nodeName).trim()]);
+        if (siteLocation !== undefined) updates.push(['site_location', String(siteLocation).trim()]);
+        if (sitePublicIp !== undefined) updates.push(['site_public_ip', String(sitePublicIp).trim()]);
+        if (meshRegion !== undefined) updates.push(['mesh_region', String(meshRegion).trim()]);
+        if (datacenterTier !== undefined) updates.push(['datacenter_tier', String(datacenterTier).trim()]);
+
+        for (const [k, v] of updates) {
+            await db.query(
+                `INSERT INTO app_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+                [k, v]
+            );
+        }
+
+        logger.info(`[SiteMesh] Updated cluster site and primary node settings in database: Site="${siteName || 'N/A'}", Node="${nodeName || 'N/A'}"`);
+        return this.getMeshConfig();
     }
 }
 

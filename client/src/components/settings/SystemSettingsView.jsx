@@ -64,6 +64,17 @@ const SystemSettingsView = ({
     const [resetPasswordValue, setResetPasswordValue] = useState('');
     const [resettingPasswordLoading, setResettingPasswordLoading] = useState(false);
 
+    // Cluster Site & Primary Node Identity States
+    const [meshConfig, setMeshConfig] = useState({
+        siteName: 'Site-01-blr',
+        nodeName: 'Debian-Storage-Hub',
+        siteLocation: 'Primary On-Premise Datacenter',
+        sitePublicIp: '10.10.20.166',
+        meshRegion: 'ap-south-1 (BLR)',
+        datacenterTier: 'Tier III Enterprise Facility'
+    });
+    const [savingMeshConfig, setSavingMeshConfig] = useState(false);
+
     const token = localStorage.getItem('token');
     const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
@@ -79,11 +90,34 @@ const SystemSettingsView = ({
         }
     };
 
+    const fetchMeshConfig = async () => {
+        try {
+            const res = await axios.get('/api/v1/sitemesh/config', { headers });
+            if (res.data) setMeshConfig(res.data);
+        } catch (_) {}
+    };
+
     useEffect(() => {
         if (activeTab === 'users') {
             fetchAllUsers();
         }
+        if (activeTab === 'cluster') {
+            fetchMeshConfig();
+        }
     }, [activeTab]);
+
+    const handleSaveMeshConfig = async (e) => {
+        e?.preventDefault();
+        setSavingMeshConfig(true);
+        try {
+            await axios.post('/api/v1/sitemesh/config', meshConfig, { headers });
+            if (showToast) showToast('Cluster Site & Primary Node configuration saved in database! 🌐', 'success');
+        } catch (err) {
+            if (showToast) showToast('Failed to save Cluster settings: ' + (err.response?.data?.error || err.message), 'error');
+        } finally {
+            setSavingMeshConfig(false);
+        }
+    };
 
     const handleApplyBranding = () => {
         if (!localAppName) return;
@@ -299,6 +333,7 @@ const SystemSettingsView = ({
 
     const tabs = [
         { id: 'branding', label: 'Branding & Interface', icon: <Sparkles size={18} /> },
+        { id: 'cluster', label: 'Cluster Site & Node Identity', icon: <Globe size={18} /> },
         { id: 'users', label: 'User Accounts & Roles', icon: <Users size={18} /> },
         { id: 'account', label: 'My Profile & 2FA / MFA', icon: <User size={18} /> },
         { id: 'clock', label: 'Global Clock & Display', icon: <Clock size={18} /> },
@@ -383,6 +418,146 @@ const SystemSettingsView = ({
                                         Save Brand Settings
                                     </button>
                                 </div>
+                            </motion.div>
+                        )}
+
+                        {/* TAB: CLUSTER SITE & PRIMARY NODE IDENTITY */}
+                        {activeTab === 'cluster' && (
+                            <motion.div key="cluster" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} transition={{ duration: 0.2 }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+                                    <div>
+                                        <h3 style={{ margin: '0 0 4px 0', fontSize: '18px', fontWeight: '800', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                            <Globe size={20} color="var(--primary)" /> Cluster Site Mesh & Master Node Identity
+                                        </h3>
+                                        <p style={{ margin: 0, fontSize: '12.5px', color: 'var(--text-secondary)' }}>
+                                            Configure database-backed site name, primary node hostname, datacenter tier, and public mesh IP address
+                                        </p>
+                                    </div>
+                                    <button
+                                        onClick={fetchMeshConfig}
+                                        className="btn-secondary"
+                                        style={{ padding: '8px 12px', borderRadius: '8px', fontSize: '12px' }}
+                                        title="Refresh Config"
+                                    >
+                                        <RefreshCw size={14} />
+                                    </button>
+                                </div>
+
+                                <form onSubmit={handleSaveMeshConfig} style={{ display: 'flex', flexDirection: 'column', gap: '18px', marginTop: '14px' }}>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                            <label style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)' }}>PRIMARY SITE NAME</label>
+                                            <input
+                                                type="text"
+                                                required
+                                                className="form-control"
+                                                placeholder="e.g. Site-01-blr"
+                                                value={meshConfig.siteName || ''}
+                                                onChange={(e) => setMeshConfig(prev => ({ ...prev, siteName: e.target.value }))}
+                                                style={{ padding: '10px 14px', borderRadius: '10px', fontSize: '13px', background: 'var(--bg-surface-1)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
+                                            />
+                                            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Global cluster site identifier displayed across federated meshes</span>
+                                        </div>
+
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                            <label style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)' }}>PRIMARY NODE NAME</label>
+                                            <input
+                                                type="text"
+                                                required
+                                                className="form-control"
+                                                placeholder="e.g. Debian-Storage-Hub"
+                                                value={meshConfig.nodeName || ''}
+                                                onChange={(e) => setMeshConfig(prev => ({ ...prev, nodeName: e.target.value }))}
+                                                style={{ padding: '10px 14px', borderRadius: '10px', fontSize: '13px', background: 'var(--bg-surface-1)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
+                                            />
+                                            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Local master node host label stored in app_settings</span>
+                                        </div>
+                                    </div>
+
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                        <label style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)' }}>PHYSICAL DATACENTER FACILITY / LOCATION</label>
+                                        <input
+                                            type="text"
+                                            required
+                                            className="form-control"
+                                            placeholder="e.g. Primary On-Premise Datacenter (BLR-DC1)"
+                                            value={meshConfig.siteLocation || ''}
+                                            onChange={(e) => setMeshConfig(prev => ({ ...prev, siteLocation: e.target.value }))}
+                                            style={{ padding: '10px 14px', borderRadius: '10px', fontSize: '13px', background: 'var(--bg-surface-1)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
+                                        />
+                                    </div>
+
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                            <label style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)' }}>PUBLIC MESH IP / HOST ADDRESS</label>
+                                            <input
+                                                type="text"
+                                                className="form-control"
+                                                placeholder="e.g. 10.10.20.166"
+                                                value={meshConfig.sitePublicIp || ''}
+                                                onChange={(e) => setMeshConfig(prev => ({ ...prev, sitePublicIp: e.target.value }))}
+                                                style={{ padding: '10px 14px', borderRadius: '10px', fontSize: '13px', background: 'var(--bg-surface-1)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
+                                            />
+                                        </div>
+
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                            <label style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)' }}>CLUSTER MESH REGION</label>
+                                            <input
+                                                type="text"
+                                                className="form-control"
+                                                placeholder="e.g. ap-south-1 (BLR)"
+                                                value={meshConfig.meshRegion || ''}
+                                                onChange={(e) => setMeshConfig(prev => ({ ...prev, meshRegion: e.target.value }))}
+                                                style={{ padding: '10px 14px', borderRadius: '10px', fontSize: '13px', background: 'var(--bg-surface-1)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                        <label style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)' }}>FACILITY / INFRASTRUCTURE TIER</label>
+                                        <input
+                                            type="text"
+                                            className="form-control"
+                                            placeholder="e.g. Tier III Enterprise Facility"
+                                            value={meshConfig.datacenterTier || ''}
+                                            onChange={(e) => setMeshConfig(prev => ({ ...prev, datacenterTier: e.target.value }))}
+                                            style={{ padding: '10px 14px', borderRadius: '10px', fontSize: '13px', background: 'var(--bg-surface-1)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
+                                        />
+                                    </div>
+
+                                    {/* Presets */}
+                                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                                        <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-muted)' }}>Quick Presets:</span>
+                                        <button
+                                            type="button"
+                                            className="btn-outline"
+                                            onClick={() => setMeshConfig(prev => ({ ...prev, siteName: 'Site-01-blr', nodeName: 'Debian-Storage-Hub' }))}
+                                            style={{ padding: '4px 8px', fontSize: '11px', borderRadius: '6px' }}
+                                        >
+                                            Site-01-blr / Debian-Hub
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="btn-outline"
+                                            onClick={() => setMeshConfig(prev => ({ ...prev, siteLocation: 'Primary On-Premise Datacenter', sitePublicIp: '10.10.20.166' }))}
+                                            style={{ padding: '4px 8px', fontSize: '11px', borderRadius: '6px' }}
+                                        >
+                                            BLR-DC1 (10.10.20.166)
+                                        </button>
+                                    </div>
+
+                                    <div style={{ marginTop: '8px' }}>
+                                        <button
+                                            type="submit"
+                                            disabled={savingMeshConfig}
+                                            className="btn-primary"
+                                            style={{ padding: '10px 22px', fontWeight: '800', borderRadius: '10px', width: 'fit-content', display: 'flex', alignItems: 'center', gap: '8px' }}
+                                        >
+                                            <Globe size={16} />
+                                            {savingMeshConfig ? 'Saving Settings...' : 'Save Cluster Site & Node Settings'}
+                                        </button>
+                                    </div>
+                                </form>
                             </motion.div>
                         )}
 

@@ -5,7 +5,7 @@ import {
     HardDrive, CheckCircle2, ArrowRight, Radio, Server, Copy, Check, Info, 
     Cpu, Layers, Database, Gauge, Zap, ExternalLink, ChevronDown, ChevronUp,
     Sparkles, Lock, ArrowUpRight, Clock, FolderSync, Folder, File, ChevronRight,
-    Link, ArrowLeftRight, Terminal, Laptop
+    Link, ArrowLeftRight, Terminal, Laptop, Edit3, Settings, MapPin, Tag, Box, Save
 } from 'lucide-react';
 
 import ConfirmModal from './ConfirmModal';
@@ -25,12 +25,23 @@ const SiteMeshModal = ({ show, onClose, showToast, onExploreSite }) => {
     const [sites, setSites] = useState([]);
     const [syncJobs, setSyncJobs] = useState([]);
     const [loading, setLoading] = useState(false);
-    const [provisioningDemo, setProvisioningDemo] = useState(false);
     const [viewTab, setViewTab] = useState('sites'); // 'sites', 'sync', 'pair'
     const [siteToUnpair, setSiteToUnpair] = useState(null);
     const [selectedSiteInspector, setSelectedSiteInspector] = useState(null);
     const [remoteExplorer, setRemoteExplorer] = useState(null); // { siteId, siteName, path, items, loading }
     const [expandedSites, setExpandedSites] = useState({});
+
+    // Site & Node Configuration Edit Modal State
+    const [showEditConfigModal, setShowEditConfigModal] = useState(false);
+    const [configForm, setConfigForm] = useState({
+        siteName: '',
+        nodeName: '',
+        siteLocation: '',
+        sitePublicIp: '',
+        meshRegion: '',
+        datacenterTier: ''
+    });
+    const [savingConfig, setSavingConfig] = useState(false);
 
     // Pairing Mode: 'primary' (Server 1 generates token) vs 'secondary' (Server 2 connects to Server 1)
     const [pairingRole, setPairingRole] = useState('primary'); 
@@ -102,23 +113,33 @@ const SiteMeshModal = ({ show, onClose, showToast, onExploreSite }) => {
         }
     };
 
-    const handleProvisionDemoSite = async () => {
-        setProvisioningDemo(true);
+    const handleOpenEditConfig = () => {
+        setConfigForm({
+            siteName: masterInfo?.name || 'Site-01-blr',
+            nodeName: masterInfo?.nodeName || masterInfo?.hostname || 'Debian-Storage-Hub',
+            siteLocation: masterInfo?.location || 'Primary On-Premise Datacenter',
+            sitePublicIp: masterInfo?.ip || '10.10.20.166',
+            meshRegion: masterInfo?.details?.meshRegion || 'ap-south-1 (BLR)',
+            datacenterTier: masterInfo?.details?.datacenterTier || 'Tier III Enterprise Facility'
+        });
+        setShowEditConfigModal(true);
+    };
+
+    const handleSaveConfig = async (e) => {
+        e?.preventDefault();
+        setSavingConfig(true);
         const token = localStorage.getItem('token') || '';
         try {
-            const res = await axios.post(`${API_BASE}/v1/sitemesh/demo-site`, {}, {
+            await axios.post(`${API_BASE}/v1/sitemesh/config`, configForm, {
                 headers: { Authorization: `Bearer ${token}` }
             });
-            if (showToast) showToast('Proxmox VE Cluster-02 secondary site connected to mesh!', 'success');
-            await fetchData();
-            setViewTab('sites');
-            if (res.data?.site?.id) {
-                setExpandedSites(prev => ({ ...prev, [res.data.site.id]: true }));
-            }
+            if (showToast) showToast('Site & Node configuration saved in database!', 'success');
+            setShowEditConfigModal(false);
+            await fetchData(true);
         } catch (e) {
-            if (showToast) showToast('Failed to provision demo site: ' + (e.response?.data?.error || e.message), 'error');
+            if (showToast) showToast('Failed to save configuration: ' + (e.response?.data?.error || e.message), 'error');
         } finally {
-            setProvisioningDemo(false);
+            setSavingConfig(false);
         }
     };
 
@@ -382,26 +403,22 @@ const SiteMeshModal = ({ show, onClose, showToast, onExploreSite }) => {
                     </div>
                     
                     <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                        {sites.length === 0 && (
-                            <button
-                                className="btn-primary"
-                                onClick={handleProvisionDemoSite}
-                                disabled={provisioningDemo}
-                                style={{
-                                    padding: '7px 14px',
-                                    fontSize: '12.5px',
-                                    fontWeight: '800',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '6px',
-                                    background: 'linear-gradient(135deg, #6366f1, #0ea5e9)',
-                                    boxShadow: '0 4px 14px rgba(99, 102, 241, 0.35)'
-                                }}
-                            >
-                                <Sparkles size={14} className={provisioningDemo ? 'animate-spin' : ''} />
-                                {provisioningDemo ? 'Connecting Proxmox VE...' : '✨ Connect Demo Proxmox VE Site'}
-                            </button>
-                        )}
+                        <button
+                            className="btn-primary"
+                            onClick={handleOpenEditConfig}
+                            style={{
+                                padding: '7px 14px',
+                                fontSize: '12.5px',
+                                fontWeight: '800',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                background: 'linear-gradient(135deg, #6366f1, #0ea5e9)',
+                                boxShadow: '0 4px 14px rgba(99, 102, 241, 0.35)'
+                            }}
+                        >
+                            <Settings size={14} /> Configure Site & Node
+                        </button>
                         <button className="btn-outline" onClick={fetchData} style={{ padding: '7px 14px', fontSize: '12.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                             <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Refresh Mesh
                         </button>
@@ -419,6 +436,7 @@ const SiteMeshModal = ({ show, onClose, showToast, onExploreSite }) => {
                                 isExpanded={expandedSites['master-local'] ?? true}
                                 onToggleExpand={() => toggleSiteExpand('master-local')}
                                 onInspect={() => setSelectedSiteInspector(masterInfo)}
+                                onEditConfig={handleOpenEditConfig}
                                 onBrowseStorage={() => {
                                     if (onExploreSite) {
                                         onExploreSite('master-local', masterInfo?.name || 'Primary Hub');
@@ -464,8 +482,7 @@ const SiteMeshModal = ({ show, onClose, showToast, onExploreSite }) => {
                                     <div style={{ display: 'flex', gap: '12px', marginTop: '10px', flexWrap: 'wrap', justifyContent: 'center' }}>
                                         <button 
                                             className="btn-primary" 
-                                            onClick={handleProvisionDemoSite}
-                                            disabled={provisioningDemo}
+                                            onClick={() => setViewTab('pair')}
                                             style={{
                                                 display: 'flex',
                                                 alignItems: 'center',
@@ -473,19 +490,11 @@ const SiteMeshModal = ({ show, onClose, showToast, onExploreSite }) => {
                                                 padding: '11px 22px',
                                                 fontSize: '13.5px',
                                                 fontWeight: '900',
-                                                background: 'linear-gradient(135deg, #6366f1, #0ea5e9)',
-                                                boxShadow: '0 6px 20px rgba(99, 102, 241, 0.4)'
+                                                background: 'linear-gradient(135deg, #0ea5e9, #6366f1)',
+                                                boxShadow: '0 6px 20px rgba(14, 165, 233, 0.4)'
                                             }}
                                         >
-                                            <Sparkles size={16} className={provisioningDemo ? 'animate-spin' : ''} />
-                                            {provisioningDemo ? 'Connecting Proxmox Cluster...' : '✨ Provision Demo Proxmox VE Site (Frankfurt)'}
-                                        </button>
-                                        <button 
-                                            className="btn-outline" 
-                                            onClick={() => setViewTab('pair')}
-                                            style={{ padding: '11px 20px', fontSize: '13.5px', fontWeight: '800' }}
-                                        >
-                                            Pair / Connect Physical Server
+                                            <Plus size={16} /> Pair / Connect Secondary Site
                                         </button>
                                     </div>
                                 </div>
@@ -894,6 +903,17 @@ const SiteMeshModal = ({ show, onClose, showToast, onExploreSite }) => {
                 />
             )}
 
+            {/* Primary Site & Node Configuration Modal */}
+            {showEditConfigModal && (
+                <EditSiteConfigModal
+                    config={configForm}
+                    onChange={(field, value) => setConfigForm(prev => ({ ...prev, [field]: value }))}
+                    onSubmit={handleSaveConfig}
+                    saving={savingConfig}
+                    onClose={() => setShowEditConfigModal(false)}
+                />
+            )}
+
             {/* Remote Site File & Storage Explorer Modal */}
             {remoteExplorer && (
                 <RemoteStorageExplorerModal
@@ -1006,7 +1026,7 @@ const SiteMeshModal = ({ show, onClose, showToast, onExploreSite }) => {
 };
 
 // ── PROXMOX-STYLE SITE CARD COMPONENT ──────────────────────────────────────────────
-const SiteCard = ({ site, isMaster, isExpanded, onToggleExpand, onInspect, onBrowseStorage, onUnpair }) => {
+const SiteCard = ({ site, isMaster, isExpanded, onToggleExpand, onInspect, onBrowseStorage, onUnpair, onEditConfig }) => {
     if (!site) return null;
 
     const details = site.details || {};
@@ -1015,8 +1035,8 @@ const SiteCard = ({ site, isMaster, isExpanded, onToggleExpand, onInspect, onBro
     const storageCap = Number(site.storage_capacity_bytes || site.storageTotalBytes || 0);
     const storageUsed = Number(site.storage_used_bytes || site.storageUsedBytes || 0);
     const storagePct = storageCap > 0 ? Math.round((storageUsed / storageCap) * 100) : 0;
-    const cpuVal = site.cpu || details.cpuUsage || 8.5;
-    const memVal = site.memory || (details.ramTotalBytes ? Math.round((details.ramUsedBytes / details.ramTotalBytes) * 100) : 24);
+    const cpuVal = site.cpu || details.cpuUsage || 4.2;
+    const memVal = site.memory || (details.ramTotalBytes ? Math.round((details.ramUsedBytes / details.ramTotalBytes) * 100) : 35);
 
     return (
         <div style={{
@@ -1088,6 +1108,9 @@ const SiteCard = ({ site, isMaster, isExpanded, onToggleExpand, onInspect, onBro
                             <span>📍 <strong>{site.location || 'Local Host'}</strong></span>
                             <span>🌐 IP: <strong>{site.ip || details.ip || '127.0.0.1'}</strong></span>
                             <span>⚡ Latency: <strong style={{ color: '#10b981' }}>{site.latency_ms || site.latencyMs || 0.1}ms</strong></span>
+                            {details.nodeName && (
+                                <span>🖥️ Node: <strong style={{ color: 'var(--text-primary)' }}>{details.nodeName}</strong></span>
+                            )}
                             {details.hypervisor && (
                                 <span style={{ color: 'var(--text-muted)' }}>🖥️ {details.hypervisor}</span>
                             )}
@@ -1126,6 +1149,17 @@ const SiteCard = ({ site, isMaster, isExpanded, onToggleExpand, onInspect, onBro
 
                     {/* Buttons */}
                     <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        {isMaster && onEditConfig && (
+                            <button
+                                className="btn-outline"
+                                onClick={onEditConfig}
+                                style={{ padding: '7px 12px', fontSize: '12px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '5px' }}
+                                title="Edit Primary Site & Node Settings"
+                            >
+                                <Edit3 size={13} /> Edit Node
+                            </button>
+                        )}
+
                         <button
                             className="btn-primary"
                             onClick={onBrowseStorage}
@@ -1502,6 +1536,180 @@ const DatacenterInspectorModal = ({ site, onClose }) => {
                         Close Inspector
                     </button>
                 </div>
+            </div>
+        </div>
+    );
+};
+
+// ── EDIT SITE & PRIMARY NODE CONFIGURATION MODAL ────────────────────────────────
+const EditSiteConfigModal = ({ config, onChange, onSubmit, saving, onClose }) => {
+    return (
+        <div className="modal-overlay" style={{ zIndex: 100000 }} onClick={onClose}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ width: '580px', maxWidth: '94vw', background: 'var(--bg-surface-0)', borderRadius: '20px', padding: '28px', border: '1px solid var(--border-subtle)', boxShadow: '0 20px 50px rgba(0,0,0,0.5)' }}>
+                {/* Modal Header */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <div style={{ width: '42px', height: '42px', borderRadius: '12px', background: 'rgba(99, 102, 241, 0.15)', border: '1px solid rgba(99, 102, 241, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--primary)' }}>
+                            <Settings size={22} />
+                        </div>
+                        <div>
+                            <h3 style={{ margin: 0, fontSize: '17.5px', fontWeight: '900', color: 'var(--text-primary)' }}>
+                                Configure Site & Primary Node
+                            </h3>
+                            <p style={{ margin: '3px 0 0', fontSize: '12.5px', color: 'var(--text-secondary)' }}>
+                                Manage cluster identification, datacenter facility, and persistent mesh addresses in PostgreSQL.
+                            </p>
+                        </div>
+                    </div>
+                    <button className="btn-icon" onClick={onClose}><X size={18} /></button>
+                </div>
+
+                <form onSubmit={onSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    {/* Site Name & Node Name */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                            <label style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)' }}>PRIMARY SITE NAME</label>
+                            <input
+                                type="text"
+                                required
+                                className="form-control"
+                                placeholder="e.g. Site-01-blr"
+                                value={config.siteName}
+                                onChange={(e) => onChange('siteName', e.target.value)}
+                                style={{ padding: '10px 14px', borderRadius: '10px', fontSize: '13px', background: 'var(--bg-surface-1)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
+                            />
+                        </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                            <label style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)' }}>PRIMARY NODE NAME</label>
+                            <input
+                                type="text"
+                                required
+                                className="form-control"
+                                placeholder="e.g. Debian-Storage-Hub"
+                                value={config.nodeName}
+                                onChange={(e) => onChange('nodeName', e.target.value)}
+                                style={{ padding: '10px 14px', borderRadius: '10px', fontSize: '13px', background: 'var(--bg-surface-1)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
+                            />
+                        </div>
+                    </div>
+
+                    {/* Datacenter Location */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <label style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)' }}>DATACENTER FACILITY / LOCATION</label>
+                        <input
+                            type="text"
+                            required
+                            className="form-control"
+                            placeholder="e.g. Primary On-Premise Datacenter (BLR-DC1)"
+                            value={config.siteLocation}
+                            onChange={(e) => onChange('siteLocation', e.target.value)}
+                            style={{ padding: '10px 14px', borderRadius: '10px', fontSize: '13px', background: 'var(--bg-surface-1)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
+                        />
+                    </div>
+
+                    {/* Host IP & Mesh Region */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                            <label style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)' }}>PRIMARY HOST IP / MESH ADDRESS</label>
+                            <input
+                                type="text"
+                                className="form-control"
+                                placeholder="e.g. 10.10.20.166"
+                                value={config.sitePublicIp}
+                                onChange={(e) => onChange('sitePublicIp', e.target.value)}
+                                style={{ padding: '10px 14px', borderRadius: '10px', fontSize: '13px', background: 'var(--bg-surface-1)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
+                            />
+                        </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                            <label style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)' }}>CLUSTER MESH REGION</label>
+                            <input
+                                type="text"
+                                className="form-control"
+                                placeholder="e.g. ap-south-1 (BLR)"
+                                value={config.meshRegion}
+                                onChange={(e) => onChange('meshRegion', e.target.value)}
+                                style={{ padding: '10px 14px', borderRadius: '10px', fontSize: '13px', background: 'var(--bg-surface-1)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
+                            />
+                        </div>
+                    </div>
+
+                    {/* Facility Tier */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <label style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)' }}>FACILITY / INFRASTRUCTURE TIER</label>
+                        <input
+                            type="text"
+                            className="form-control"
+                            placeholder="e.g. Tier III Enterprise Facility"
+                            value={config.datacenterTier}
+                            onChange={(e) => onChange('datacenterTier', e.target.value)}
+                            style={{ padding: '10px 14px', borderRadius: '10px', fontSize: '13px', background: 'var(--bg-surface-1)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
+                        />
+                    </div>
+
+                    {/* Quick Presets */}
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginTop: '4px' }}>
+                        <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-muted)' }}>Quick Presets:</span>
+                        <button
+                            type="button"
+                            className="btn-outline"
+                            onClick={() => onChange('siteName', 'Site-01-blr')}
+                            style={{ padding: '4px 8px', fontSize: '11px', borderRadius: '6px' }}
+                        >
+                            Site-01-blr
+                        </button>
+                        <button
+                            type="button"
+                            className="btn-outline"
+                            onClick={() => onChange('nodeName', 'Debian-Storage-Hub')}
+                            style={{ padding: '4px 8px', fontSize: '11px', borderRadius: '6px' }}
+                        >
+                            Debian-Storage-Hub
+                        </button>
+                        <button
+                            type="button"
+                            className="btn-outline"
+                            onClick={() => onChange('siteLocation', 'Primary On-Premise Datacenter')}
+                            style={{ padding: '4px 8px', fontSize: '11px', borderRadius: '6px' }}
+                        >
+                            Primary On-Premise
+                        </button>
+                        <button
+                            type="button"
+                            className="btn-outline"
+                            onClick={() => onChange('sitePublicIp', '10.10.20.166')}
+                            style={{ padding: '4px 8px', fontSize: '11px', borderRadius: '6px' }}
+                        >
+                            10.10.20.166
+                        </button>
+                    </div>
+
+                    {/* Modal Footer Buttons */}
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '14px', borderTop: '1px solid var(--border-subtle)', paddingTop: '16px' }}>
+                        <button type="button" className="btn-outline" onClick={onClose} style={{ padding: '9px 18px', fontSize: '13px' }}>
+                            Cancel
+                        </button>
+                        <button
+                            type="submit"
+                            className="btn-primary"
+                            disabled={saving}
+                            style={{
+                                padding: '9px 22px',
+                                fontSize: '13px',
+                                fontWeight: '900',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px',
+                                background: 'linear-gradient(135deg, #6366f1, #0ea5e9)',
+                                boxShadow: '0 4px 14px rgba(99, 102, 241, 0.35)'
+                            }}
+                        >
+                            <Save size={14} />
+                            {saving ? 'Saving to Database...' : 'Save Configuration'}
+                        </button>
+                    </div>
+                </form>
             </div>
         </div>
     );

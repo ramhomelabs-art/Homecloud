@@ -4,6 +4,28 @@ const siteMeshService = require('../services/siteMeshService');
 const { authenticateToken, requireRole } = require('../middleware/auth');
 const logger = require('../utils/logger');
 
+// Get Site Mesh & Primary Node Configuration
+router.get('/config', authenticateToken, async (req, res) => {
+    try {
+        const config = await siteMeshService.getMeshConfig();
+        res.json(config);
+    } catch (err) {
+        logger.error(`[SiteMesh Routes] Failed to get mesh config: ${err.message}`);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Update Site Mesh & Primary Node Configuration
+router.post('/config', authenticateToken, requireRole(['Admin']), async (req, res) => {
+    try {
+        const updated = await siteMeshService.updateMeshConfig(req.body);
+        res.json({ success: true, message: 'Cluster site and node configuration updated successfully', config: updated });
+    } catch (err) {
+        logger.error(`[SiteMesh Routes] Failed to update mesh config: ${err.message}`);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // Generate Pairing Token for a new remote site
 router.post('/token', authenticateToken, requireRole(['Admin']), async (req, res) => {
     try {
