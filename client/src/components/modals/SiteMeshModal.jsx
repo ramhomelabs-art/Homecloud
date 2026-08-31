@@ -59,6 +59,7 @@ const SiteMeshModal = ({ show, onClose, showToast, onExploreSite }) => {
     const [secondarySiteName, setSecondarySiteName] = useState('');
     const [secondaryLocation, setSecondaryLocation] = useState('');
     const [joiningHub, setJoiningHub] = useState(false);
+    const [provisioningDemo, setProvisioningDemo] = useState(false);
 
     // Sync Job form state
     const [showNewJobModal, setShowNewJobModal] = useState(false);
@@ -140,6 +141,23 @@ const SiteMeshModal = ({ show, onClose, showToast, onExploreSite }) => {
             if (showToast) showToast('Failed to save configuration: ' + (e.response?.data?.error || e.message), 'error');
         } finally {
             setSavingConfig(false);
+        }
+    };
+
+    const handleProvisionDemoSite = async () => {
+        setProvisioningDemo(true);
+        const token = localStorage.getItem('token') || '';
+        try {
+            const res = await axios.post(`${API_BASE}/v1/sitemesh/demo-site`, {}, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            if (showToast) showToast(res.data?.message || 'Proxmox VE Cluster-02 secondary site provisioned!', 'success');
+            await fetchData(true);
+            setViewTab('sites');
+        } catch (e) {
+            if (showToast) showToast('Failed to provision demo site: ' + (e.response?.data?.error || e.message), 'error');
+        } finally {
+            setProvisioningDemo(false);
         }
     };
 
