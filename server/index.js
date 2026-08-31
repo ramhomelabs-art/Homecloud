@@ -401,7 +401,7 @@ app.use('/api/v1/traffic', trafficRouter);
 app.use('/api/v1/cloud', cloudRouter);
 app.use('/api/v1/tiering', tieringRouter);
 app.use('/api/v1/sitemesh', siteMeshRouter);
-app.use('/api/v1/updates', updateRouter);
+app.use(['/api/v1/updates', '/api/v1/update', '/api/updates', '/api/update'], updateRouter);
 app.use('/api/v1/deployment', deploymentRouter);
 
 // --- HEALTH CHECK ENDPOINTS ---

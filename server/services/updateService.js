@@ -297,6 +297,9 @@ class UpdateService {
 
         const urlsToTry = [
             downloadUrl,
+            `https://github.com/${repo}/releases/download/v${targetVersion}/nexadisk-v${targetVersion}.zip`,
+            `https://github.com/${repo}/archive/refs/tags/v${targetVersion}.zip`,
+            `https://github.com/${repo}/archive/refs/heads/main.zip`,
             `https://api.github.com/repos/${repo}/zipball/v${targetVersion}`,
             `https://api.github.com/repos/${repo}/zipball/main`
         ].filter(Boolean);
@@ -317,7 +320,13 @@ class UpdateService {
                     maxRedirects: 10,
                     timeout: 45000,
                     beforeRedirect: (options) => {
-                        if (options.hostname && (options.hostname.includes('s3') || options.hostname.includes('codeload') || options.hostname.includes('github-production-release-asset'))) {
+                        if (options.hostname && (
+                            options.hostname.includes('s3') || 
+                            options.hostname.includes('codeload') || 
+                            options.hostname.includes('github-production-release-asset') ||
+                            options.hostname.includes('objects.githubusercontent.com') ||
+                            options.hostname.includes('amazonaws.com')
+                        )) {
                             delete options.headers['Authorization'];
                             delete options.headers['authorization'];
                         }
@@ -436,8 +445,8 @@ class UpdateService {
 
             for (const entry of zipEntries) {
                 let relPath = rootPrefix ? entry.entryName.replace(rootPrefix, '') : entry.entryName;
-                if (!relPath || relPath.startsWith('.env') || relPath.startsWith('uploads') || relPath.startsWith('logs') || relPath.startsWith('backups')) {
-                    continue; // Preserve user environment, uploads, and data
+                if (!relPath || relPath.startsWith('.env') || relPath.startsWith('uploads') || relPath.startsWith('logs') || relPath.startsWith('backups') || relPath.startsWith('node_modules')) {
+                    continue; // Preserve user environment, uploads, node_modules, and data
                 }
 
                 const destFile = path.join(rootDir, relPath);
@@ -466,8 +475,14 @@ class UpdateService {
                 fs.rmSync(stagingDir, { recursive: true, force: true });
             } catch (_) {}
 
-            log(`🎉 NexaDisk v${targetVersion} is active and running cleanly!`);
+            log(`🎉 NexaDisk v${targetVersion} is active! Reloading services in 2 seconds...`);
             this.updateInProgress = false;
+
+            // Trigger graceful restart to load newly extracted files into memory
+            setTimeout(() => {
+                logger.info('[OTA Update] Graceful process exit to reload updated server code...');
+                process.exit(0);
+            }, 2000);
 
             return {
                 success: true,
