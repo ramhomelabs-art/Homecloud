@@ -224,32 +224,6 @@ const TransferQueueDrawer = ({
         }));
     };
 
-    // Quick Test / Demo Simulation feature
-    const handleAddDemoTransfer = () => {
-        const sampleFiles = [
-            { name: 'Debian-12.6.0-x86_64-DVD.iso', size: 3958000000, type: 'upload', source: 'Local Browser Client', destination: '\\\\10.10.20.25\\TorrentDownloads' },
-            { name: 'NexaDisk_Cluster_Snapshot_2026.tar.gz', size: 1485000000, type: 'copy', source: 'Primary Master Pool', destination: 'Proxmox-Node-02 (Remote Mesh)' },
-            { name: 'Database_Daily_Dump.sql.zst', size: 684000000, type: 'upload', source: 'Admin Workstation', destination: 'Encrypted Vault Storage' },
-            { name: '4K_Drone_Cinematic_Footage.mp4', size: 2150000000, type: 'move', source: 'SD Card Ingestion', destination: 'SMB: Media-Storage' }
-        ];
-        const randomItem = sampleFiles[Math.floor(Math.random() * sampleFiles.length)];
-        const newTx = {
-            id: 'tx_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
-            name: randomItem.name,
-            type: randomItem.type,
-            status: 'active',
-            progress: 0,
-            transferred: 0,
-            size: randomItem.size,
-            speed: 48500000,
-            source: randomItem.source,
-            destination: randomItem.destination,
-            startedAt: Date.now()
-        };
-        setInternalTransfers(prev => [newTx, ...prev]);
-        setIsExpanded(true);
-    };
-
     // Filtered items based on tab & search
     const filteredTransfers = useMemo(() => {
         return internalTransfers.filter(t => {
@@ -573,14 +547,6 @@ const TransferQueueDrawer = ({
                                                 Clear Done ({completedCount})
                                             </button>
                                         )}
-                                        <button
-                                            onClick={handleAddDemoTransfer}
-                                            className="btn-outline"
-                                            style={{ padding: '4px 8px', borderRadius: '7px', fontSize: '11px', fontWeight: '800', color: 'var(--accent-cyan)' }}
-                                            title="Add simulated stream to test real-time speedometer & progress bar"
-                                        >
-                                            + Simulate
-                                        </button>
                                     </div>
                                 </div>
 
@@ -682,22 +648,6 @@ const TransferQueueDrawer = ({
                                                     No active transfers in queue. File uploads, SMB transfers, and copy/move streams will appear here with live speedometers.
                                                 </div>
                                             </div>
-                                            <button
-                                                onClick={handleAddDemoTransfer}
-                                                className="btn-outline"
-                                                style={{
-                                                    marginTop: '6px',
-                                                    padding: '6px 14px',
-                                                    fontSize: '12px',
-                                                    fontWeight: '800',
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    gap: '6px',
-                                                    borderRadius: '8px'
-                                                }}
-                                            >
-                                                <Sparkles size={13} color="var(--primary)" /> Simulate Sample Transfer
-                                            </button>
                                         </div>
                                     ) : (
                                         filteredTransfers.map((tx) => {

@@ -946,10 +946,11 @@ let bannedIpsCache = [];
 let geofenceConfig = { mode: 'whitelist_all', blockedCountries: ['RU', 'KP', 'IR', 'CN'] };
 
 // ─── GET /api/v1/security/threat-map ──────────────────────────────────────────
-// Builds the spatial radar dataset strictly from REAL database WAF telemetry & active bans
+// Builds the spatial radar dataset strictly from REAL database WAF telemetry, active bans & live traffic flows
 router.get('/threat-map', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const geoService = require('../utils/geoService');
+        const trafficService = require('../services/trafficService');
 
         // 1. Pull real security events from the DB
         const eventsRes = await db.query(`
@@ -985,7 +986,7 @@ router.get('/threat-map', authenticateToken, requireAdmin, async (req, res) => {
                 : (geo.country && geo.country !== 'XX' && geo.country !== 'LOCAL' ? geo.country : null);
 
             if (!country) {
-                country = ip === '127.0.0.1' ? 'LOCAL' : 'US';
+                country = ip === '127.0.0.1' ? 'LOCAL' : (geo.country || 'IN');
             }
 
             const countryMeta = geoService.COUNTRY_COORDS[country] || { lat: 20.5937, lng: 78.9629, name: country, city: country };
@@ -1028,7 +1029,7 @@ router.get('/threat-map', authenticateToken, requireAdmin, async (req, res) => {
             });
         }
 
-        // Also include all real banned IPs from database
+        // 3. Also include all real banned IPs from database
         for (const ban of bansRes.rows) {
             const ip = (ban.ip || '').replace(/^::ffff:/, '').trim();
             if (!ip || seen.has(ip)) continue;
@@ -1040,7 +1041,7 @@ router.get('/threat-map', authenticateToken, requireAdmin, async (req, res) => {
                 : (geo.country && geo.country !== 'XX' && geo.country !== 'LOCAL' ? geo.country : null);
 
             if (!country) {
-                country = ip === '127.0.0.1' ? 'LOCAL' : 'US';
+                country = ip === '127.0.0.1' ? 'LOCAL' : (geo.country || 'IN');
             }
 
             const countryMeta = geoService.COUNTRY_COORDS[country] || { lat: 37.0902, lng: -95.7129, name: country, city: country };
@@ -1075,71 +1076,65 @@ router.get('/threat-map', authenticateToken, requireAdmin, async (req, res) => {
             });
         }
 
-        // If no events or bans exist yet (fresh install), provide baseline verified threat intel nodes
-        if (threatPoints.length === 0) {
-            threatPoints.push(
-                {
-                    id: 'ban-185.220.101.5',
-                    source: 'bunkerweb',
+        // 4. Ingest real-time active traffic hosts and ingress streams from trafficService
+        if (trafficService && trafficService.hostMatrix) {
+            for (const [ip, host] of trafficService.hostMatrix.entries()) {
+                const cleanIp = (ip || '').replace(/^::ffff:/, '').trim();
+                if (!cleanIp || seen.has(cleanIp)) continue;
+                seen.add(cleanIp);
+
+                const geo = geoService.resolveIp(cleanIp);
+                const isLocal = cleanIp === '127.0.0.1' || cleanIp.startsWith('10.') || cleanIp.startsWith('192.168.') || cleanIp.startsWith('172.');
+                const country = isLocal ? 'LOCAL' : (host.country || geo.country || 'IN');
+                const countryMeta = geoService.COUNTRY_COORDS[country] || { lat: 12.9716, lng: 77.5946, name: 'Local Intranet', city: 'Cluster Node' };
+                const lat = isLocal ? 12.9716 : (countryMeta.lat || 12.9716);
+                const lng = isLocal ? 77.5946 : (countryMeta.lng || 77.5946);
+
+                threatPoints.push({
+                    id: `traffic-${cleanIp}`,
+                    source: 'traffic_dpi',
                     isSimulated: false,
-                    ip: '185.220.101.5',
-                    country: 'DE',
-                    countryName: 'Germany',
-                    city: 'Berlin',
-                    lat: 51.1657,
-                    lng: 10.4515,
-                    severity: 'high',
-                    attackType: 'IP_BLACKLISTED',
-                    tactic: 'T1110 Tor Exit Node / Brute Force Threat Intelligence',
-                    threatScore: 85,
-                    action: 'BLOCKED',
-                    timestamp: new Date().toISOString()
-                },
-                {
-                    id: 'ban-198.51.100.22',
-                    source: 'bunkerweb',
-                    isSimulated: false,
-                    ip: '198.51.100.22',
-                    country: 'RU',
-                    countryName: 'Russia',
-                    city: 'Moscow',
-                    lat: 55.7558,
-                    lng: 37.6173,
-                    severity: 'high',
-                    attackType: 'IP_BLACKLISTED',
-                    tactic: 'DarkGate Botnet Credential Stuffing',
-                    threatScore: 85,
-                    action: 'BLOCKED',
-                    timestamp: new Date().toISOString()
-                },
-                {
-                    id: 'ban-203.0.113.195',
-                    source: 'bunkerweb',
-                    isSimulated: false,
-                    ip: '203.0.113.195',
-                    country: 'US',
-                    countryName: 'United States',
-                    city: 'Ashburn',
-                    lat: 37.0902,
-                    lng: -95.7129,
-                    severity: 'high',
-                    attackType: 'IP_BLACKLISTED',
-                    tactic: 'T1190 Exploit Public-Facing Application Scanner',
-                    threatScore: 85,
-                    action: 'BLOCKED',
-                    timestamp: new Date().toISOString()
-                }
-            );
+                    ip: cleanIp,
+                    country,
+                    countryName: isLocal ? 'Cluster LAN / Intranet' : (host.countryName || countryMeta.name || country),
+                    city: isLocal ? 'Local Host' : (host.city || countryMeta.city || 'Active Client'),
+                    lat,
+                    lng,
+                    severity: (host.riskScore && host.riskScore > 50) ? 'high' : 'clean',
+                    attackType: (host.riskScore && host.riskScore > 50) ? 'SUSPICIOUS_ANOMALY' : 'INGRESS_CLIENT',
+                    tactic: `Active Traffic Flow (${Math.round((host.bytesIn || 0) / 1024)} KB in / ${Math.round((host.bytesOut || 0) / 1024)} KB out)`,
+                    threatScore: host.riskScore || 0,
+                    action: 'ALLOWED',
+                    timestamp: host.lastSeen || new Date().toISOString()
+                });
+            }
         }
 
+        // Live Real-Time Network & Traffic Telemetry
+        const liveTelemetry = trafficService ? trafficService.getLiveTelemetry() : null;
+        const dpiData = trafficService ? trafficService.getNetworkDashboardData() : null;
+
         res.json({
+            status: 'success',
             activeThreats: threatPoints,
-            blockedIpsCount: Math.max(threatPoints.length, bansRes.rows.length),
+            totalThreats: threatPoints.length,
+            blockedIpsCount: bansRes.rows.length,
             geofenceMode: geofenceConfig.mode,
             blockedCountries: geofenceConfig.blockedCountries,
             wafHealth: wafCollector.getHealthStatus(),
             radarSweep: true,
-            lastSweep: new Date().toISOString()
+            lastSweep: new Date().toISOString(),
+            liveTraffic: {
+                totalRequests: liveTelemetry?.totalRequests || 0,
+                requestsPerSec: liveTelemetry?.requestsPerSec || 0,
+                bandwidthIn: liveTelemetry?.bandwidthIn || 0,
+                bandwidthOut: liveTelemetry?.bandwidthOut || 0,
+                activeSessionsCount: liveTelemetry?.activeSessions?.length || 0,
+                recentRequests: (liveTelemetry?.recentRequests || []).slice(0, 30),
+                hostsCount: dpiData?.hosts?.length || 0,
+                networkFlows: (dpiData?.networkFlows || []).slice(0, 20),
+                osAdapters: dpiData?.adapters || []
+            }
         });
     } catch (err) {
         logger.error(`[SOC] Threat map error: ${err.message}`);
