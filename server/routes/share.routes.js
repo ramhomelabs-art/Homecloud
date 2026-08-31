@@ -866,35 +866,42 @@ router.post('/stream', async (req, res) => {
 const multer = require('multer');
 const securityQueue = require('../services/securityQueue');
 
+const checkShareActive = (share) => {
+    if (!share) return 'Share link not found or expired';
+    if (share.expires_at && new Date(share.expires_at) < new Date()) {
+        return 'This share link has expired';
+    }
+    return null;
+};
+
 const upload = multer({
-    storage: multer.diskStorage({
-        destination: async (req, file, cb) => {
-            try {
-                const share = await getShare(req.params.token);
-                if (!share || share.type !== 'upload') return cb(new Error('Invalid upload share'));
-                if (!isShareAuthorized(req, share)) {
-                    return cb(new Error('Authentication required'));
-                }
-                req.shareObj = share;
-                cb(null, securityQueue.getStagingDir());
-            } catch (e) { cb(e); }
-        },
-        filename: (req, file, cb) => {
-            cb(null, `${Date.now()}-${Math.random().toString(36).substring(2, 8)}-${file.originalname}`);
-        }
-    }),
+    dest: securityQueue.getStagingDir(),
     limits: { fileSize: 5 * 1024 * 1024 * 1024 } // 5GB max
 });
 
 router.post('/upload/:token', upload.array('files'), async (req, res) => {
     try {
-        const share = req.shareObj || await getShare(req.params.token);
+        const share = await getShare(req.params.token);
+        if (!share) {
+            (req.files || []).forEach(f => { try { fs.unlinkSync(f.path); } catch(_) {} });
+            return res.status(404).json({ error: 'Share link not found or expired' });
+        }
+
         const err = checkShareActive(share);
-        if (err) return res.status(404).json({ error: err });
+        if (err) {
+            (req.files || []).forEach(f => { try { fs.unlinkSync(f.path); } catch(_) {} });
+            return res.status(404).json({ error: err });
+        }
+
         if (!isShareAuthorized(req, share)) {
+            (req.files || []).forEach(f => { try { fs.unlinkSync(f.path); } catch(_) {} });
             return res.status(401).json({ error: 'Authentication required', authRequired: true });
         }
-        if (share.type !== 'upload') return res.status(403).json({ error: 'This share does not accept uploads' });
+
+        if (share.type !== 'upload' && share.type !== 'exchange') {
+            (req.files || []).forEach(f => { try { fs.unlinkSync(f.path); } catch(_) {} });
+            return res.status(403).json({ error: 'This share does not accept uploads' });
+        }
 
         const targetDir = resolveSharedPath(share.path);
         
@@ -906,10 +913,11 @@ router.post('/upload/:token', upload.array('files'), async (req, res) => {
         }
 
         await logAccess(share.id, req, 'upload');
-        res.json({ success: true, message: 'Uploads queued for security scanning', uploaded });
+        res.json({ success: true, message: 'Uploads received and queued for security scanning', uploaded });
     } catch (e) {
+        (req.files || []).forEach(f => { try { fs.unlinkSync(f.path); } catch(_) {} });
         logger.error('[Share Upload Error]', e);
-        res.status(500).json({ error: 'Upload failed' });
+        res.status(500).json({ error: e.message || 'Upload failed' });
     }
 });
 
