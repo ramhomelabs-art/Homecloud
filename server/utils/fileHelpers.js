@@ -122,7 +122,7 @@ const calculateCategorySizes = (dirPath, totalDiskUsed) => {
 
 const uploadFileToSmb = async (localFilePath, sharePath, fileName) => {
     const db = require('../config/database');
-    const cryptoHelper = require('./crypto');
+    const cryptoHelper = require('./cryptoHelper');
     const sharesRes = await db.query('SELECT * FROM network_shares');
     let clean = (sharePath || '').trim().replace(/\\/g, '/').replace(/^.*?uploads\//i, '').replace(/^(smb:)?\/+/, '');
     const parts = clean.split('/');
@@ -142,7 +142,16 @@ const uploadFileToSmb = async (localFilePath, sharePath, fileName) => {
     const user = matchedShare?.username || '';
     let pass = '';
     if (matchedShare?.password) {
-        try { pass = cryptoHelper.decrypt(matchedShare.password); } catch (e) { pass = matchedShare.password; }
+        try {
+            pass = cryptoHelper.decrypt(matchedShare.password) || matchedShare.password;
+        } catch (_) {
+            try {
+                const cryptoUtil = require('./crypto');
+                pass = cryptoUtil.decryptPassword(matchedShare.password) || matchedShare.password;
+            } catch (e) {
+                pass = matchedShare.password;
+            }
+        }
     }
 
     const env = { ...process.env, PASSWD: pass || '' };
