@@ -503,6 +503,8 @@ function App() {
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [overwriteContext, setOverwriteContext] = useState(null); // { source, dest, agentId, type }
     const [operations, setOperations] = useState([]);
+    const [contextMenu, setContextMenu] = useState(null);
+    const fileInputRef = useRef(null);
     const abortControllers = useRef({});
     const uploadContextRef = useRef({}); // opId -> { filesList, uploadPath, targetDevice, isGuest }
 
@@ -3526,6 +3528,18 @@ function App() {
                 guestPermissions={guestPermissions}
             />
             {contextMenu && <div className="cm-overlay" onClick={() => setContextMenu(null)} />}
+            <input
+                type="file"
+                ref={fileInputRef}
+                multiple
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                    if (e.target.files?.length) {
+                        handleUpload(Array.from(e.target.files));
+                        e.target.value = '';
+                    }
+                }}
+            />
 
             {
                 shareModal && (
