@@ -502,7 +502,9 @@ function App() {
     const [cloudMounts, setCloudMounts] = useState([]);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [overwriteContext, setOverwriteContext] = useState(null); // { source, dest, agentId, type }
+    const [operations, setOperations] = useState([]);
     const abortControllers = useRef({});
+    const uploadContextRef = useRef({}); // opId -> { filesList, uploadPath, targetDevice, isGuest }
 
     const cancelOperation = (opId) => {
         if (abortControllers.current[opId]) {
@@ -513,20 +515,29 @@ function App() {
         } else {
             // For non-cancellable or already finished/failed ops, just remove from list
             setOperations(prev => prev.filter(op => op.id !== opId));
+            delete uploadContextRef.current[opId];
         }
     };
 
-    const handleUpload = (filesList) => {
-        if (filesList.length > 0) {
-            const opId = Date.now();
-            const name = filesList.length === 1 ? filesList[0].name : `${filesList.length} files`;
-            const totalSize = filesList.reduce((acc, f) => acc + f.size, 0);
-            const startTime = Date.now();
+    const pauseOperation = (opId) => {
+        if (abortControllers.current[opId]) {
+            abortControllers.current[opId].abort();
+            delete abortControllers.current[opId];
+            setOperations(prev => prev.map(op => op.id === opId ? { ...op, status: 'Paused', speed: 0 } : op));
+            showToast('Transfer paused', 'info');
+        }
+    };
 
-            // Create abort controller
-            const controller = new AbortController();
-            abortControllers.current[opId] = controller;
+    const performUploadExecution = (filesList, opId, isRetry = false) => {
+        const name = filesList.length === 1 ? filesList[0].name : `${filesList.length} files`;
+        const totalSize = filesList.reduce((acc, f) => acc + f.size, 0);
+        const startTime = Date.now();
 
+        // Create abort controller
+        const controller = new AbortController();
+        abortControllers.current[opId] = controller;
+
+        if (!isRetry) {
             setOperations(prev => [{
                 id: opId,
                 type: 'upload',
@@ -537,91 +548,118 @@ function App() {
                 bytesTransferred: 0,
                 startTime: startTime
             }, ...prev]);
-            showToast(`Uploading ${name}...`, 'info');
+        } else {
+            setOperations(prev => prev.map(op => op.id === opId ? {
+                ...op,
+                status: 'In Progress',
+                progress: 0,
+                bytesTransferred: 0,
+                startTime: startTime
+            } : op));
+        }
 
-            const formData = new FormData();
-            filesList.forEach(f => formData.append('files', f));
+        showToast(isRetry ? `Retrying ${name}...` : `Uploading ${name}...`, 'info');
 
-            let uploadUrl = guestToken
-                ? `${API_BASE.replace('/api', '')}/public/share/${shareId}/upload?path=${encodeURIComponent(path)}`
-                : `${API_BASE}/files/upload?path=${encodeURIComponent(path)}`;
-            if (!guestToken && selectedDevice?.type === 'Agent') uploadUrl += `&agentId=${selectedDevice.id}`;
+        const formData = new FormData();
+        filesList.forEach(f => formData.append('files', f));
 
-            const headers = {
-                Authorization: guestToken ? `Bearer ${guestToken}` : `Bearer ${token}`
-            };
+        let uploadUrl = guestToken
+            ? `${API_BASE.replace('/api', '')}/public/share/${shareId}/upload?path=${encodeURIComponent(path)}`
+            : `${API_BASE}/files/upload?path=${encodeURIComponent(path)}`;
+        if (!guestToken && selectedDevice?.type === 'Agent') uploadUrl += `&agentId=${selectedDevice.id}`;
 
-            axios.post(uploadUrl, formData, {
-                headers,
-                signal: controller.signal,
-                timeout: 0,
-                onUploadProgress: (progressEvent) => {
-                    const { loaded, total } = progressEvent;
-                    const percentCompleted = Math.round((loaded * 100) / total);
-                    const timeElapsed = (Date.now() - startTime) / 1000; // seconds
-                    const speed = timeElapsed > 0 ? loaded / timeElapsed : 0; // bytes/sec
-                    const remainingBytes = total - loaded;
-                    const eta = speed > 0 ? remainingBytes / speed : 0;
+        const headers = {
+            Authorization: guestToken ? `Bearer ${guestToken}` : `Bearer ${token}`
+        };
 
-                    setOperations(prev => prev.map(o => o.id === opId ? {
-                        ...o,
-                        progress: percentCompleted,
-                        bytesTransferred: loaded,
-                        totalBytes: total,
-                        speed: speed,
-                        eta: eta
-                    } : o));
-                }
-            }).then((res) => {
-                if (abortControllers.current[opId]) delete abortControllers.current[opId];
-                setOperations(prev => prev.map(o => o.id === opId ? { ...o, status: 'Scanning...', progress: 100 } : o));
-                
-                // Keep the "Scanning..." status visible longer so the user knows it's being processed
-                // In a real app we would use WebSockets or SSE to know exactly when it's done.
-                setTimeout(() => setOperations(prev => prev.map(o => o.id === opId ? { ...o, status: 'Completed' } : o)), 10000);
-                setTimeout(() => setOperations(prev => prev.filter(o => o.id !== opId)), 15000);
-                
-                showToast('Upload Complete, sent to Security Engine for scanning', 'success');
+        axios.post(uploadUrl, formData, {
+            headers,
+            signal: controller.signal,
+            timeout: 0,
+            onUploadProgress: (progressEvent) => {
+                const { loaded, total } = progressEvent;
+                const percentCompleted = Math.round((loaded * 100) / total);
+                const timeElapsed = (Date.now() - startTime) / 1000; // seconds
+                const speed = timeElapsed > 0 ? loaded / timeElapsed : 0; // bytes/sec
+                const remainingBytes = total - loaded;
+                const eta = speed > 0 ? remainingBytes / speed : 0;
 
-                if (guestToken) {
-                    const serverResults = res.data?.results || [];
-                    const uploadedMeta = filesList.map(f => {
-                        const matchingResult = serverResults.find(r => r.name === f.name);
-                        return {
-                            name: f.name,
-                            size: f.size,
-                            time: new Date(),
-                            status: matchingResult ? matchingResult.status : 'uploaded',
-                            message: matchingResult ? matchingResult.message : 'Upload successful'
-                        };
-                    });
-                    setDroppedSessionFiles(prev => [...uploadedMeta, ...prev]);
-                } else {
-                    fetchFiles(path);
-                }
-            }).catch((err) => {
-                if (abortControllers.current[opId]) delete abortControllers.current[opId];
-                if (axios.isCancel(err)) {
-                    console.log('Upload cancelled');
-                } else {
-                    setOperations(prev => prev.map(o => o.id === opId ? { ...o, status: 'Failed', progress: 0 } : o));
-                    const errMsg = err.response?.data?.error || 'Upload Failed';
-                    showToast(errMsg, 'error');
-                }
-            });
+                setOperations(prev => prev.map(o => o.id === opId ? {
+                    ...o,
+                    progress: percentCompleted,
+                    bytesTransferred: loaded,
+                    totalBytes: total,
+                    speed: speed,
+                    eta: eta
+                } : o));
+            }
+        }).then((res) => {
+            if (abortControllers.current[opId]) delete abortControllers.current[opId];
+            delete uploadContextRef.current[opId];
+
+            setOperations(prev => prev.map(o => o.id === opId ? { ...o, status: 'Scanning...', progress: 100 } : o));
+            
+            setTimeout(() => setOperations(prev => prev.map(o => o.id === opId ? { ...o, status: 'Completed' } : o)), 10000);
+            setTimeout(() => setOperations(prev => prev.filter(o => o.id !== opId)), 15000);
+            
+            showToast('Upload Complete, sent to Security Engine for scanning', 'success');
+
+            if (guestToken) {
+                const serverResults = res.data?.results || [];
+                const uploadedMeta = filesList.map(f => {
+                    const matchingResult = serverResults.find(r => r.name === f.name);
+                    return {
+                        name: f.name,
+                        size: f.size,
+                        time: new Date(),
+                        status: matchingResult ? matchingResult.status : 'uploaded',
+                        message: matchingResult ? matchingResult.message : 'Upload successful'
+                    };
+                });
+                setDroppedSessionFiles(prev => [...uploadedMeta, ...prev]);
+            } else {
+                fetchFiles(path);
+            }
+        }).catch((err) => {
+            if (abortControllers.current[opId]) delete abortControllers.current[opId];
+            if (axios.isCancel(err)) {
+                console.log('Upload cancelled or paused');
+            } else {
+                setOperations(prev => prev.map(o => o.id === opId ? { ...o, status: 'Failed', progress: 0 } : o));
+                const is413 = err.response?.status === 413;
+                const errMsg = is413
+                    ? 'Upload Failed (HTTP 413): File exceeds Cloudflare 100MB body limit.'
+                    : (err.response?.data?.error || 'Upload Failed');
+                showToast(errMsg, 'error');
+            }
+        });
+    };
+
+    const handleUpload = (filesList) => {
+        if (filesList && filesList.length > 0) {
+            const opId = Date.now();
+            uploadContextRef.current[opId] = { filesList, path, selectedDevice, guestToken, shareId };
+            performUploadExecution(filesList, opId, false);
         }
     };
-    const fileInputRef = useRef(null);
-    const [shareModal, setShareModal] = useState(null);
-    const [showFolderPicker, setShowFolderPicker] = useState(false);
-    const [pickerShareModal, setPickerShareModal] = useState(null); // { path, agentId }
-    const [propertiesFile, setPropertiesFile] = useState(null);
-    const [renameFile, setRenameFile] = useState(null);
-    const [contextMenu, setContextMenu] = useState(null);
-    const [showMountModal, setShowMountModal] = useState(false);
-    const [toast, setToast] = useState(null);
-    const toastTimerRef = useRef(null);
-    const [operations, setOperations] = useState([]);
+
+    const resumeOperation = (opId) => {
+        const ctx = uploadContextRef.current[opId];
+        if (ctx && ctx.filesList) {
+            performUploadExecution(ctx.filesList, opId, true);
+        } else {
+            setOperations(prev => prev.map(o => o.id === opId ? { ...o, status: 'In Progress' } : o));
+        }
+    };
+
+    const retryOperation = (opId) => {
+        const ctx = uploadContextRef.current[opId];
+        if (ctx && ctx.filesList) {
+            performUploadExecution(ctx.filesList, opId, true);
+        } else {
+            setOperations(prev => prev.map(o => o.id === opId ? { ...o, status: 'In Progress', progress: 0 } : o));
+        }
+    };
     const [showFolderModal, setShowFolderModal] = useState(false);
     const [showCompressModal, setShowCompressModal] = useState(false);
     const [compressTargets, setCompressTargets] = useState([]);
@@ -3616,6 +3654,9 @@ function App() {
                 transfers={operations}
                 setOperations={setOperations}
                 onCancelTransfer={cancelOperation}
+                onPauseTransfer={pauseOperation}
+                onResumeTransfer={resumeOperation}
+                onRetryTransfer={retryOperation}
             />
             <OverlapConfirmModal
                 context={overwriteContext}

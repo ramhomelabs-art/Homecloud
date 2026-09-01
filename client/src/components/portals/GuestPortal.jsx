@@ -269,7 +269,7 @@ const GuestPortal = ({ shareId, showToast }) => {
             const data = encoder.encode(`${plainPassword}:${token}:nexadisk-vault-auth`);
             const hashBuf = await window.crypto.subtle.digest('SHA-256', data);
             const hashHex = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
-            return { authDigest: hashHex };
+            return { password: plainPassword, authDigest: hashHex };
         } catch {
             return { password: plainPassword };
         }

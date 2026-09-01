@@ -565,15 +565,15 @@ router.post('/auth/:token', async (req, res) => {
             }
 
             let ok = false;
-            if (authDigest && realPlain) {
-                const expectedDigest = crypto.createHash('sha256').update(`${realPlain}:${req.params.token}:nexadisk-vault-auth`).digest('hex');
-                ok = (authDigest.toLowerCase() === expectedDigest.toLowerCase());
-            } else if (password !== undefined) {
+            if (password !== undefined && password !== '') {
                 if (share.password_hash.startsWith('AES:')) {
                     ok = (realPlain === String(password));
                 } else {
                     ok = await bcrypt.compare(String(password), share.password_hash);
                 }
+            } else if (authDigest && realPlain) {
+                const expectedDigest = crypto.createHash('sha256').update(`${realPlain}:${req.params.token}:nexadisk-vault-auth`).digest('hex');
+                ok = (authDigest.toLowerCase() === expectedDigest.toLowerCase());
             }
 
             if (!ok) {

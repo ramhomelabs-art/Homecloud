@@ -61,6 +61,7 @@ const TransferQueueDrawer = ({
     onCancelTransfer, 
     onPauseTransfer, 
     onResumeTransfer, 
+    onRetryTransfer,
     onClearCompleted 
 }) => {
     const [isExpanded, setIsExpanded] = useState(true);
@@ -145,7 +146,7 @@ const TransferQueueDrawer = ({
     const activeTransfers = internalTransfers.filter(t => t.status === 'active' || t.status === 'In Progress' || t.status === 'Preparing');
     const pausedTransfers = internalTransfers.filter(t => t.status === 'paused' || t.status === 'Paused');
     const completedTransfers = internalTransfers.filter(t => t.status === 'completed' || t.status === 'Completed');
-    const failedTransfers = internalTransfers.filter(t => t.status === 'failed' || t.status === 'Failed');
+    const failedTransfers = internalTransfers.filter(t => t.status === 'failed' || t.status === 'Failed' || t.status === 'Error');
     
     const activeCount = activeTransfers.length;
     const pausedCount = pausedTransfers.length;
@@ -170,24 +171,47 @@ const TransferQueueDrawer = ({
 
     // Interactive Handlers
     const togglePauseItem = (id) => {
+        const item = internalTransfers.find(t => t.id === id);
+        const isCurrentlyActive = item ? (item.status === 'active' || item.status === 'In Progress' || item.status === 'Preparing') : true;
+        const nextStatus = isCurrentlyActive ? 'Paused' : 'In Progress';
+
         setInternalTransfers(prev => prev.map(t => {
             if (t.id === id) {
-                const isCurrentlyActive = (t.status === 'active' || t.status === 'In Progress' || t.status === 'Preparing');
-                const nextStatus = isCurrentlyActive ? 'paused' : 'active';
-                return { ...t, status: nextStatus, speed: nextStatus === 'paused' ? 0 : 38500000 };
+                return { ...t, status: nextStatus, speed: nextStatus === 'Paused' ? 0 : 38500000 };
             }
             return t;
         }));
-        if (onPauseTransfer) onPauseTransfer(id);
+        if (setOperations) {
+            setOperations(prev => prev.map(t => {
+                if (t.id === id) {
+                    return { ...t, status: nextStatus, speed: nextStatus === 'Paused' ? 0 : 38500000 };
+                }
+                return t;
+            }));
+        }
+        if (isCurrentlyActive) {
+            if (onPauseTransfer) onPauseTransfer(id);
+        } else {
+            if (onResumeTransfer) onResumeTransfer(id);
+        }
     };
 
     const retryItem = (id) => {
         setInternalTransfers(prev => prev.map(t => {
             if (t.id === id) {
-                return { ...t, status: 'active', progress: 0, transferred: 0, speed: 38500000 };
+                return { ...t, status: 'In Progress', progress: 0, transferred: 0, speed: 0 };
             }
             return t;
         }));
+        if (setOperations) {
+            setOperations(prev => prev.map(t => {
+                if (t.id === id) {
+                    return { ...t, status: 'In Progress', progress: 0, bytesTransferred: 0, speed: 0 };
+                }
+                return t;
+            }));
+        }
+        if (onRetryTransfer) onRetryTransfer(id);
     };
 
     const cancelItem = (id) => {

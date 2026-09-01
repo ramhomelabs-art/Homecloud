@@ -4,7 +4,8 @@ import {
     Image as ImageIcon, Video, File, ZoomOut, ZoomIn, Save, Download, X,
     ChevronLeft, ChevronRight, RefreshCw, FileText, ExternalLink, Printer,
     RotateCw, BookOpen, Eye, Music, Play, Pause, RotateCcw, Volume2, VolumeX,
-    Maximize, SkipBack, SkipForward
+    Maximize, SkipBack, SkipForward, Settings, Repeat, Tv, Sliders, AlertTriangle,
+    Volume1, Sparkles, Layers, Film
 } from 'lucide-react';
 import ConfirmModal from './ConfirmModal';
 
@@ -50,6 +51,17 @@ const MediaPreviewModal = ({ media, onClose, onDownload, onNext, onPrev, showToa
     const [volume, setVolume] = useState(1);
     const [isMuted, setIsMuted] = useState(false);
     const [playbackRate, setPlaybackRate] = useState(1);
+    const [isBuffering, setIsBuffering] = useState(false);
+    const [videoError, setVideoError] = useState(null);
+    const [showControls, setShowControls] = useState(true);
+    const [aspectRatio, setAspectRatio] = useState('contain'); // 'contain', 'cover', 'fill'
+    const [isLooping, setIsLooping] = useState(false);
+    const [audioBoost, setAudioBoost] = useState(1); // 1, 1.5, 2
+    const [showSettingsMenu, setShowSettingsMenu] = useState(false);
+    const [bufferedPercent, setBufferedPercent] = useState(0);
+    const controlsTimeoutRef = useRef(null);
+    const audioContextRef = useRef(null);
+    const gainNodeRef = useRef(null);
 
     const lineCounterRef = useRef(null);
     const textareaRef = useRef(null);
@@ -62,12 +74,16 @@ const MediaPreviewModal = ({ media, onClose, onDownload, onNext, onPrev, showToa
         setCurrentTime(0);
         setDuration(0);
         setIsPlaying(true);
+        setVideoError(null);
+        setIsBuffering(false);
+        setBufferedPercent(0);
     }, [media?.path]);
 
     // Reset offset when zoom is reset to 1
     useEffect(() => {
         if (zoom === 1) setOffset({ x: 0, y: 0 });
     }, [zoom]);
+
     let mediaUrl = '';
     if (media) {
         const sizeParam = media.size ? `&size=${media.size}` : '';
@@ -79,18 +95,29 @@ const MediaPreviewModal = ({ media, onClose, onDownload, onNext, onPrev, showToa
         }
     }
 
-
     const isPdf = media?.type === 'pdf' || (media?.name && media.name.toLowerCase().endsWith('.pdf'));
+
+    const resetControlsTimeout = () => {
+        setShowControls(true);
+        if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+        if (isPlaying) {
+            controlsTimeoutRef.current = setTimeout(() => {
+                setShowControls(false);
+                setShowSettingsMenu(false);
+            }, 3000);
+        }
+    };
 
     const togglePlay = () => {
         if (!videoRef.current) return;
         if (videoRef.current.paused) {
-            videoRef.current.play();
+            videoRef.current.play().catch(e => console.warn('Play error:', e));
             setIsPlaying(true);
         } else {
             videoRef.current.pause();
             setIsPlaying(false);
         }
+        resetControlsTimeout();
     };
 
     const handleSeek = (e) => {
@@ -99,6 +126,7 @@ const MediaPreviewModal = ({ media, onClose, onDownload, onNext, onPrev, showToa
         if (videoRef.current) {
             videoRef.current.currentTime = newTime;
         }
+        resetControlsTimeout();
     };
 
     const handleSkip = (seconds) => {
@@ -106,6 +134,7 @@ const MediaPreviewModal = ({ media, onClose, onDownload, onNext, onPrev, showToa
         const newTime = Math.max(0, Math.min(duration || 999999, videoRef.current.currentTime + seconds));
         videoRef.current.currentTime = newTime;
         setCurrentTime(newTime);
+        resetControlsTimeout();
     };
 
     const handleVolumeChange = (e) => {
@@ -116,6 +145,7 @@ const MediaPreviewModal = ({ media, onClose, onDownload, onNext, onPrev, showToa
             videoRef.current.volume = newVol;
             videoRef.current.muted = newVol === 0;
         }
+        resetControlsTimeout();
     };
 
     const toggleMute = () => {
@@ -123,6 +153,7 @@ const MediaPreviewModal = ({ media, onClose, onDownload, onNext, onPrev, showToa
         const nextMuted = !isMuted;
         setIsMuted(nextMuted);
         videoRef.current.muted = nextMuted;
+        resetControlsTimeout();
     };
 
     const changePlaybackRate = (rate) => {
@@ -130,16 +161,114 @@ const MediaPreviewModal = ({ media, onClose, onDownload, onNext, onPrev, showToa
         if (videoRef.current) {
             videoRef.current.playbackRate = rate;
         }
+        resetControlsTimeout();
     };
 
     const toggleFullscreen = () => {
         if (!videoRef.current) return;
+        const container = videoRef.current.parentElement;
         if (!document.fullscreenElement) {
-            videoRef.current.requestFullscreen?.() || videoRef.current.webkitRequestFullscreen?.();
+            (container?.requestFullscreen || videoRef.current.requestFullscreen || videoRef.current.webkitRequestFullscreen)?.call(container || videoRef.current);
         } else {
             document.exitFullscreen?.();
         }
     };
+
+    const togglePip = async () => {
+        if (!videoRef.current) return;
+        try {
+            if (document.pictureInPictureElement) {
+                await document.exitPictureInPicture();
+            } else if (videoRef.current.requestPictureInPicture) {
+                await videoRef.current.requestPictureInPicture();
+            }
+        } catch (e) {
+            console.warn('PiP error:', e);
+        }
+    };
+
+    const handleSetAudioBoost = (boostVal) => {
+        setAudioBoost(boostVal);
+        try {
+            if (!audioContextRef.current && videoRef.current) {
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                if (AudioCtx) {
+                    const ctx = new AudioCtx();
+                    const source = ctx.createMediaElementSource(videoRef.current);
+                    const gain = ctx.createGain();
+                    source.connect(gain);
+                    gain.connect(ctx.destination);
+                    audioContextRef.current = ctx;
+                    gainNodeRef.current = gain;
+                }
+            }
+            if (gainNodeRef.current) {
+                gainNodeRef.current.gain.value = boostVal;
+            }
+            if (audioContextRef.current?.state === 'suspended') {
+                audioContextRef.current.resume();
+            }
+            if (showToast) showToast(`Audio Boost: ${Math.round(boostVal * 100)}%`, 'info');
+        } catch (e) {
+            console.warn('Audio boost error:', e);
+        }
+    };
+
+    const updateBufferProgress = () => {
+        if (!videoRef.current || !videoRef.current.buffered || videoRef.current.buffered.length === 0) return;
+        try {
+            const bufferedEnd = videoRef.current.buffered.end(videoRef.current.buffered.length - 1);
+            const dur = videoRef.current.duration;
+            if (dur > 0) {
+                setBufferedPercent(Math.min(100, Math.round((bufferedEnd / dur) * 100)));
+            }
+        } catch (e) {}
+    };
+
+    // Keyboard navigation shortcuts
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            if (media?.type !== 'video') return;
+            if (['input', 'textarea'].includes(document.activeElement?.tagName?.toLowerCase())) return;
+
+            if (e.code === 'Space' || e.key === 'k') {
+                e.preventDefault();
+                togglePlay();
+                resetControlsTimeout();
+            } else if (e.code === 'ArrowLeft' || e.key === 'j') {
+                e.preventDefault();
+                handleSkip(-10);
+                resetControlsTimeout();
+            } else if (e.code === 'ArrowRight' || e.key === 'l') {
+                e.preventDefault();
+                handleSkip(10);
+                resetControlsTimeout();
+            } else if (e.code === 'ArrowUp') {
+                e.preventDefault();
+                const newVol = Math.min(1, Math.round(((volume || 0) + 0.1) * 100) / 100);
+                handleVolumeChange({ target: { value: newVol } });
+                resetControlsTimeout();
+            } else if (e.code === 'ArrowDown') {
+                e.preventDefault();
+                const newVol = Math.max(0, Math.round(((volume || 0) - 0.1) * 100) / 100);
+                handleVolumeChange({ target: { value: newVol } });
+                resetControlsTimeout();
+            } else if (e.key === 'm' || e.key === 'M') {
+                e.preventDefault();
+                toggleMute();
+                resetControlsTimeout();
+            } else if (e.key === 'f' || e.key === 'F') {
+                e.preventDefault();
+                toggleFullscreen();
+            } else if (e.key === 'p' || e.key === 'P') {
+                e.preventDefault();
+                togglePip();
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [media?.type, isPlaying, volume, isMuted, duration]);
 
     // Fetch PDF as blob for secure and CSP-free iframe viewing
     useEffect(() => {
@@ -532,67 +661,323 @@ const MediaPreviewModal = ({ media, onClose, onDownload, onNext, onPrev, showToa
                                 }}
                             />
                         ) : media?.type === 'video' ? (
-                            <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#090d16', position: 'relative', overflow: 'hidden' }}>
+                            <div 
+                                onMouseMove={resetControlsTimeout}
+                                onMouseEnter={resetControlsTimeout}
+                                style={{ 
+                                    width: '100%', 
+                                    height: '100%', 
+                                    display: 'flex', 
+                                    flexDirection: 'column', 
+                                    alignItems: 'center', 
+                                    justifyContent: 'center', 
+                                    background: '#040711', 
+                                    position: 'relative', 
+                                    overflow: 'hidden' 
+                                }}
+                            >
                                 <video
                                     ref={videoRef}
                                     src={mediaUrl}
                                     autoPlay
                                     playsInline
+                                    loop={isLooping}
                                     onTimeUpdate={() => {
                                         if (videoRef.current) {
                                             setCurrentTime(videoRef.current.currentTime);
                                             if (videoRef.current.duration) setDuration(videoRef.current.duration);
+                                            updateBufferProgress();
                                         }
                                     }}
+                                    onProgress={updateBufferProgress}
+                                    onWaiting={() => setIsBuffering(true)}
+                                    onPlaying={() => { setIsBuffering(false); setIsPlaying(true); }}
+                                    onCanPlay={() => setIsBuffering(false)}
                                     onLoadedMetadata={() => {
                                         if (videoRef.current && videoRef.current.duration) {
                                             setDuration(videoRef.current.duration);
                                         }
+                                        setIsBuffering(false);
+                                    }}
+                                    onError={(e) => {
+                                        console.error('Video error:', e);
+                                        setIsBuffering(false);
+                                        setVideoError('Unable to decode video stream or codec unsupported by browser. You can download the file or retry.');
                                     }}
                                     onPlay={() => setIsPlaying(true)}
                                     onPause={() => setIsPlaying(false)}
                                     onClick={togglePlay}
-                                    style={{ maxHeight: 'calc(100% - 64px)', maxWidth: '100%', objectFit: 'contain', cursor: 'pointer' }}
+                                    style={{ 
+                                        maxHeight: '100%', 
+                                        maxWidth: '100%', 
+                                        width: aspectRatio === 'fill' ? '100%' : 'auto',
+                                        height: aspectRatio === 'fill' ? '100%' : 'auto',
+                                        objectFit: aspectRatio, 
+                                        cursor: 'pointer',
+                                        transition: 'all 0.2s ease'
+                                    }}
                                 />
+
+                                {/* Buffering Spinner Overlay */}
+                                {isBuffering && !videoError && (
+                                    <div style={{
+                                        position: 'absolute',
+                                        top: '50%',
+                                        left: '50%',
+                                        transform: 'translate(-50%, -50%)',
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        alignItems: 'center',
+                                        gap: '12px',
+                                        background: 'rgba(0,0,0,0.65)',
+                                        padding: '16px 24px',
+                                        borderRadius: '16px',
+                                        backdropFilter: 'blur(8px)',
+                                        pointerEvents: 'none',
+                                        zIndex: 15
+                                    }}>
+                                        <RefreshCw size={32} color="var(--primary)" style={{ animation: 'spin 1s linear infinite' }} />
+                                        <span style={{ fontSize: '13px', fontWeight: '800', color: '#fff' }}>Buffering stream...</span>
+                                    </div>
+                                )}
+
+                                {/* Video Load Error Fallback Card */}
+                                {videoError && (
+                                    <div style={{
+                                        position: 'absolute',
+                                        top: '50%',
+                                        left: '50%',
+                                        transform: 'translate(-50%, -50%)',
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        alignItems: 'center',
+                                        gap: '14px',
+                                        background: 'rgba(15, 23, 42, 0.95)',
+                                        border: '1px solid rgba(244, 63, 94, 0.35)',
+                                        padding: '24px 32px',
+                                        borderRadius: '18px',
+                                        boxShadow: '0 20px 50px rgba(0,0,0,0.7)',
+                                        maxWidth: '460px',
+                                        textAlign: 'center',
+                                        zIndex: 30
+                                    }}>
+                                        <div style={{ width: '48px', height: '48px', borderRadius: '12px', background: 'rgba(244, 63, 94, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                            <AlertTriangle size={24} color="#f43f5e" />
+                                        </div>
+                                        <div>
+                                            <div style={{ fontSize: '15px', fontWeight: '900', color: '#fff' }}>Stream Playback Notice</div>
+                                            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px', lineHeight: '1.5' }}>
+                                                {videoError}
+                                            </div>
+                                        </div>
+                                        <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>
+                                            <button
+                                                className="btn-outline"
+                                                onClick={() => {
+                                                    setVideoError(null);
+                                                    if (videoRef.current) {
+                                                        videoRef.current.load();
+                                                        videoRef.current.play().catch(() => {});
+                                                    }
+                                                }}
+                                                style={{ padding: '6px 14px', fontSize: '12px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '6px' }}
+                                            >
+                                                <RefreshCw size={13} /> Retry Stream
+                                            </button>
+                                            {onDownload && (
+                                                <button
+                                                    className="btn-primary"
+                                                    onClick={() => onDownload(media)}
+                                                    style={{ padding: '6px 14px', fontSize: '12px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '6px' }}
+                                                >
+                                                    <Download size={13} /> Download Video
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Settings Popover Menu */}
+                                {showSettingsMenu && (
+                                    <div 
+                                        onClick={(e) => e.stopPropagation()}
+                                        style={{
+                                            position: 'absolute',
+                                            bottom: '76px',
+                                            right: '24px',
+                                            width: '280px',
+                                            background: 'rgba(15, 23, 42, 0.95)',
+                                            backdropFilter: 'blur(16px)',
+                                            borderRadius: '16px',
+                                            border: '1px solid rgba(255, 255, 255, 0.15)',
+                                            padding: '16px',
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            gap: '14px',
+                                            boxShadow: '0 20px 50px rgba(0,0,0,0.8)',
+                                            zIndex: 25,
+                                            animation: 'fadeIn 0.15s ease'
+                                        }}
+                                    >
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '8px' }}>
+                                            <div style={{ fontSize: '13px', fontWeight: '900', color: '#fff', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                <Settings size={14} color="var(--primary)" /> Player Settings
+                                            </div>
+                                            <button 
+                                                onClick={() => setShowSettingsMenu(false)}
+                                                style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+                                            >
+                                                <X size={14} />
+                                            </button>
+                                        </div>
+
+                                        {/* Aspect Ratio Fit */}
+                                        <div>
+                                            <div style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                                                ASPECT RATIO / SCALING
+                                            </div>
+                                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px' }}>
+                                                {[
+                                                    { id: 'contain', label: 'Fit (Contain)' },
+                                                    { id: 'cover', label: 'Zoom (Cover)' },
+                                                    { id: 'fill', label: 'Stretch (Fill)' }
+                                                ].map(ratio => (
+                                                    <button
+                                                        key={ratio.id}
+                                                        onClick={() => setAspectRatio(ratio.id)}
+                                                        style={{
+                                                            padding: '5px 4px',
+                                                            borderRadius: '6px',
+                                                            fontSize: '10.5px',
+                                                            fontWeight: '800',
+                                                            background: aspectRatio === ratio.id ? 'var(--primary)' : 'rgba(255,255,255,0.06)',
+                                                            color: '#fff',
+                                                            border: 'none',
+                                                            cursor: 'pointer'
+                                                        }}
+                                                    >
+                                                        {ratio.label}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        {/* Audio Volume Booster (Web Audio API) */}
+                                        <div>
+                                            <div style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-secondary)', marginBottom: '6px', display: 'flex', justifyContent: 'space-between' }}>
+                                                <span>AUDIO BOOST (QUIET VIDEOS)</span>
+                                                <span style={{ color: audioBoost > 1 ? '#10b981' : 'var(--text-muted)' }}>{Math.round(audioBoost * 100)}%</span>
+                                            </div>
+                                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px' }}>
+                                                {[
+                                                    { val: 1, label: '100% Normal' },
+                                                    { val: 1.5, label: '150% Boost' },
+                                                    { val: 2, label: '200% Max' }
+                                                ].map(b => (
+                                                    <button
+                                                        key={b.val}
+                                                        onClick={() => handleSetAudioBoost(b.val)}
+                                                        style={{
+                                                            padding: '5px 4px',
+                                                            borderRadius: '6px',
+                                                            fontSize: '10.5px',
+                                                            fontWeight: '800',
+                                                            background: audioBoost === b.val ? '#10b981' : 'rgba(255,255,255,0.06)',
+                                                            color: '#fff',
+                                                            border: 'none',
+                                                            cursor: 'pointer'
+                                                        }}
+                                                    >
+                                                        {b.label}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        {/* Continuous Loop */}
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '4px', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                                            <span style={{ fontSize: '11.5px', fontWeight: '800', color: '#fff' }}>Loop Playback</span>
+                                            <button
+                                                onClick={() => {
+                                                    setIsLooping(!isLooping);
+                                                    if (showToast) showToast(isLooping ? 'Loop Disabled' : 'Loop Enabled', 'info');
+                                                }}
+                                                style={{
+                                                    padding: '3px 10px',
+                                                    borderRadius: '6px',
+                                                    fontSize: '11px',
+                                                    fontWeight: '800',
+                                                    background: isLooping ? 'rgba(99, 102, 241, 0.25)' : 'rgba(255,255,255,0.08)',
+                                                    color: isLooping ? 'var(--primary)' : 'var(--text-muted)',
+                                                    border: `1px solid ${isLooping ? 'var(--primary)' : 'transparent'}`,
+                                                    cursor: 'pointer'
+                                                }}
+                                            >
+                                                {isLooping ? 'ON' : 'OFF'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
                                 
-                                {/* Precision Playback & Seek Toolbar */}
-                                <div style={{
-                                    width: 'calc(100% - 32px)',
-                                    maxWidth: '840px',
-                                    padding: '10px 16px',
-                                    background: 'rgba(15, 23, 42, 0.88)',
-                                    backdropFilter: 'blur(12px)',
-                                    borderRadius: '14px',
-                                    border: '1px solid rgba(255, 255, 255, 0.1)',
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    gap: '8px',
-                                    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
-                                    position: 'absolute',
-                                    bottom: '12px',
-                                    zIndex: 20
-                                }}>
-                                    {/* Seek Timeline */}
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                        <span style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', minWidth: '45px' }}>
+                                {/* Precision Playback & Seek Toolbar (Auto-fades on idle) */}
+                                <div 
+                                    onClick={(e) => e.stopPropagation()}
+                                    style={{
+                                        width: 'calc(100% - 32px)',
+                                        maxWidth: '900px',
+                                        padding: '12px 18px',
+                                        background: 'rgba(10, 15, 29, 0.92)',
+                                        backdropFilter: 'blur(16px)',
+                                        borderRadius: '16px',
+                                        border: '1px solid rgba(255, 255, 255, 0.12)',
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        gap: '10px',
+                                        boxShadow: '0 12px 40px rgba(0, 0, 0, 0.65)',
+                                        position: 'absolute',
+                                        bottom: '16px',
+                                        zIndex: 20,
+                                        opacity: showControls || !isPlaying || showSettingsMenu ? 1 : 0,
+                                        pointerEvents: showControls || !isPlaying || showSettingsMenu ? 'auto' : 'none',
+                                        transform: showControls || !isPlaying || showSettingsMenu ? 'translateY(0)' : 'translateY(12px)',
+                                        transition: 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)'
+                                    }}
+                                >
+                                    {/* Seek Timeline with Buffered Bar */}
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                        <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', minWidth: '45px' }}>
                                             {formatTime(currentTime)}
                                         </span>
-                                        <input
-                                            type="range"
-                                            min={0}
-                                            max={duration || 100}
-                                            step="0.1"
-                                            value={currentTime}
-                                            onChange={handleSeek}
-                                            style={{
-                                                flex: 1,
-                                                accentColor: 'var(--primary)',
-                                                cursor: 'pointer',
-                                                height: '5px',
-                                                borderRadius: '4px'
-                                            }}
-                                        />
-                                        <span style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', minWidth: '45px', textAlign: 'right' }}>
+                                        <div style={{ flex: 1, position: 'relative', height: '6px', display: 'flex', alignItems: 'center' }}>
+                                            {/* Buffered Background Bar */}
+                                            <div style={{
+                                                position: 'absolute',
+                                                left: 0,
+                                                top: '1px',
+                                                height: '4px',
+                                                width: `${bufferedPercent}%`,
+                                                background: 'rgba(255, 255, 255, 0.2)',
+                                                borderRadius: '999px',
+                                                pointerEvents: 'none'
+                                            }} />
+                                            <input
+                                                type="range"
+                                                min={0}
+                                                max={duration || 100}
+                                                step="0.1"
+                                                value={currentTime}
+                                                onChange={handleSeek}
+                                                style={{
+                                                    width: '100%',
+                                                    accentColor: 'var(--primary)',
+                                                    cursor: 'pointer',
+                                                    height: '6px',
+                                                    borderRadius: '4px',
+                                                    zIndex: 2
+                                                }}
+                                            />
+                                        </div>
+                                        <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', minWidth: '45px', textAlign: 'right' }}>
                                             {formatTime(duration)}
                                         </span>
                                     </div>
@@ -603,17 +988,29 @@ const MediaPreviewModal = ({ media, onClose, onDownload, onNext, onPrev, showToa
                                             <button
                                                 type="button"
                                                 onClick={togglePlay}
-                                                style={{ background: 'var(--primary)', border: 'none', borderRadius: '8px', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', cursor: 'pointer' }}
-                                                title={isPlaying ? 'Pause' : 'Play'}
+                                                style={{ 
+                                                    background: 'var(--primary)', 
+                                                    border: 'none', 
+                                                    borderRadius: '9px', 
+                                                    width: '34px', 
+                                                    height: '34px', 
+                                                    display: 'flex', 
+                                                    alignItems: 'center', 
+                                                    justifyContent: 'center', 
+                                                    color: '#fff', 
+                                                    cursor: 'pointer',
+                                                    boxShadow: '0 2px 10px rgba(99, 102, 241, 0.4)'
+                                                }}
+                                                title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
                                             >
-                                                {isPlaying ? <Pause size={16} /> : <Play size={16} />}
+                                                {isPlaying ? <Pause size={17} /> : <Play size={17} />}
                                             </button>
 
                                             <button
                                                 type="button"
                                                 onClick={() => handleSkip(-10)}
-                                                style={{ background: 'rgba(255, 255, 255, 0.08)', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '8px', padding: '6px 10px', display: 'flex', alignItems: 'center', gap: '4px', color: '#f8fafc', fontSize: '11px', fontWeight: '700', cursor: 'pointer' }}
-                                                title="Skip back 10 seconds"
+                                                style={{ background: 'rgba(255, 255, 255, 0.08)', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: '8px', padding: '6px 11px', display: 'flex', alignItems: 'center', gap: '4px', color: '#f8fafc', fontSize: '11px', fontWeight: '800', cursor: 'pointer' }}
+                                                title="Skip back 10s (Left Arrow)"
                                             >
                                                 <SkipBack size={13} /> -10s
                                             </button>
@@ -621,23 +1018,23 @@ const MediaPreviewModal = ({ media, onClose, onDownload, onNext, onPrev, showToa
                                             <button
                                                 type="button"
                                                 onClick={() => handleSkip(10)}
-                                                style={{ background: 'rgba(255, 255, 255, 0.08)', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '8px', padding: '6px 10px', display: 'flex', alignItems: 'center', gap: '4px', color: '#f8fafc', fontSize: '11px', fontWeight: '700', cursor: 'pointer' }}
-                                                title="Skip forward 10 seconds"
+                                                style={{ background: 'rgba(255, 255, 255, 0.08)', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: '8px', padding: '6px 11px', display: 'flex', alignItems: 'center', gap: '4px', color: '#f8fafc', fontSize: '11px', fontWeight: '800', cursor: 'pointer' }}
+                                                title="Skip forward 10s (Right Arrow)"
                                             >
                                                 +10s <SkipForward size={13} />
                                             </button>
                                         </div>
 
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                                             {/* Volume Control */}
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                                 <button
                                                     type="button"
                                                     onClick={toggleMute}
                                                     style={{ background: 'transparent', border: 'none', color: '#cbd5e1', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-                                                    title={isMuted ? 'Unmute' : 'Mute'}
+                                                    title={isMuted ? 'Unmute (M)' : 'Mute (M)'}
                                                 >
-                                                    {isMuted || volume === 0 ? <VolumeX size={16} /> : <Volume2 size={16} />}
+                                                    {isMuted || volume === 0 ? <VolumeX size={16} /> : (volume > 0.5 ? <Volume2 size={16} /> : <Volume1 size={16} />)}
                                                 </button>
                                                 <input
                                                     type="range"
@@ -646,13 +1043,13 @@ const MediaPreviewModal = ({ media, onClose, onDownload, onNext, onPrev, showToa
                                                     step="0.05"
                                                     value={isMuted ? 0 : volume}
                                                     onChange={handleVolumeChange}
-                                                    style={{ width: '60px', accentColor: 'var(--primary)', cursor: 'pointer', height: '4px' }}
+                                                    style={{ width: '64px', accentColor: 'var(--primary)', cursor: 'pointer', height: '4px' }}
                                                 />
                                             </div>
 
                                             {/* Speed Selector */}
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                                {[1, 1.25, 1.5, 2].map((rate) => (
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                                                {[0.75, 1, 1.25, 1.5, 2].map((rate) => (
                                                     <button
                                                         key={rate}
                                                         type="button"
@@ -661,9 +1058,9 @@ const MediaPreviewModal = ({ media, onClose, onDownload, onNext, onPrev, showToa
                                                             background: playbackRate === rate ? 'var(--primary)' : 'rgba(255, 255, 255, 0.06)',
                                                             border: 'none',
                                                             borderRadius: '6px',
-                                                            padding: '3px 6px',
+                                                            padding: '4px 7px',
                                                             fontSize: '10.5px',
-                                                            fontWeight: '700',
+                                                            fontWeight: '800',
                                                             color: '#f8fafc',
                                                             cursor: 'pointer'
                                                         }}
@@ -673,12 +1070,43 @@ const MediaPreviewModal = ({ media, onClose, onDownload, onNext, onPrev, showToa
                                                 ))}
                                             </div>
 
+                                            {/* Settings Toggle Button */}
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowSettingsMenu(!showSettingsMenu)}
+                                                style={{ 
+                                                    background: showSettingsMenu ? 'var(--primary)' : 'rgba(255, 255, 255, 0.08)', 
+                                                    border: '1px solid rgba(255, 255, 255, 0.12)', 
+                                                    borderRadius: '8px', 
+                                                    width: '30px', 
+                                                    height: '30px', 
+                                                    display: 'flex', 
+                                                    alignItems: 'center', 
+                                                    justifyContent: 'center', 
+                                                    color: '#f8fafc', 
+                                                    cursor: 'pointer' 
+                                                }}
+                                                title="Player Settings (Audio Boost, Aspect Ratio, Loop)"
+                                            >
+                                                <Settings size={14} />
+                                            </button>
+
+                                            {/* Picture-in-Picture */}
+                                            <button
+                                                type="button"
+                                                onClick={togglePip}
+                                                style={{ background: 'rgba(255, 255, 255, 0.08)', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: '8px', width: '30px', height: '30px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#f8fafc', cursor: 'pointer' }}
+                                                title="Picture in Picture (P)"
+                                            >
+                                                <Tv size={14} />
+                                            </button>
+
                                             {/* Fullscreen */}
                                             <button
                                                 type="button"
                                                 onClick={toggleFullscreen}
-                                                style={{ background: 'rgba(255, 255, 255, 0.08)', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '6px', width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#cbd5e1', cursor: 'pointer' }}
-                                                title="Fullscreen"
+                                                style={{ background: 'rgba(255, 255, 255, 0.08)', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: '8px', width: '30px', height: '30px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#f8fafc', cursor: 'pointer' }}
+                                                title="Fullscreen (F)"
                                             >
                                                 <Maximize size={14} />
                                             </button>
