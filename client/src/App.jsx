@@ -203,6 +203,16 @@ const Toast = ({ message, type, onClose }) => {
 };
 
 function App() {
+    const [toast, setToast] = useState(null);
+    const toastTimerRef = useRef(null);
+    const showToast = (message, type = 'info') => {
+        if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+        setToast({ message, type });
+        toastTimerRef.current = setTimeout(() => {
+            setToast(null);
+            toastTimerRef.current = null;
+        }, 4000);
+    };
     const [token, setToken] = useState(() => localStorage.getItem('token') || sessionStorage.getItem('token'));
     const [guestToken, setGuestToken] = useState(() => localStorage.getItem('guestToken') || sessionStorage.getItem('guestToken'));
     // Tracks whether the initial token verification is in progress.
@@ -968,15 +978,6 @@ function App() {
         }
 
         await executeOperation('copy', sourcePath, destPath, destAgentId);
-    };
-
-    const showToast = (message, type = 'info') => {
-        if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-        setToast({ message, type });
-        toastTimerRef.current = setTimeout(() => {
-            setToast(null);
-            toastTimerRef.current = null;
-        }, 4000);
     };
 
     const copyToClipboard = (text, successMsg = 'Link copied to clipboard') => {
