@@ -679,6 +679,12 @@ function App() {
     const [downloadFile, setDownloadFile] = useState(null);
     const [previewMedia, setPreviewMedia] = useState(null);
     const [editingFile, setEditingFile] = useState(null);
+    const [shareModal, setShareModal] = useState(null);
+    const [renameFile, setRenameFile] = useState(null);
+    const [propertiesFile, setPropertiesFile] = useState(null);
+    const [showMountModal, setShowMountModal] = useState(false);
+    const [showFolderPicker, setShowFolderPicker] = useState(false);
+    const [pickerShareModal, setPickerShareModal] = useState(null);
     const [showHeatmapModal, setShowHeatmapModal] = useState(false);
     const [showDeduplicateModal, setShowDeduplicateModal] = useState(false);
     const [historyFile, setHistoryFile] = useState(null);
@@ -1972,7 +1978,6 @@ function App() {
         e.stopPropagation();
         setContextMenu({ x: e.clientX, y: e.clientY, file });
     };
-
 
     const handleCreateFolder = async (folderName) => {
         try {
