@@ -95,10 +95,10 @@ function SecurityCenter({ showToast: externalToast }) {
                 }
             };
 
-            const [statsData, quarantineData, eventsData, agentsData, postureData, secAgentsData, canaryData, scrubData, sharesData, policyData, attackersData, attackTypesData] = await Promise.all([
+            const [statsData, quarantineData, eventsData, agentsData, postureData, secAgentsData, canaryData, scrubData, sharesData, policyData, attackersData, attackTypesData, auditLogsData] = await Promise.all([
                 fetchEndpoint('/api/v1/security/stats', null),
                 fetchEndpoint('/api/v1/security/quarantine', []),
-                fetchEndpoint('/api/v1/security/events', { events: [] }),
+                fetchEndpoint('/api/v1/security/events?limit=50', { events: [] }),
                 fetchEndpoint('/api/v1/agents', []),
                 fetchEndpoint('/api/v1/security/posture', null),
                 fetchEndpoint('/api/v1/security/agents', null),
@@ -107,12 +107,45 @@ function SecurityCenter({ showToast: externalToast }) {
                 fetchEndpoint('/api/v1/network/list', []),
                 fetchEndpoint('/api/v1/security/policy', null),
                 fetchEndpoint('/api/v1/security/top-attackers', []),
-                fetchEndpoint('/api/v1/security/attack-types', { total: 0, types: [] })
+                fetchEndpoint('/api/v1/security/attack-types', { total: 0, types: [] }),
+                fetchEndpoint('/api/v1/audit?limit=50', { logs: [] })
             ]);
 
             if (statsData !== null) setStats(statsData);
             setQuarantine(quarantineData);
-            setEvents(eventsData.events || (Array.isArray(eventsData) ? eventsData : []));
+            
+            // Normalize security events and cryptographic audit logs into a unified chronological ledger
+            const rawSecEvents = (eventsData?.events || (Array.isArray(eventsData) ? eventsData : [])).map(e => ({
+                id: e.id,
+                eventType: e.eventType || e.event_type || 'SECURITY_ALERT',
+                details: e.details,
+                createdAt: e.createdAt || e.timestamp || e.created_at,
+                sourceIp: e.sourceIp || e.source_ip,
+                path: e.path,
+                ruleMessage: e.ruleMessage || e.rule_message,
+                action: e.action,
+                severity: e.severity,
+                source: e.source || 'WAF / Threat Defense'
+            }));
+
+            const rawAuditLogs = (auditLogsData?.logs || (Array.isArray(auditLogsData) ? auditLogsData : [])).map(l => ({
+                id: l.id,
+                eventType: l.action || 'AUDIT_LOG',
+                details: l.details,
+                createdAt: l.timestamp || l.createdAt,
+                username: l.username,
+                sourceIp: l.ip_address,
+                entryHash: l.entry_hash,
+                source: 'Cryptographic Hash Ledger'
+            }));
+
+            const combinedEvents = [...rawSecEvents, ...rawAuditLogs].sort((a, b) => {
+                const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+                const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+                return tb - ta;
+            });
+
+            setEvents(combinedEvents);
             setAgents(agentsData);
             if (postureData !== null) setPosture(postureData);
             if (secAgentsData && secAgentsData.nodes) setAgentNodes(secAgentsData.nodes);
@@ -540,57 +573,78 @@ function SecurityCenter({ showToast: externalToast }) {
 
     const getEventBadgeColor = (type) => {
         const t = (type || '').toUpperCase();
-        switch (t) {
-            case 'THREAT_DETECTED': return { bg: 'rgba(248,81,73,0.1)', text: '#f85149' };
-            case 'FILE_QUARANTINED': return { bg: 'rgba(242,201,76,0.1)', text: '#f2c94c' };
-            case 'QUARANTINE_APPROVED': return { bg: 'rgba(46,160,67,0.1)', text: '#2ea043' };
-            case 'QUARANTINE_REJECTED': return { bg: 'rgba(255,255,255,0.05)', text: '#8b949e' };
-            case 'POLICY_CHANGE': return { bg: 'rgba(88,166,255,0.1)', text: '#58a6ff' };
-            case 'AVATAR_UPLOAD_BLOCKED': return { bg: 'rgba(248,81,73,0.1)', text: '#f85149' };
-            case 'AVATAR_UPDATED': return { bg: 'rgba(46,160,67,0.1)', text: '#2ea043' };
-            case 'AVATAR_REMOVED': return { bg: 'rgba(255,255,255,0.05)', text: '#8b949e' };
-            default: return { bg: 'rgba(255,255,255,0.05)', text: '#c9d1d9' };
+        if (t.includes('SUSPICIOUS') || t.includes('MALICIOUS') || t.includes('ATTACK') || t.includes('RCE') || t.includes('SQL') || t.includes('THREAT')) {
+            return { bg: 'rgba(239, 68, 68, 0.15)', text: '#ef4444' };
         }
+        if (t.includes('BLOCKED') || t.includes('REJECTED') || t.includes('DENIED') || t.includes('BAN')) {
+            return { bg: 'rgba(239, 68, 68, 0.12)', text: '#f87171' };
+        }
+        if (t.includes('LOGIN') || t.includes('AUTH_SUCCESS') || t.includes('RESTORE') || t.includes('CLEAN')) {
+            return { bg: 'rgba(16, 185, 129, 0.15)', text: '#10b981' };
+        }
+        if (t.includes('SETTINGS') || t.includes('CONFIG') || t.includes('POLICY') || t.includes('UPDATE')) {
+            return { bg: 'rgba(99, 102, 241, 0.15)', text: '#6366f1' };
+        }
+        if (t.includes('QUARANTINE') || t.includes('WARNING')) {
+            return { bg: 'rgba(245, 158, 11, 0.15)', text: '#f59e0b' };
+        }
+        return { bg: 'rgba(99, 102, 241, 0.12)', text: 'var(--primary)' };
     };
 
-    const renderEventDescription = (eventType, details) => {
-        const type = (eventType || '').toUpperCase();
+    const renderEventDescription = (eventType, details, event = {}) => {
+        // Priority 1: Direct rule message from WAF or security engine
+        if (event.ruleMessage || event.rule_message) {
+            const rule = event.ruleMessage || event.rule_message;
+            const target = event.path ? ` on ${event.path}` : '';
+            const action = event.action ? ` [${event.action}]` : '';
+            const ip = (event.sourceIp || event.source_ip) ? ` • IP: ${event.sourceIp || event.source_ip}` : '';
+            return `${rule}${action}${target}${ip}`;
+        }
+
+        // Priority 2: Parsed or string details from Audit log
         let parsed = details;
         if (typeof details === 'string') {
             try {
                 parsed = JSON.parse(details);
             } catch (e) {
-                return details;
+                const user = event.username ? ` (User: ${event.username})` : '';
+                const ip = (event.sourceIp || event.source_ip) ? ` • ${event.sourceIp || event.source_ip}` : '';
+                return `${details}${user}${ip}`;
             }
         }
         
-        if (!parsed) return '';
+        if (parsed && typeof parsed === 'string') return parsed;
 
-        switch (type) {
-            case 'THREAT_DETECTED':
-                return `Threat detected: ${parsed.verdict?.toUpperCase() || 'UNKNOWN'} (Score: ${parsed.score || 0}) for file ${parsed.filePath || ''}`;
-            case 'FILE_QUARANTINED':
-                return `File "${parsed.originalName || ''}" was quarantined (Threat Score: ${parsed.score || 0})`;
-            case 'QUARANTINE_APPROVED':
-                return `Quarantined file "${parsed.originalName || ''}" approved and restored to: ${parsed.targetPath || ''}`;
-            case 'QUARANTINE_REJECTED':
-                return `Quarantined file "${parsed.originalName || ''}" deleted permanently by Admin`;
-            case 'POLICY_CHANGE':
-                return `Security policy configuration updated by user "${parsed.updatedBy || 'admin'}"`;
-            case 'AVATAR_UPLOAD_BLOCKED':
-                return `Avatar upload blocked (File: "${parsed.file || ''}", Threat Score: ${parsed.score || 0}, Reason: ${parsed.reason || 'Suspicious file'})`;
-            case 'AVATAR_UPDATED':
-                return `Avatar updated successfully (Path: "${parsed.path || ''}")`;
-            case 'AVATAR_REMOVED':
-                return `Avatar removed / reset to system default`;
-            default:
-                if (typeof parsed === 'object') {
+        const type = (eventType || event.eventType || event.event_type || '').toUpperCase();
+
+        if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
+            switch (type) {
+                case 'THREAT_DETECTED':
+                    return `Threat detected: ${parsed.verdict?.toUpperCase() || 'UNKNOWN'} (Score: ${parsed.score || 0}) for file ${parsed.filePath || ''}`;
+                case 'FILE_QUARANTINED':
+                    return `File "${parsed.originalName || ''}" was quarantined (Threat Score: ${parsed.score || 0})`;
+                case 'QUARANTINE_APPROVED':
+                    return `Quarantined file "${parsed.originalName || ''}" approved and restored to: ${parsed.targetPath || ''}`;
+                case 'QUARANTINE_REJECTED':
+                    return `Quarantined file "${parsed.originalName || ''}" deleted permanently by Admin`;
+                case 'POLICY_CHANGE':
+                    return `Security policy configuration updated by user "${parsed.updatedBy || 'admin'}"`;
+                default:
                     return Object.entries(parsed)
                         .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`)
                         .join(' | ');
-                }
-                return String(parsed);
+            }
         }
+
+        if (event.username) {
+            return `Action performed by user "${event.username}"${event.sourceIp ? ` from ${event.sourceIp}` : ''}`;
+        }
+
+        if (event.path || event.sourceIp) {
+            return `${eventType || 'Security Activity'} on ${event.path || 'server'}${event.sourceIp ? ` from ${event.sourceIp}` : ''}`;
+        }
+
+        return (typeof details === 'string' && details) ? details : (eventType || 'Security Event Recorded');
     };
 
     return (
@@ -2170,23 +2224,42 @@ function SecurityCenter({ showToast: externalToast }) {
                     ) : (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                             {events.map((e) => {
-                                const badge = getEventBadgeColor(e.eventType);
+                                const type = e.eventType || e.event_type || e.action || 'EVENT';
+                                const badge = getEventBadgeColor(type);
+                                const rawDate = e.createdAt || e.timestamp || e.created_at;
+                                let dateDisplay = 'Just now';
+                                if (rawDate) {
+                                    const parsedDate = new Date(rawDate);
+                                    if (!isNaN(parsedDate.getTime())) {
+                                        dateDisplay = parsedDate.toLocaleString();
+                                    }
+                                }
+
                                 return (
                                     <div key={e.id} style={styles.eventRow}>
-                                        <div style={{ display: 'flex', alignItems: 'center', justifySpaceBetween: 'space-between', width: '100%' }}>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: '12px', flexWrap: 'wrap' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: '260px' }}>
                                                 <span style={{
-                                                    fontSize: '10px', fontWeight: 'bold', padding: '3px 8px', borderRadius: '4px',
-                                                    background: badge.bg, color: badge.text, textTransform: 'uppercase', fontFamily: 'monospace'
-                                                }}>{e.eventType}</span>
+                                                    fontSize: '10.5px', fontWeight: '800', padding: '3px 8px', borderRadius: '6px',
+                                                    background: badge.bg, color: badge.text, textTransform: 'uppercase', fontFamily: 'monospace',
+                                                    letterSpacing: '0.4px', flexShrink: 0
+                                                }}>{type}</span>
                                                 
-                                                <span style={{ fontSize: '13px', color: 'var(--text-primary)' }}>
-                                                    {renderEventDescription(e.eventType, e.details)}
+                                                <span style={{ fontSize: '13px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>
+                                                    {renderEventDescription(type, e.details, e)}
                                                 </span>
                                             </div>
-                                            <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'monospace', flexShrink: 0 }}>
-                                                {new Date(e.createdAt).toLocaleString()}
-                                            </span>
+
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
+                                                {e.entryHash && (
+                                                    <span style={{ fontSize: '10.5px', fontFamily: 'monospace', color: 'var(--primary)', background: 'rgba(99, 102, 241, 0.1)', padding: '2px 6px', borderRadius: '4px' }} title={`SHA-256 Ledger Hash: ${e.entryHash}`}>
+                                                        🔗 {e.entryHash.slice(0, 8)}...
+                                                    </span>
+                                                )}
+                                                <span style={{ fontSize: '11.5px', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>
+                                                    {dateDisplay}
+                                                </span>
+                                            </div>
                                         </div>
                                     </div>
                                 );

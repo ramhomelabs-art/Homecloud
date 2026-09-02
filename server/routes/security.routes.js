@@ -138,11 +138,11 @@ router.get('/events', authenticateToken, requireAdmin, async (req, res) => {
         const total = parseInt(totalRes.rows[0].count, 10);
 
         const dataQuery = `
-            SELECT id, event_type, source, source_ip AS "sourceIp", source_port AS "sourcePort",
+            SELECT id, event_type AS "eventType", event_type, source, source_ip AS "sourceIp", source_port AS "sourcePort",
                    destination, method, path, user_agent AS "userAgent", attack_type AS "attackType",
                    severity, threat_score AS "threatScore", action, status_code AS "statusCode",
                    country, city, latitude, longitude, mitre_technique AS "mitreTechnique",
-                   rule_id AS "ruleId", rule_message AS "ruleMessage", details, created_at AS "timestamp"
+                   rule_id AS "ruleId", rule_message AS "ruleMessage", details, created_at AS "createdAt", created_at AS "timestamp"
             FROM security_events
             ${whereClause}
             ORDER BY created_at DESC
@@ -704,26 +704,6 @@ router.post('/policy', authenticateToken, requireAdmin, async (req, res) => {
     } catch (err) {
         logger.error(`[SOC] Save policy error: ${err.message}`);
         res.status(500).json({ error: 'Failed to update security policy' });
-    }
-});
-
-// ─── GET /api/v1/security/events ──────────────────────────────────────────────
-router.get('/events', authenticateToken, requireAdmin, async (req, res) => {
-    try {
-        const limit = parseInt(req.query.limit) || 40;
-        const resDb = await db.query(
-            'SELECT * FROM security_events ORDER BY created_at DESC LIMIT $1',
-            [limit]
-        );
-        res.json(resDb.rows.map(row => ({
-            id: row.id,
-            eventType: row.event_type,
-            details: row.details,
-            createdAt: row.created_at
-        })));
-    } catch (err) {
-        logger.error(`[SOC] Get events error: ${err.message}`);
-        res.status(500).json({ error: 'Failed to retrieve security events' });
     }
 });
 
