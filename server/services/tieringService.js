@@ -90,9 +90,21 @@ class TieringService {
     constructor() {
         this.configPath = path.join(__dirname, '../data/tiering_policies.json');
         this.snapshotsPath = path.join(__dirname, '../data/snapshots.json');
+        this.settingsPath = path.join(__dirname, '../data/tiering_settings.json');
         this.policies = [];
         this.snapshots = [];
         this.migrationHistory = [];
+        this.settings = {
+            autoSweepEnabled: true,
+            intervalHours: 12,
+            lastSweepTime: null,
+            targetTiers: {
+                HOT: 'Master NVMe / Primary Uploads',
+                WARM: 'Fleet Secondary / HDDs',
+                COLD: 'S3 Glacier / R2 Cold Vault'
+            }
+        };
+        this.schedulerTimer = null;
         this.init();
     }
 
@@ -276,9 +288,75 @@ class TieringService {
             if (fs.existsSync(this.snapshotsPath)) {
                 this.snapshots = JSON.parse(fs.readFileSync(this.snapshotsPath, 'utf8'));
             }
+
+            if (fs.existsSync(this.settingsPath)) {
+                try {
+                    this.settings = { ...this.settings, ...JSON.parse(fs.readFileSync(this.settingsPath, 'utf8')) };
+                } catch (_) {}
+            } else {
+                this.saveSettings();
+            }
+            this.startScheduler();
         } catch (e) {
             logger.warn(`[TieringService] Init fallback: ${e.message}`);
         }
+    }
+
+    saveSettings() {
+        try {
+            fs.writeFileSync(this.settingsPath, JSON.stringify(this.settings, null, 2));
+        } catch (e) {
+            logger.error(`[TieringService] Failed to save settings: ${e.message}`);
+        }
+    }
+
+    getSettings() {
+        let nextSweepTime = null;
+        if (this.settings.autoSweepEnabled && this.settings.intervalHours) {
+            const last = this.settings.lastSweepTime ? new Date(this.settings.lastSweepTime).getTime() : Date.now();
+            nextSweepTime = new Date(last + this.settings.intervalHours * 3600 * 1000).toISOString();
+        }
+        return {
+            ...this.settings,
+            nextSweepTime
+        };
+    }
+
+    updateSettings(updates) {
+        this.settings = { ...this.settings, ...updates };
+        this.saveSettings();
+        this.startScheduler();
+        return this.getSettings();
+    }
+
+    startScheduler() {
+        if (this.schedulerTimer) {
+            clearInterval(this.schedulerTimer);
+            this.schedulerTimer = null;
+        }
+
+        if (!this.settings.autoSweepEnabled) return;
+
+        // Run check every 5 minutes
+        this.schedulerTimer = setInterval(async () => {
+            try {
+                if (!this.settings.autoSweepEnabled) return;
+                const intervalMs = (this.settings.intervalHours || 12) * 3600 * 1000;
+                const last = this.settings.lastSweepTime ? new Date(this.settings.lastSweepTime).getTime() : 0;
+                const now = Date.now();
+
+                if (now - last >= intervalMs) {
+                    logger.info('[TieringService] Running scheduled automated storage tiering sweep...');
+                    const sweepRes = await this.runTieringSweep();
+                    this.settings.lastSweepTime = new Date().toISOString();
+                    this.saveSettings();
+                    logger.info(`[TieringService] Scheduled sweep completed: evaluated ${sweepRes.processed}, moved ${sweepRes.migrated} files`);
+                }
+            } catch (err) {
+                logger.error(`[TieringService] Scheduled sweep error: ${err.message}`);
+            }
+        }, 5 * 60 * 1000);
+        if (this.schedulerTimer.unref) this.schedulerTimer.unref();
     }
 
     savePolicies() {
@@ -400,6 +478,8 @@ class TieringService {
         }
 
         try {
+            this.settings.lastSweepTime = new Date().toISOString();
+            this.saveSettings();
             notificationService.notify('sync_success', 'Storage Tiering Sweep Executed ⚡', {
                 status: `Evaluated ${processed} files on "${nodeName}". Migrated ${migrated} files (${(reclaimedBytes / 1024 / 1024).toFixed(2)} MB moved to Cold/Warm tiers).`,
                 error: 'info'
@@ -413,6 +493,53 @@ class TieringService {
             targetNode: nodeName,
             targetPath: rootPath,
             history: this.migrationHistory.slice(0, 20)
+        };
+    }
+
+    /**
+     * Simulate Policy Impact (Dry Run)
+     */
+    async simulatePolicy(candidate = {}, options = {}) {
+        const { rootPath, nodeName } = this.resolveTargetRoot(options);
+        const allFiles = await walkAllFilesAsync(rootPath, 4, 0, [], 3000);
+
+        const patterns = (candidate.pattern || '*.*').split(',').map(p => p.trim().toLowerCase());
+        const daysThreshold = parseInt(candidate.daysThreshold, 10) || 0;
+
+        let matchedCount = 0;
+        let matchedBytes = 0;
+        const sampleFiles = [];
+
+        for (const fileObj of allFiles) {
+            const ageDays = (Date.now() - fileObj.mtimeMs) / (1000 * 60 * 60 * 24);
+            const matchesPattern = patterns.some(p => {
+                if (p === '*.*' || p === '*') return true;
+                if (p.startsWith('*.')) return fileObj.name.toLowerCase().endsWith(p.slice(1));
+                return fileObj.name.toLowerCase().includes(p);
+            });
+
+            if (matchesPattern && ageDays >= daysThreshold) {
+                matchedCount++;
+                matchedBytes += fileObj.size;
+                if (sampleFiles.length < 20) {
+                    sampleFiles.push({
+                        name: fileObj.name,
+                        relativePath: fileObj.relativePath,
+                        size: fileObj.size,
+                        ageDays: Math.floor(ageDays),
+                        mtime: fileObj.mtime
+                    });
+                }
+            }
+        }
+
+        return {
+            targetNode: nodeName,
+            targetPath: rootPath,
+            totalEvaluated: allFiles.length,
+            matchedCount,
+            matchedBytes,
+            sampleFiles
         };
     }
 
@@ -500,8 +627,10 @@ class TieringService {
             hashes.get(hash).push({
                 name: fileObj.name,
                 relativePath: fileObj.relativePath,
+                fullPath: fileObj.fullPath,
                 size: fileObj.size,
-                mtime: fileObj.mtime
+                mtime: fileObj.mtime,
+                mtimeMs: fileObj.mtimeMs
             });
         }
 
@@ -641,6 +770,127 @@ class TieringService {
             success: true,
             snapshot: snap,
             message: `Snapshot "${snap.label}" restored successfully.`
+        };
+    }
+
+    /**
+     * Reclaim Disk Space from Redundant Duplicate Files
+     */
+    async reclaimDeduplication(options = {}) {
+        const { rootPath, nodeName } = this.resolveTargetRoot(options);
+        const allFiles = await walkAllFilesAsync(rootPath, 4, 0, [], 3000);
+
+        const hashes = new Map();
+        for (let i = 0; i < allFiles.length; i++) {
+            const fileObj = allFiles[i];
+            if (fileObj.size === 0) continue;
+            if (i % 100 === 0) await new Promise(r => setImmediate(r));
+
+            const hash = await getFileFingerprintAsync(fileObj.fullPath, fileObj.size);
+            if (!hash) continue;
+
+            const shortHash = hash.substring(0, 16);
+            if (!hashes.has(shortHash)) hashes.set(shortHash, []);
+            hashes.get(shortHash).push(fileObj);
+        }
+
+        let reclaimedBytes = 0;
+        let deletedFilesCount = 0;
+        let preservedFilesCount = 0;
+        const deletedEntries = [];
+
+        for (const [hash, group] of hashes.entries()) {
+            if (group.length <= 1) continue;
+            if (options.groupHashes && options.groupHashes.length > 0 && !options.groupHashes.includes(hash)) {
+                continue;
+            }
+
+            // Strategy: 'keep_newest' or 'keep_oldest' (default)
+            if (options.strategy === 'keep_newest') {
+                group.sort((a, b) => (b.mtimeMs || 0) - (a.mtimeMs || 0));
+            } else {
+                group.sort((a, b) => (a.mtimeMs || 0) - (b.mtimeMs || 0));
+            }
+
+            const primaryFile = group[0];
+            preservedFilesCount++;
+
+            const redundantCopies = group.slice(1);
+            for (const dup of redundantCopies) {
+                try {
+                    if (fs.existsSync(dup.fullPath)) {
+                        await fs.promises.unlink(dup.fullPath);
+                        reclaimedBytes += dup.size;
+                        deletedFilesCount++;
+                        deletedEntries.push({
+                            name: dup.name,
+                            relativePath: dup.relativePath,
+                            size: dup.size,
+                            reclaimedHash: hash
+                        });
+
+                        this.migrationHistory.unshift({
+                            id: `dedup_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+                            fileName: dup.name,
+                            relativePath: dup.relativePath,
+                            source: `${nodeName} (Duplicate Copy)`,
+                            destination: 'DEDUPLICATED (Space Reclaimed)',
+                            action: 'DEDUP_PURGE',
+                            size: dup.size,
+                            policyName: `Deduplication (Retained: ${primaryFile.name})`,
+                            timestamp: new Date().toISOString()
+                        });
+                    }
+                } catch (err) {
+                    logger.warn(`[TieringService] Could not unlink duplicate ${dup.fullPath}: ${err.message}`);
+                }
+            }
+        }
+
+        if (this.migrationHistory.length > 100) {
+            this.migrationHistory = this.migrationHistory.slice(0, 100);
+        }
+
+        try {
+            notificationService.notify('sync_success', 'Storage Deduplication Reclaim Completed ♻️', {
+                status: `Reclaimed ${(reclaimedBytes / 1024 / 1024).toFixed(2)} MB across ${deletedFilesCount} redundant copies on "${nodeName}".`,
+                error: 'info'
+            });
+        } catch (_) {}
+
+        return {
+            success: true,
+            reclaimedBytes,
+            deletedFilesCount,
+            preservedFilesCount,
+            targetNode: nodeName,
+            targetPath: rootPath,
+            deletedEntries: deletedEntries.slice(0, 50)
+        };
+    }
+
+    /**
+     * Export Snapshot Manifest as JSON or CSV
+     */
+    exportSnapshot(id, format = 'json') {
+        const snap = this.snapshots.find(s => s.id === id);
+        if (!snap) throw new Error('Snapshot not found');
+
+        const manifest = snap.manifest || [];
+        if (format === 'csv') {
+            const headers = 'File Name,Relative Path,Size Bytes,Modified Time\n';
+            const rows = manifest.map(f => `"${(f.name || '').replace(/"/g, '""')}","${(f.relativePath || '').replace(/"/g, '""')}",${f.size},"${f.mtime || ''}"`).join('\n');
+            return {
+                data: headers + rows,
+                mime: 'text/csv',
+                filename: `snapshot_${(snap.label || 'manifest').replace(/[^a-zA-Z0-9_-]/g, '_')}_${snap.id}.csv`
+            };
+        }
+
+        return {
+            data: JSON.stringify(snap, null, 2),
+            mime: 'application/json',
+            filename: `snapshot_${(snap.label || 'manifest').replace(/[^a-zA-Z0-9_-]/g, '_')}_${snap.id}.json`
         };
     }
 }

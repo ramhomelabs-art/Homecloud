@@ -1,0 +1,10 @@
+{
+  "autoSweepEnabled": true,
+  "intervalHours": 12,
+  "lastSweepTime": null,
+  "targetTiers": {
+    "HOT": "Master NVMe / Primary Uploads",
+    "WARM": "Fleet Secondary / HDDs",
+    "COLD": "S3 Glacier / R2 Cold Vault"
+  }
+}

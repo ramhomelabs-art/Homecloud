@@ -121,6 +121,60 @@ router.delete('/snapshots/:id', authenticateToken, requireRole(['Admin', 'Admini
     }
 });
 
+// GET /api/v1/tiering/config - Scheduler settings
+router.get('/config', authenticateToken, (req, res) => {
+    try {
+        res.json({ success: true, config: tieringService.getSettings() });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// POST /api/v1/tiering/config - Update scheduler settings
+router.post('/config', authenticateToken, requireRole(['Admin', 'Administrator', 'Operator']), (req, res) => {
+    try {
+        const updated = tieringService.updateSettings(req.body);
+        res.json({ success: true, config: updated, message: 'Tiering scheduler configuration updated' });
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+});
+
+// POST /api/v1/tiering/simulate - Dry run policy simulation
+router.post('/simulate', authenticateToken, async (req, res) => {
+    try {
+        const { candidate, targetId, path: customPath } = req.body;
+        const result = await tieringService.simulatePolicy(candidate, { targetId, path: customPath });
+        res.json({ success: true, ...result });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// POST /api/v1/tiering/dedup/reclaim - Reclaim space from duplicate files
+router.post('/dedup/reclaim', authenticateToken, requireRole(['Admin', 'Administrator', 'Operator']), async (req, res) => {
+    try {
+        const { targetId, path: customPath, strategy, groupHashes } = req.body;
+        const result = await tieringService.reclaimDeduplication({ targetId, path: customPath, strategy, groupHashes });
+        res.json({ success: true, ...result });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// GET /api/v1/tiering/snapshots/:id/export - Export snapshot manifest as JSON or CSV
+router.get('/snapshots/:id/export', authenticateToken, (req, res) => {
+    try {
+        const format = (req.query.format || 'json').toLowerCase();
+        const exportResult = tieringService.exportSnapshot(req.params.id, format);
+        res.setHeader('Content-Type', exportResult.mime);
+        res.setHeader('Content-Disposition', `attachment; filename="${exportResult.filename}"`);
+        res.send(exportResult.data);
+    } catch (e) {
+        res.status(404).json({ error: e.message });
+    }
+});
+
 // POST /api/v1/tiering/snapshots/:id/restore
 router.post('/snapshots/:id/restore', authenticateToken, requireRole(['Admin', 'Administrator', 'Operator']), (req, res) => {
     try {

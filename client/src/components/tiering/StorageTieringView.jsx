@@ -6,7 +6,8 @@ import {
     Play, Plus, RotateCcw, Camera, HardDrive, 
     Clock, CheckCircle2, AlertCircle, ArrowRight, 
     Sparkles, ShieldCheck, RefreshCw, Sliders, X, FileText,
-    Copy, Zap, FolderOpen, Folder, Eye, Search
+    Copy, Zap, FolderOpen, Folder, Eye, Search, Download, Check,
+    CheckSquare, ChevronRight, BarChart3, HelpCircle
 } from 'lucide-react';
 import FolderPickerModal from '../modals/FolderPickerModal';
 import ConfirmModal from '../modals/ConfirmModal';
@@ -44,6 +45,24 @@ const StorageTieringView = ({ showToast }) => {
     const [inspectingSnapshot, setInspectingSnapshot] = useState(null);
     const [manifestSearch, setManifestSearch] = useState('');
 
+    // Scheduler and Automation state
+    const [schedulerConfig, setSchedulerConfig] = useState({
+        autoSweepEnabled: true,
+        intervalHours: 12,
+        lastSweepTime: null,
+        nextSweepTime: null
+    });
+    const [updatingScheduler, setUpdatingScheduler] = useState(false);
+
+    // Deduplication Reclaim state
+    const [reclaimingDedup, setReclaimingDedup] = useState(false);
+    const [dedupStrategy, setDedupStrategy] = useState('keep_oldest');
+
+    // Policy Simulation / Dry Run state
+    const [simulatingPolicy, setSimulatingPolicy] = useState(false);
+    const [simulationResult, setSimulationResult] = useState(null);
+    const [simulatingPolicyId, setSimulatingPolicyId] = useState(null);
+
     // Form state for new policy
     const [formName, setFormName] = useState('');
     const [formPattern, setFormPattern] = useState('*.log,*.tmp');
@@ -76,16 +95,18 @@ const StorageTieringView = ({ showToast }) => {
     const loadAll = async (targetId = selectedTarget, pathVal = customPath) => {
         setLoading(true);
         try {
-            const [targetsRes, statsRes, polRes, snapRes] = await Promise.all([
+            const [targetsRes, statsRes, polRes, snapRes, configRes] = await Promise.all([
                 axios.get('/api/v1/tiering/targets', { headers: getHeaders() }),
                 axios.get(`/api/v1/tiering/stats?targetId=${encodeURIComponent(targetId)}&path=${encodeURIComponent(pathVal || '')}`, { headers: getHeaders() }),
                 axios.get('/api/v1/tiering/policies', { headers: getHeaders() }),
-                axios.get('/api/v1/tiering/snapshots', { headers: getHeaders() })
+                axios.get('/api/v1/tiering/snapshots', { headers: getHeaders() }),
+                axios.get('/api/v1/tiering/config', { headers: getHeaders() }).catch(() => ({ data: { config: null } }))
             ]);
             setTargets(targetsRes.data.targets || []);
             setStats(statsRes.data);
             setPolicies(polRes.data.policies || []);
             setSnapshots(snapRes.data.snapshots || []);
+            if (configRes?.data?.config) setSchedulerConfig(configRes.data.config);
         } catch (e) {
             if (showToast) showToast('Failed to load storage tiering data', 'error');
         } finally {
@@ -271,6 +292,117 @@ const StorageTieringView = ({ showToast }) => {
         });
     };
 
+    const handleToggleScheduler = async (enabled) => {
+        setUpdatingScheduler(true);
+        try {
+            const res = await axios.post('/api/v1/tiering/config', {
+                autoSweepEnabled: enabled
+            }, { headers: getHeaders() });
+            setSchedulerConfig(res.data.config);
+            if (showToast) showToast(`Automated Tiering Scheduler ${enabled ? 'Activated' : 'Paused'}`, 'success');
+        } catch (e) {
+            if (showToast) showToast('Failed to update scheduler: ' + (e.response?.data?.error || e.message), 'error');
+        } finally {
+            setUpdatingScheduler(false);
+        }
+    };
+
+    const handleChangeSweepInterval = async (hours) => {
+        setUpdatingScheduler(true);
+        try {
+            const res = await axios.post('/api/v1/tiering/config', {
+                intervalHours: parseInt(hours, 10)
+            }, { headers: getHeaders() });
+            setSchedulerConfig(res.data.config);
+            if (showToast) showToast(`Sweep schedule set to every ${hours} hours`, 'success');
+        } catch (e) {
+            if (showToast) showToast('Failed to update interval: ' + (e.response?.data?.error || e.message), 'error');
+        } finally {
+            setUpdatingScheduler(false);
+        }
+    };
+
+    const handleSimulatePolicy = async (policyCandidate, isExistingId = null) => {
+        if (isExistingId) setSimulatingPolicyId(isExistingId);
+        else setSimulatingPolicy(true);
+
+        try {
+            const res = await axios.post('/api/v1/tiering/simulate', {
+                candidate: policyCandidate,
+                targetId: selectedTarget,
+                path: customPath
+            }, { headers: getHeaders() });
+
+            setSimulationResult(res.data);
+            if (showToast) {
+                showToast(`Simulation: ${res.data.matchedCount} files (${formatBytes(res.data.matchedBytes)}) match this rule`, 'info');
+            }
+        } catch (e) {
+            if (showToast) showToast('Simulation failed: ' + (e.response?.data?.error || e.message), 'error');
+        } finally {
+            if (isExistingId) setSimulatingPolicyId(null);
+            else setSimulatingPolicy(false);
+        }
+    };
+
+    const handleReclaimDuplicates = (groupHash = null) => {
+        const wasted = groupHash 
+            ? (dedup?.duplicateGroups?.find(g => g.hash === groupHash)?.wastedBytes || 0)
+            : (dedup?.reclaimableBytes || 0);
+
+        setConfirmAction({
+            title: groupHash ? 'Reclaim Duplicate Files' : 'Reclaim All Duplicate Space',
+            message: `Are you sure you want to delete redundant duplicate copies to reclaim ${formatBytes(wasted)} of disk space? The original primary file will be safely preserved.`,
+            confirmText: `Reclaim ${formatBytes(wasted)}`,
+            type: 'primary',
+            onConfirm: async () => {
+                setReclaimingDedup(true);
+                try {
+                    const res = await axios.post('/api/v1/tiering/dedup/reclaim', {
+                        targetId: selectedTarget,
+                        path: customPath,
+                        strategy: dedupStrategy,
+                        groupHashes: groupHash ? [groupHash] : null
+                    }, { headers: getHeaders() });
+
+                    if (showToast) {
+                        showToast(`Successfully reclaimed ${formatBytes(res.data.reclaimedBytes)} across ${res.data.deletedFilesCount} redundant copies!`, 'success');
+                    }
+                    loadAll(selectedTarget, customPath);
+                    handleScanDedup();
+                } catch (e) {
+                    if (showToast) showToast('Reclaim failed: ' + (e.response?.data?.error || e.message), 'error');
+                } finally {
+                    setReclaimingDedup(false);
+                }
+            }
+        });
+    };
+
+    const handleExportSnapshot = (snapId, format = 'json') => {
+        const token = localStorage.getItem('token');
+        const url = `/api/v1/tiering/snapshots/${snapId}/export?format=${format}`;
+        
+        fetch(url, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {}
+        })
+        .then(res => res.blob())
+        .then(blob => {
+            const downloadUrl = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = downloadUrl;
+            a.download = `snapshot_${snapId}.${format}`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(downloadUrl);
+            if (showToast) showToast(`Snapshot manifest exported as ${format.toUpperCase()}`, 'success');
+        })
+        .catch(err => {
+            if (showToast) showToast('Failed to export snapshot: ' + err.message, 'error');
+        });
+    };
+
     return (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '24px', padding: '10px 0' }}>
             {/* Header */}
@@ -295,11 +427,103 @@ const StorageTieringView = ({ showToast }) => {
                         {runningSweep ? 'Sweeping Tiers...' : 'Run Tiering Sweep'}
                     </button>
                     <button
-                        onClick={() => setShowAddPolicy(true)}
+                        onClick={() => {
+                            setShowAddPolicy(true);
+                            setSimulationResult(null);
+                        }}
                         className="btn-secondary"
                         style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 16px', fontWeight: '800', borderRadius: '10px' }}
                     >
                         <Plus size={16} /> Add Rule
+                    </button>
+                </div>
+            </div>
+
+            {/* Automated Tiering Scheduler Daemon Controller */}
+            <div className="glass" style={{
+                padding: '14px 20px',
+                borderRadius: '14px',
+                background: 'var(--bg-surface-0)',
+                border: '1px solid var(--border-subtle)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '14px'
+            }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div style={{
+                        width: '10px',
+                        height: '10px',
+                        borderRadius: '50%',
+                        background: schedulerConfig.autoSweepEnabled ? '#10b981' : '#6b7280',
+                        boxShadow: schedulerConfig.autoSweepEnabled ? '0 0 10px #10b981' : 'none'
+                    }} />
+                    <div>
+                        <div style={{ fontSize: '13.5px', fontWeight: '800', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span>Automated Lifecycle Sweep Daemon:</span>
+                            <span style={{ color: schedulerConfig.autoSweepEnabled ? '#10b981' : 'var(--text-dim)' }}>
+                                {schedulerConfig.autoSweepEnabled ? 'ACTIVE & MONITORING' : 'PAUSED'}
+                            </span>
+                        </div>
+                        <div style={{ fontSize: '11.5px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                            {schedulerConfig.autoSweepEnabled ? (
+                                <>
+                                    Runs background sweep every <strong>{schedulerConfig.intervalHours || 12} hours</strong>
+                                    {schedulerConfig.nextSweepTime && ` • Next automatic run: ${new Date(schedulerConfig.nextSweepTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} (${new Date(schedulerConfig.nextSweepTime).toLocaleDateString()})`}
+                                </>
+                            ) : (
+                                'Background sweeps are paused. Tiers will only evaluate when triggered manually.'
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ fontSize: '11.5px', color: 'var(--text-dim)', fontWeight: '700' }}>Cadence:</span>
+                        <select
+                            value={schedulerConfig.intervalHours || 12}
+                            disabled={updatingScheduler}
+                            onChange={(e) => handleChangeSweepInterval(e.target.value)}
+                            style={{
+                                padding: '6px 10px',
+                                borderRadius: '8px',
+                                background: 'var(--bg-surface-2)',
+                                border: '1px solid var(--border-subtle)',
+                                color: 'var(--text-primary)',
+                                fontSize: '12px',
+                                fontWeight: '700',
+                                outline: 'none',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            <option value={1}>Every 1 Hour (Aggressive)</option>
+                            <option value={6}>Every 6 Hours</option>
+                            <option value={12}>Every 12 Hours (Recommended)</option>
+                            <option value={24}>Every 24 Hours (Daily)</option>
+                            <option value={168}>Every 7 Days (Weekly)</option>
+                        </select>
+                    </div>
+
+                    <button
+                        onClick={() => handleToggleScheduler(!schedulerConfig.autoSweepEnabled)}
+                        disabled={updatingScheduler}
+                        className="btn-secondary"
+                        style={{
+                            padding: '6px 12px',
+                            borderRadius: '8px',
+                            fontSize: '12px',
+                            fontWeight: '800',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            background: schedulerConfig.autoSweepEnabled ? 'rgba(239, 68, 68, 0.1)' : 'rgba(16, 185, 129, 0.15)',
+                            color: schedulerConfig.autoSweepEnabled ? '#ef4444' : '#10b981',
+                            border: `1px solid ${schedulerConfig.autoSweepEnabled ? 'rgba(239, 68, 68, 0.25)' : 'rgba(16, 185, 129, 0.3)'}`
+                        }}
+                    >
+                        {schedulerConfig.autoSweepEnabled ? 'Pause Daemon' : 'Enable Daemon'}
                     </button>
                 </div>
             </div>
@@ -434,6 +658,67 @@ const StorageTieringView = ({ showToast }) => {
                     </form>
                 )}
             </div>
+
+            {/* Visual Storage Tier Distribution Pipeline Bar */}
+            {(() => {
+                const hotB = stats?.tiers?.HOT?.bytes || 0;
+                const warmB = stats?.tiers?.WARM?.bytes || 0;
+                const coldB = stats?.tiers?.COLD?.bytes || 0;
+                const totalB = hotB + warmB + coldB;
+                const hotP = totalB > 0 ? Math.round((hotB / totalB) * 100) : 0;
+                const warmP = totalB > 0 ? Math.round((warmB / totalB) * 100) : 0;
+                const coldP = totalB > 0 ? Math.max(0, 100 - hotP - warmP) : 0;
+
+                return (
+                    <div className="glass" style={{ padding: '16px 20px', borderRadius: '16px', background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                            <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <BarChart3 size={14} color="var(--primary)" /> Cluster Tier Distribution Pipeline
+                            </span>
+                            <span style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-secondary)' }}>
+                                Managed Tiered Data: <strong style={{ color: 'var(--text-primary)' }}>{formatBytes(totalB)}</strong> ({stats?.totalFiles || 0} files)
+                            </span>
+                        </div>
+
+                        {/* Segmented Pipeline Bar */}
+                        <div style={{ width: '100%', height: '12px', borderRadius: '6px', background: 'var(--bg-surface-2)', overflow: 'hidden', display: 'flex', border: '1px solid var(--border-subtle)' }}>
+                            {totalB === 0 ? (
+                                <div style={{ width: '100%', background: 'var(--bg-surface-2)' }} />
+                            ) : (
+                                <>
+                                    <div style={{ width: `${hotP}%`, background: 'linear-gradient(90deg, #f59e0b, #fbbf24)', transition: 'width 0.4s' }} title={`Hot Tier: ${hotP}% (${formatBytes(hotB)})`} />
+                                    <div style={{ width: `${warmP}%`, background: 'linear-gradient(90deg, #6366f1, #818cf8)', transition: 'width 0.4s' }} title={`Warm Tier: ${warmP}% (${formatBytes(warmB)})`} />
+                                    <div style={{ width: `${coldP}%`, background: 'linear-gradient(90deg, #0ea5e9, #38bdf8)', transition: 'width 0.4s' }} title={`Cold Tier: ${coldP}% (${formatBytes(coldB)})`} />
+                                </>
+                            )}
+                        </div>
+
+                        {/* Pipeline Legend */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', fontSize: '11.5px', marginTop: '2px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '18px', flexWrap: 'wrap' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#f59e0b' }} />
+                                    <span style={{ color: 'var(--text-secondary)' }}>Hot NVMe:</span>
+                                    <strong style={{ color: '#f59e0b' }}>{hotP}% ({formatBytes(hotB)})</strong>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--primary)' }} />
+                                    <span style={{ color: 'var(--text-secondary)' }}>Warm Fleet:</span>
+                                    <strong style={{ color: 'var(--primary)' }}>{warmP}% ({formatBytes(warmB)})</strong>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#0ea5e9' }} />
+                                    <span style={{ color: 'var(--text-secondary)' }}>Cold Glacier:</span>
+                                    <strong style={{ color: '#0ea5e9' }}>{coldP}% ({formatBytes(coldB)})</strong>
+                                </div>
+                            </div>
+                            <span style={{ fontSize: '11px', color: 'var(--text-dim)', fontStyle: 'italic' }}>
+                                💡 Data automatically migrates down tiers as age increases
+                            </span>
+                        </div>
+                    </div>
+                );
+            })()}
 
             {/* Storage Tiers Pipeline Banner */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
@@ -611,6 +896,14 @@ const StorageTieringView = ({ showToast }) => {
                                         </span>
                                         <div style={{ display: 'flex', gap: '6px' }}>
                                             <button 
+                                                onClick={() => handleSimulatePolicy(p, p.id)}
+                                                disabled={simulatingPolicyId === p.id}
+                                                style={{ padding: '4px 8px', borderRadius: '6px', background: 'rgba(99, 102, 241, 0.12)', border: '1px solid rgba(99, 102, 241, 0.25)', fontSize: '11px', cursor: 'pointer', color: 'var(--primary)', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '4px' }}
+                                                title="Test policy against active target storage"
+                                            >
+                                                <Sparkles size={11} /> {simulatingPolicyId === p.id ? 'Testing...' : 'Impact Test'}
+                                            </button>
+                                            <button 
                                                 onClick={() => handleTogglePolicy(p)}
                                                 style={{ padding: '4px 8px', borderRadius: '6px', background: 'var(--bg-surface-2)', border: '1px solid var(--border-subtle)', fontSize: '11px', cursor: 'pointer', color: 'var(--text-primary)', fontWeight: '700' }}
                                             >
@@ -648,24 +941,67 @@ const StorageTieringView = ({ showToast }) => {
             {/* TAB 2: DEDUPLICATION */}
             {activeTab === 'dedup' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                    <div className="glass" style={{ padding: '20px', borderRadius: '16px', background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div className="glass" style={{ padding: '20px', borderRadius: '16px', background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
                         <div>
                             <h3 style={{ margin: '0 0 4px 0', fontSize: '17px', fontWeight: '800', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
                                 <Copy size={18} color="var(--primary)" /> Cluster Deduplication Analyzer
                             </h3>
                             <p style={{ margin: 0, fontSize: '12.5px', color: 'var(--text-secondary)' }}>
-                                Detect redundant copies across node disks with SHA-256 hash comparison
+                                Detect & safely consolidate duplicate files across node storage blocks using SHA-256 fingerprints
                             </p>
                         </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span style={{ fontSize: '11px', color: 'var(--text-dim)', fontWeight: '700' }}>Strategy:</span>
+                                <select
+                                    value={dedupStrategy}
+                                    onChange={(e) => setDedupStrategy(e.target.value)}
+                                    style={{
+                                        padding: '6px 10px',
+                                        borderRadius: '8px',
+                                        background: 'var(--bg-surface-2)',
+                                        border: '1px solid var(--border-subtle)',
+                                        color: 'var(--text-primary)',
+                                        fontSize: '12px',
+                                        fontWeight: '700',
+                                        outline: 'none',
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    <option value="keep_oldest">Keep Oldest (Original)</option>
+                                    <option value="keep_newest">Keep Newest (Recent)</option>
+                                </select>
+                            </div>
+
                             <div style={{ textAlign: 'right' }}>
                                 <span style={{ fontSize: '11px', color: 'var(--text-dim)', textTransform: 'uppercase', display: 'block' }}>Reclaimable Space</span>
                                 <strong style={{ fontSize: '18px', color: '#10b981' }}>{formatBytes(dedup?.reclaimableBytes || dedup?.totalWastedBytes || 0)}</strong>
                             </div>
+
+                            <button
+                                onClick={() => handleReclaimDuplicates()}
+                                disabled={reclaimingDedup || !(dedup?.reclaimableBytes || dedup?.totalWastedBytes)}
+                                className="btn-primary"
+                                style={{
+                                    padding: '8px 16px',
+                                    fontWeight: '800',
+                                    borderRadius: '8px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                    background: (dedup?.reclaimableBytes || dedup?.totalWastedBytes) ? 'var(--primary)' : 'var(--bg-surface-2)',
+                                    color: (dedup?.reclaimableBytes || dedup?.totalWastedBytes) ? '#fff' : 'var(--text-dim)'
+                                }}
+                                title="Safely delete redundant copies across all sets to reclaim disk space"
+                            >
+                                <Trash2 size={14} />
+                                {reclaimingDedup ? 'Reclaiming...' : `Reclaim Space (${formatBytes(dedup?.reclaimableBytes || dedup?.totalWastedBytes || 0)})`}
+                            </button>
+
                             <button
                                 onClick={handleScanDedup}
                                 disabled={scanningDedup}
-                                className="btn-primary"
+                                className="btn-secondary"
                                 style={{ padding: '8px 16px', fontWeight: '800', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}
                             >
                                 <RefreshCw size={14} className={scanningDedup ? 'spin-anim' : ''} />
@@ -686,22 +1022,71 @@ const StorageTieringView = ({ showToast }) => {
                                 const filesList = group.files || group.copies || [];
                                 return (
                                     <div key={idx} className="glass" style={{ padding: '16px', borderRadius: '12px', background: 'var(--bg-surface-0)', border: '1px solid var(--border-subtle)' }}>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '10px' }}>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                                 <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', background: 'var(--bg-surface-2)', padding: '2px 8px', borderRadius: '4px', color: 'var(--primary)' }}>
                                                     SHA-256: {group.hash}...
                                                 </span>
                                                 <span style={{ fontSize: '11.5px', color: 'var(--text-secondary)' }}>
-                                                    {group.duplicateCount || filesList.length} redundant copies ({formatBytes(group.wastedBytes || group.reclaimableBytes || 0)} wasted)
+                                                    {group.duplicateCount || filesList.length} copies ({formatBytes(group.wastedBytes || group.reclaimableBytes || 0)} redundant space)
                                                 </span>
                                             </div>
+
+                                            <button
+                                                onClick={() => handleReclaimDuplicates(group.hash)}
+                                                disabled={reclaimingDedup}
+                                                style={{
+                                                    padding: '5px 12px',
+                                                    borderRadius: '8px',
+                                                    background: 'rgba(239, 68, 68, 0.12)',
+                                                    border: '1px solid rgba(239, 68, 68, 0.3)',
+                                                    color: '#ef4444',
+                                                    fontSize: '11.5px',
+                                                    fontWeight: '800',
+                                                    cursor: 'pointer',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '6px'
+                                                }}
+                                                title="Reclaim space for this set only"
+                                            >
+                                                <Trash2 size={12} /> Reclaim {formatBytes(group.wastedBytes || group.reclaimableBytes || 0)}
+                                            </button>
                                         </div>
+
                                         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                                            {filesList.map((f, fi) => (
-                                                <span key={fi} style={{ fontSize: '11px', background: 'var(--bg-surface-2)', padding: '4px 10px', borderRadius: '6px', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}>
-                                                    📄 {f.name || f.relativePath} ({formatBytes(f.size)})
-                                                </span>
-                                            ))}
+                                            {filesList.map((f, fi) => {
+                                                const isPrimary = dedupStrategy === 'keep_newest' ? fi === filesList.length - 1 : fi === 0;
+                                                return (
+                                                    <span
+                                                        key={fi}
+                                                        style={{
+                                                            fontSize: '11px',
+                                                            background: isPrimary ? 'rgba(16, 185, 129, 0.1)' : 'var(--bg-surface-2)',
+                                                            padding: '4px 10px',
+                                                            borderRadius: '6px',
+                                                            border: `1px solid ${isPrimary ? 'rgba(16, 185, 129, 0.35)' : 'var(--border-subtle)'}`,
+                                                            color: isPrimary ? '#10b981' : 'var(--text-primary)',
+                                                            display: 'inline-flex',
+                                                            alignItems: 'center',
+                                                            gap: '6px'
+                                                        }}
+                                                    >
+                                                        <span>📄 {f.name || f.relativePath} ({formatBytes(f.size)})</span>
+                                                        <span style={{
+                                                            fontSize: '9.5px',
+                                                            fontWeight: '800',
+                                                            textTransform: 'uppercase',
+                                                            padding: '1px 5px',
+                                                            borderRadius: '4px',
+                                                            background: isPrimary ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.15)',
+                                                            color: isPrimary ? '#10b981' : '#ef4444'
+                                                        }}>
+                                                            {isPrimary ? 'Retained' : 'Redundant'}
+                                                        </span>
+                                                    </span>
+                                                );
+                                            })}
                                         </div>
                                     </div>
                                 );
@@ -892,9 +1277,52 @@ const StorageTieringView = ({ showToast }) => {
                                 <input className="m-input" placeholder="Optional rationale for this policy" value={formDesc} onChange={e => setFormDesc(e.target.value)} />
                             </div>
 
-                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '12px' }}>
-                                <button type="button" onClick={() => setShowAddPolicy(false)} className="btn-secondary" style={{ padding: '9px 18px', borderRadius: '10px', fontWeight: '700' }}>Cancel</button>
-                                <button type="submit" className="btn-primary" style={{ padding: '9px 20px', borderRadius: '10px', fontWeight: '800' }}>Save Tiering Rule</button>
+                            {/* Dry Run Simulation Result */}
+                            {simulationResult && (
+                                <div style={{ padding: '12px 14px', borderRadius: '12px', background: 'rgba(99, 102, 241, 0.12)', border: '1px solid rgba(99, 102, 241, 0.3)', fontSize: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <strong style={{ color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                            <Sparkles size={14} /> Dry Run Impact Result:
+                                        </strong>
+                                        <span style={{ color: 'var(--text-primary)', fontWeight: '800' }}>
+                                            {simulationResult.matchedCount} file(s) ({formatBytes(simulationResult.matchedBytes)})
+                                        </span>
+                                    </div>
+                                    <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '11.5px' }}>
+                                        Evaluated against current target <strong>{simulationResult.targetNode}</strong> ({simulationResult.totalEvaluated} files scanned).
+                                    </p>
+                                    {simulationResult.sampleFiles?.length > 0 && (
+                                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '4px' }}>
+                                            {simulationResult.sampleFiles.slice(0, 4).map((f, fi) => (
+                                                <span key={fi} style={{ fontSize: '10.5px', background: 'var(--bg-surface-2)', padding: '2px 8px', borderRadius: '4px', color: 'var(--text-primary)' }}>
+                                                    📄 {f.name} ({f.ageDays}d old)
+                                                </span>
+                                            ))}
+                                            {simulationResult.sampleFiles.length > 4 && (
+                                                <span style={{ fontSize: '10.5px', color: 'var(--text-dim)', alignSelf: 'center' }}>
+                                                    +{simulationResult.sampleFiles.length - 4} more
+                                                </span>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px', flexWrap: 'wrap', gap: '10px' }}>
+                                <button
+                                    type="button"
+                                    onClick={() => handleSimulatePolicy({ pattern: formPattern, sourceTier: formSource, targetTier: formTarget, daysThreshold: formDays })}
+                                    disabled={simulatingPolicy}
+                                    className="btn-secondary"
+                                    style={{ padding: '9px 14px', borderRadius: '10px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--primary)', border: '1px solid rgba(99, 102, 241, 0.3)' }}
+                                >
+                                    <Sparkles size={14} />
+                                    {simulatingPolicy ? 'Simulating...' : 'Preview Impact (Dry Run)'}
+                                </button>
+                                <div style={{ display: 'flex', gap: '10px' }}>
+                                    <button type="button" onClick={() => setShowAddPolicy(false)} className="btn-secondary" style={{ padding: '9px 18px', borderRadius: '10px', fontWeight: '700' }}>Cancel</button>
+                                    <button type="submit" className="btn-primary" style={{ padding: '9px 20px', borderRadius: '10px', fontWeight: '800' }}>Save Tiering Rule</button>
+                                </div>
                             </div>
                         </form>
                     </div>
@@ -996,7 +1424,27 @@ const StorageTieringView = ({ showToast }) => {
                             )}
                         </div>
 
-                        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px', flexWrap: 'wrap', gap: '10px' }}>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                                <button
+                                    type="button"
+                                    onClick={() => handleExportSnapshot(inspectingSnapshot.id, 'json')}
+                                    className="btn-secondary"
+                                    style={{ padding: '7px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '5px' }}
+                                    title="Export complete file manifest as JSON"
+                                >
+                                    <Download size={13} color="var(--primary)" /> Export JSON
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => handleExportSnapshot(inspectingSnapshot.id, 'csv')}
+                                    className="btn-secondary"
+                                    style={{ padding: '7px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '5px' }}
+                                    title="Export complete file manifest as CSV spreadsheet"
+                                >
+                                    <Download size={13} color="#10b981" /> Export CSV
+                                </button>
+                            </div>
                             <button
                                 onClick={() => setInspectingSnapshot(null)}
                                 className="btn-primary"
