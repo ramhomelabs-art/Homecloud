@@ -1,5 +1,5 @@
 {
-  "autoSweepEnabled": true,
+  "autoSweepEnabled": false,
   "intervalHours": 12,
   "lastSweepTime": null,
   "targetTiers": {

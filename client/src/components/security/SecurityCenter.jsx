@@ -17,7 +17,6 @@ import {
 } from 'recharts';
 import FolderPickerModal from '../modals/FolderPickerModal';
 import AttackGeoMap from './AttackGeoMap';
-import NetworkTrafficView from '../network/NetworkTrafficView';
 import ConfirmModal from '../modals/ConfirmModal';
 
 function SecurityCenter({ showToast: externalToast }) {
@@ -614,7 +613,6 @@ function SecurityCenter({ showToast: externalToast }) {
             <div style={styles.tabsRow}>
                 {[
                     { id: 'dashboard', label: 'SOC Dashboard', icon: <Activity size={16} /> },
-                    { id: 'traffic', label: 'Real-Time Traffic Analysis (DPI)', icon: <Activity size={16} /> },
                     { id: 'geomap', label: 'Threat Radar & Perimeter Firewall', icon: <Globe size={16} /> },
                     { id: 'agents', label: 'Cluster Agent Endpoints', icon: <Server size={16} /> },
                     { id: 'scanner', label: 'On-Demand Scanner', icon: <Play size={16} /> },
@@ -1621,14 +1619,6 @@ function SecurityCenter({ showToast: externalToast }) {
             )}
             </AnimatePresence>
 
-            {/* TAB CONTENT: REAL-TIME TRAFFIC ANALYSIS (DPI) */}
-            <AnimatePresence mode="wait">
-            {activeTab === 'traffic' && (
-                <motion.div key="traffic" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.35 }}>
-                    <NetworkTrafficView showToast={showToast} />
-                </motion.div>
-            )}
-            </AnimatePresence>
 
             {/* TAB CONTENT: THREAT RADAR & PERIMETER FIREWALL */}
             <AnimatePresence mode="wait">
