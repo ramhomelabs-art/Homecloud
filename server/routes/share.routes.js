@@ -47,22 +47,26 @@ const isShareAuthorized = (req, share) => {
     const authHeader = req.headers['authorization'];
     const bearerToken = (authHeader && authHeader.startsWith('Bearer ')) ? authHeader.split(' ')[1] : null;
     if (bearerToken) {
-        if (bearerToken === share.token || bearerToken === share.id) return true;
         try {
             const decoded = jwt.verify(bearerToken, process.env.JWT_SECRET);
-            if (decoded && (decoded.shareId === share.id || decoded.shareId === share.token || decoded.token === share.token)) return true;
+            if (decoded && (decoded.shareId === share.id || decoded.shareId === share.token || decoded.token === share.token) && decoded.authorized === true) return true;
         } catch (_) {}
     }
 
-    // 2. Check query token
-    if (req.query.token && (req.query.token === share.token || req.query.token === share.id)) return true;
+    // 2. Check query auth_token or token (for direct video/stream/download requests)
+    const queryJwt = req.query.auth_token || req.query.signedToken || req.query.token;
+    if (queryJwt) {
+        try {
+            const decoded = jwt.verify(queryJwt, process.env.JWT_SECRET);
+            if (decoded && (decoded.shareId === share.id || decoded.shareId === share.token || decoded.token === share.token) && decoded.authorized === true) return true;
+        } catch (_) {}
+    }
 
     // 3. Check cookie token
     const cookieToken = getCookie(req, `share_auth_${share.id}`) || 
                         getCookie(req, `share_auth_${share.token}`) || 
                         getCookie(req, `share_auth_${(share.id || '').replace(/-/g, '')}`);
     if (cookieToken) {
-        if (cookieToken === 'true' || cookieToken === share.token || cookieToken === share.id) return true;
         try {
             const decoded = jwt.verify(cookieToken, process.env.JWT_SECRET);
             if (decoded && (decoded.shareId === share.id || decoded.shareId === share.token) && decoded.authorized === true) return true;
@@ -601,9 +605,16 @@ router.post('/auth/:token', async (req, res) => {
             // Success - clear lockout record
             authAttempts.delete(lockKey);
             await logAccess(share.id, req, 'auth_password');
-            const signedToken = jwt.sign({ shareId: share.id, authorized: true }, process.env.JWT_SECRET, { expiresIn: '24h' });
-            res.setHeader('Set-Cookie', `share_auth_${share.id}=${signedToken}; Path=/; HttpOnly; Max-Age=86400; SameSite=Lax`);
-            return res.json({ success: true, token: share.token });
+            const signedToken = jwt.sign({ shareId: share.id, token: share.token, authorized: true }, process.env.JWT_SECRET, { expiresIn: '24h' });
+            const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https' || (req.headers['cf-visitor'] && req.headers['cf-visitor'].includes('https'));
+            const cookieOptions = isHttps
+                ? 'Path=/; HttpOnly; Max-Age=86400; SameSite=None; Secure'
+                : 'Path=/; HttpOnly; Max-Age=86400; SameSite=Lax';
+            res.setHeader('Set-Cookie', [
+                `share_auth_${share.id}=${signedToken}; ${cookieOptions}`,
+                `share_auth_${share.token}=${signedToken}; ${cookieOptions}`
+            ]);
+            return res.json({ success: true, token: share.token, signedToken });
         }
 
         // Email OTP — request OTP
@@ -640,9 +651,16 @@ router.post('/auth/:token', async (req, res) => {
 
             otpStore.delete(`${share.token}:${email}`);
             await logAccess(share.id, req, 'auth_otp');
-            const signedToken = jwt.sign({ shareId: share.id, authorized: true }, process.env.JWT_SECRET, { expiresIn: '24h' });
-            res.setHeader('Set-Cookie', `share_auth_${share.id}=${signedToken}; Path=/; HttpOnly; Max-Age=86400; SameSite=Lax`);
-            return res.json({ success: true, token: share.token });
+            const signedToken = jwt.sign({ shareId: share.id, token: share.token, authorized: true }, process.env.JWT_SECRET, { expiresIn: '24h' });
+            const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https' || (req.headers['cf-visitor'] && req.headers['cf-visitor'].includes('https'));
+            const cookieOptions = isHttps
+                ? 'Path=/; HttpOnly; Max-Age=86400; SameSite=None; Secure'
+                : 'Path=/; HttpOnly; Max-Age=86400; SameSite=Lax';
+            res.setHeader('Set-Cookie', [
+                `share_auth_${share.id}=${signedToken}; ${cookieOptions}`,
+                `share_auth_${share.token}=${signedToken}; ${cookieOptions}`
+            ]);
+            return res.json({ success: true, token: share.token, signedToken });
         }
 
         res.status(400).json({ error: 'Invalid auth request' });

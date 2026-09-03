@@ -203,7 +203,11 @@ const GuestPortal = ({ shareId, showToast }) => {
         });
 
         try {
+            const guestTok = localStorage.getItem('guestToken');
+            const headers = guestTok ? { Authorization: `Bearer ${guestTok}` } : {};
             const r = await axios.post('/api/share/stream', { token: shareId, filePath: item.path || '' }, {
+                headers,
+                withCredentials: true,
                 responseType: 'blob',
                 onDownloadProgress: (progressEvent) => {
                     const loaded = progressEvent.loaded || 0;
@@ -280,7 +284,10 @@ const GuestPortal = ({ shareId, showToast }) => {
         setSubmitting(true); setAuthErr('');
         try {
             const authPayload = await computePasskeyDigest(password, shareId);
-            await axios.post(`/api/share/auth/${shareId}`, authPayload);
+            const res = await axios.post(`/api/share/auth/${shareId}`, authPayload, { withCredentials: true });
+            if (res.data?.signedToken) {
+                localStorage.setItem('guestToken', res.data.signedToken);
+            }
             setAuthed(true); setStep('authorized');
         } catch (e) {
             setAuthErr(String(e.response?.data?.error || 'Incorrect password'));
@@ -291,7 +298,7 @@ const GuestPortal = ({ shareId, showToast }) => {
         e.preventDefault();
         setSubmitting(true); setAuthErr('');
         try {
-            await axios.post(`/api/share/auth/${shareId}`, { email });
+            await axios.post(`/api/share/auth/${shareId}`, { email }, { withCredentials: true });
             setStep('otp_code');
         } catch (e) {
             setAuthErr(String(e.response?.data?.error || 'Failed to send OTP'));
@@ -302,7 +309,10 @@ const GuestPortal = ({ shareId, showToast }) => {
         e.preventDefault();
         setSubmitting(true); setAuthErr('');
         try {
-            await axios.post(`/api/share/auth/${shareId}`, { email, otpCode: otp });
+            const res = await axios.post(`/api/share/auth/${shareId}`, { email, otpCode: otp }, { withCredentials: true });
+            if (res.data?.signedToken) {
+                localStorage.setItem('guestToken', res.data.signedToken);
+            }
             setAuthed(true); setStep('authorized');
         } catch (e) {
             setAuthErr(String(e.response?.data?.error || 'Invalid OTP'));

@@ -48,6 +48,7 @@ const UploadPortal = ({ shareId }) => {
     const [password, setPassword] = useState('');
     const [showPass, setShowPass] = useState(false);
     const [email, setEmail] = useState('');
+    const [authToken, setAuthToken] = useState(() => sessionStorage.getItem(`uploadToken_${shareId}`) || '');
     const [otp, setOtp] = useState('');
     const [authErr, setAuthErr] = useState('');
     const [submittingAuth, setSubmittingAuth] = useState(false);
@@ -92,9 +93,16 @@ const UploadPortal = ({ shareId }) => {
         const formData = new FormData();
         files.forEach(f => formData.append('files', f));
 
+        const uploadUrl = `/api/share/upload/${shareId}${authToken ? `?auth_token=${encodeURIComponent(authToken)}` : ''}`;
+        const headers = { 
+            'Content-Type': 'multipart/form-data',
+            ...(authToken ? { Authorization: `Bearer ${authToken}` } : {})
+        };
+
         try {
-            await axios.post(`/api/share/upload/${shareId}`, formData, {
-                headers: { 'Content-Type': 'multipart/form-data' },
+            await axios.post(uploadUrl, formData, {
+                headers,
+                withCredentials: true,
                 onUploadProgress: (p) => {
                     if (p.total) {
                         const pct = Math.round((p.loaded * 100) / p.total);
@@ -139,7 +147,11 @@ const UploadPortal = ({ shareId }) => {
         setSubmittingAuth(true); setAuthErr('');
         try {
             const authPayload = await computePasskeyDigest(password, shareId);
-            await axios.post(`/api/share/auth/${shareId}`, authPayload);
+            const res = await axios.post(`/api/share/auth/${shareId}`, authPayload, { withCredentials: true });
+            if (res.data?.signedToken) {
+                setAuthToken(res.data.signedToken);
+                sessionStorage.setItem(`uploadToken_${shareId}`, res.data.signedToken);
+            }
             if (info?.emailRequired) setStep('otp_email');
             else setStep('authorized');
         } catch (e) {
@@ -151,7 +163,7 @@ const UploadPortal = ({ shareId }) => {
         e.preventDefault();
         setSubmittingAuth(true); setAuthErr('');
         try {
-            await axios.post(`/api/share/auth/${shareId}`, { email });
+            await axios.post(`/api/share/auth/${shareId}`, { email }, { withCredentials: true });
             setStep('otp_code');
         } catch (e) {
             setAuthErr(String(e.response?.data?.error || 'Failed to send OTP code'));
@@ -162,7 +174,11 @@ const UploadPortal = ({ shareId }) => {
         e.preventDefault();
         setSubmittingAuth(true); setAuthErr('');
         try {
-            await axios.post(`/api/share/auth/${shareId}`, { email, otpCode: otp });
+            const res = await axios.post(`/api/share/auth/${shareId}`, { email, otpCode: otp }, { withCredentials: true });
+            if (res.data?.signedToken) {
+                setAuthToken(res.data.signedToken);
+                sessionStorage.setItem(`uploadToken_${shareId}`, res.data.signedToken);
+            }
             setStep('authorized');
         } catch (e) {
             setAuthErr(String(e.response?.data?.error || 'Invalid or expired OTP code'));

@@ -194,11 +194,32 @@ const deleteSmbFile = async (targetPath) => {
     const uncShare = `//${host}/${shareName}`;
     const internalPath = parts.slice(2).join('/');
 
+    // 1. Windows Native OS Direct Filesystem Access
+    if (process.platform === 'win32') {
+        const uncBackslash = `\\\\${host}\\${shareName}${internalPath ? '\\' + internalPath.replace(/\//g, '\\') : ''}`;
+        const uncSlash = `//${host}/${shareName}${internalPath ? '/' + internalPath : ''}`;
+        const pToDelete = fs.existsSync(uncBackslash) ? uncBackslash : (fs.existsSync(uncSlash) ? uncSlash : null);
+        if (pToDelete) {
+            try {
+                const st = fs.statSync(pToDelete);
+                if (st.isDirectory()) {
+                    fs.rmSync(pToDelete, { recursive: true, force: true });
+                } else {
+                    fs.unlinkSync(pToDelete);
+                }
+                return true;
+            } catch (fsErr) {
+                logger.warn(`[deleteSmbFile] Windows fs delete fallback to smbclient: ${fsErr.message}`);
+            }
+        }
+    }
+
     const matchedShare = sharesRes.rows.find(row => {
         let cleanRow = (row.path || '').replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
         const rowParts = cleanRow.split('/');
-        return rowParts[0]?.toLowerCase() === host.toLowerCase() && 
-               (rowParts[1] || '').toLowerCase() === shareName.toLowerCase();
+        return (rowParts[0]?.toLowerCase() === host.toLowerCase() && 
+               (rowParts[1] || '').toLowerCase() === shareName.toLowerCase()) ||
+               (row.label && row.label.toLowerCase() === shareName.toLowerCase());
     });
 
     const user = matchedShare?.username || '';
@@ -571,6 +592,48 @@ const listSmbFiles = async (sharePath, subPath = '', username = '', password = '
     let internalSub = (subPath || '').replace(/^[\\\/]+/, '').replace(/\\/g, '/');
     if (internalSub.startsWith(shareName + '/')) {
         internalSub = internalSub.slice(shareName.length + 1);
+    }
+
+    // 1. Windows Native OS Direct Filesystem Access
+    if (process.platform === 'win32') {
+        if (username && password) {
+            try {
+                const netCmd = `net use "\\\\${host}\\${shareName}" /user:"${username.replace(/"/g, '')}" "${password.replace(/"/g, '')}" /persistent:no`;
+                await new Promise(r => exec(netCmd, { timeout: 4000 }, () => r()));
+            } catch (_) {}
+        }
+        const uncBackslash = `\\\\${host}\\${shareName}${internalSub ? '\\' + internalSub.replace(/\//g, '\\') : ''}`;
+        const uncSlash = `//${host}/${shareName}${internalSub ? '/' + internalSub : ''}`;
+        const targetPath = fs.existsSync(uncBackslash) ? uncBackslash : (fs.existsSync(uncSlash) ? uncSlash : null);
+
+        if (targetPath) {
+            try {
+                const entries = await fs.promises.readdir(targetPath, { withFileTypes: true });
+                const files = [];
+                for (const entry of entries) {
+                    if (['.', '..'].includes(entry.name)) continue;
+                    const fullItemPath = `${targetPath}\\${entry.name}`;
+                    let size = 0;
+                    let mtime = new Date();
+                    try {
+                        const st = fs.statSync(fullItemPath);
+                        size = st.size;
+                        mtime = st.mtime;
+                    } catch (_) {}
+
+                    files.push({
+                        name: entry.name,
+                        isDirectory: entry.isDirectory(),
+                        size: entry.isDirectory() ? 0 : size,
+                        modified: mtime,
+                        path: fullItemPath
+                    });
+                }
+                return files;
+            } catch (winErr) {
+                logger.warn(`[listSmbFiles] Windows direct read fallback: ${winErr.message}`);
+            }
+        }
     }
 
     const cdCmd = internalSub ? `cd "${internalSub.replace(/"/g, '')}"; ` : '';
@@ -1085,6 +1148,17 @@ router.delete('/delete', requireRole(['Admin', 'Operator', 'Power User', 'User']
         }
     }
 
+    const isSmb = targetPath && (targetPath.startsWith('\\\\') || targetPath.startsWith('//') || targetPath.startsWith('smb://'));
+    if (isSmb) {
+        try {
+            await deleteSmbFile(targetPath);
+            clearDirSizeCache();
+            return res.json({ message: 'Deleted on SMB share successfully' });
+        } catch (e) {
+            return res.status(500).json({ error: `SMB delete failed: ${e.message}` });
+        }
+    }
+
     try {
         await moveToTrash(targetPath, req.user.id, req);
         clearDirSizeCache();
@@ -1112,10 +1186,15 @@ router.post('/delete/batch', requireRole(['Admin', 'Operator', 'Power User', 'Us
 
     try {
         for (const p of paths) {
-            await moveToTrash(p, req.user.id, req);
+            const isSmb = p && (p.startsWith('\\\\') || p.startsWith('//') || p.startsWith('smb://'));
+            if (isSmb) {
+                await deleteSmbFile(p);
+            } else {
+                await moveToTrash(p, req.user.id, req);
+            }
         }
         clearDirSizeCache();
-        res.json({ message: 'Batch moved to trash successfully' });
+        res.json({ message: 'Batch deleted successfully' });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -2110,16 +2189,27 @@ router.get('/download', async (req, res) => {
         const agent = clusterService.agents[agentId];
         if (agent.status !== 'approved') return res.status(403).json({ error: 'Agent not approved' });
         try {
+            const proxyHeaders = {};
+            if (req.headers.range) proxyHeaders['range'] = req.headers.range;
+            if (req.headers['if-range']) proxyHeaders['if-range'] = req.headers['if-range'];
+
+            const agentUrl = `${agent.url}/api/v1/files/download?path=${encodeURIComponent(filePath)}${req.query.intent ? `&intent=${encodeURIComponent(req.query.intent)}` : ''}`;
             const resp = await axios({
                 method: 'get',
-                url: `${agent.url}/api/v1/files/download?path=${encodeURIComponent(filePath)}`,
-                responseType: 'stream'
+                url: agentUrl,
+                headers: proxyHeaders,
+                responseType: 'stream',
+                validateStatus: (status) => status >= 200 && status < 400
             });
+
+            res.status(resp.status);
             if (resp.headers['content-type']) res.setHeader('Content-Type', resp.headers['content-type']);
             if (resp.headers['content-disposition']) res.setHeader('Content-Disposition', resp.headers['content-disposition']);
+            if (resp.headers['content-range']) res.setHeader('Content-Range', resp.headers['content-range']);
+            if (resp.headers['content-length']) res.setHeader('Content-Length', resp.headers['content-length']);
             res.setHeader('Accept-Ranges', 'bytes');
             
-            if (req.query.intent !== 'stream') {
+            if (req.query.intent !== 'stream' && resp.status === 200) {
                 notificationService.sendInAppAlert(
                     'File Downloaded (Remote) 📥',
                     `File: ${path.basename(filePath)}\nNode: ${agent.hostname}`,
@@ -2515,20 +2605,25 @@ router.post('/duplicates/scan', async (req, res) => {
 router.post('/storage/tree', async (req, res) => {
     try {
         const reqPath = req.body.path || '';
-        let physPath;
-        if (reqPath && (path.isAbsolute(reqPath) || /^[a-zA-Z]:/i.test(reqPath))) {
-            physPath = reqPath;
-            if (/^[a-zA-Z]:$/i.test(physPath)) physPath += path.sep;
-        } else {
-            physPath = storageProvider.resolvePath(reqPath || '');
-        }
+        const agentId = req.body.agentId || req.query.agentId;
 
-        if (!fs.existsSync(physPath)) {
-            try {
-                fs.mkdirSync(physPath, { recursive: true });
-            } catch (_) {
-                physPath = storageProvider.resolvePath('');
-                if (!fs.existsSync(physPath)) fs.mkdirSync(physPath, { recursive: true });
+        // 1. Agent Proxying if routed to remote cluster agent
+        const targetAgentId = resolveAgentId(agentId, reqPath);
+        if (targetAgentId && clusterService.agents[targetAgentId]) {
+            const agent = clusterService.agents[targetAgentId];
+            if (agent.status === 'approved') {
+                try {
+                    const masterKey = process.env.AGENT_KEY || '';
+                    const resp = await axios.post(`${agent.url}/api/v1/files/storage/tree`, {
+                        path: reqPath
+                    }, {
+                        headers: { Authorization: `Bearer ${masterKey}` },
+                        timeout: 15000
+                    });
+                    return res.json(resp.data);
+                } catch (agentErr) {
+                    logger.warn(`[Files Routes] Failed to proxy storage tree from agent ${agent.url}: ${agentErr.message}`);
+                }
             }
         }
 
@@ -2563,7 +2658,7 @@ router.post('/storage/tree', async (req, res) => {
                 for (const entry of entries) {
                     const fullPath = path.join(dir, entry.name);
                     const lower = entry.name.toLowerCase();
-                    if (['$recycle.bin', 'system volume information', 'node_modules', '.git'].includes(lower)) continue;
+                    if (['$recycle.bin', 'system volume information', 'node_modules', '.git', 'windows', 'program files', 'program files (x86)', 'appdata', 'programdata'].includes(lower)) continue;
 
                     if (entry.isDirectory()) {
                         if (depth < 3) {
@@ -2624,6 +2719,195 @@ router.post('/storage/tree', async (req, res) => {
             };
         };
 
+        // 2. Direct SMB / CIFS Network Share Treemap Bridge
+        const isSmb = reqPath && (reqPath.startsWith('\\\\') || reqPath.startsWith('//') || reqPath.startsWith('smb://'));
+        if (isSmb) {
+            let clean = reqPath.trim().replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
+            const parts = clean.split('/');
+            const host = parts[0];
+            const shareName = parts[1] || '';
+            const internalSub = parts.slice(2).join('/');
+
+            const sharesRes = await db.query('SELECT * FROM network_shares');
+
+            // If user opened host root e.g. //192.168.1.50
+            if (!shareName) {
+                const hostShares = sharesRes.rows.filter(row => {
+                    let cleanRow = (row.path || '').replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
+                    const rowParts = cleanRow.split('/');
+                    return rowParts[0]?.toLowerCase() === host.toLowerCase();
+                });
+
+                const children = hostShares.map(s => ({
+                    name: s.label || s.path.split(/[\\/]/).pop(),
+                    path: s.path,
+                    isDirectory: true,
+                    size: 0,
+                    fileCount: 0
+                }));
+
+                return res.json({
+                    path: reqPath,
+                    name: host,
+                    totalSize: 0,
+                    fileCount: 0,
+                    typeCategories,
+                    topLargestFiles: [],
+                    children
+                });
+            }
+
+            // Retrieve credentials for matched share
+            const matchedShare = sharesRes.rows.find(row => {
+                let cleanRow = (row.path || '').replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
+                const rowParts = cleanRow.split('/');
+                return (rowParts[0]?.toLowerCase() === host.toLowerCase() && 
+                       (rowParts[1] || '').toLowerCase() === shareName.toLowerCase()) ||
+                       (row.label && row.label.toLowerCase() === shareName.toLowerCase());
+            });
+
+            const user = matchedShare?.username || '';
+            let pass = '';
+            if (matchedShare?.password) {
+                try { pass = cryptoHelper.decrypt(matchedShare.password); } catch (e) { pass = matchedShare.password; }
+            }
+
+            // A) Test if accessible directly via OS filesystem (Windows UNC or mounted cifs)
+            const uncBackslash = `\\\\${host}\\${shareName}${internalSub ? '\\' + internalSub.replace(/\//g, '\\') : ''}`;
+            const uncSlash = `//${host}/${shareName}${internalSub ? '/' + internalSub : ''}`;
+
+            let fsAccessible = false;
+            let targetFsPath = uncBackslash;
+
+            if (process.platform === 'win32') {
+                if (user && pass) {
+                    try {
+                        const netCmd = `net use "\\\\${host}\\${shareName}" /user:"${user.replace(/"/g, '')}" "${pass.replace(/"/g, '')}" /persistent:no`;
+                        await new Promise(r => exec(netCmd, { timeout: 4000 }, () => r()));
+                    } catch (_) {}
+                }
+                if (fs.existsSync(uncBackslash)) {
+                    fsAccessible = true;
+                    targetFsPath = uncBackslash;
+                } else if (fs.existsSync(uncSlash)) {
+                    fsAccessible = true;
+                    targetFsPath = uncSlash;
+                }
+            } else {
+                if (fs.existsSync(uncSlash)) {
+                    fsAccessible = true;
+                    targetFsPath = uncSlash;
+                }
+            }
+
+            if (fsAccessible) {
+                const tree = scanTree(targetFsPath, 0);
+                topFiles.sort((a, b) => b.size - a.size);
+                return res.json({
+                    path: reqPath,
+                    name: internalSub ? path.basename(targetFsPath) : (matchedShare?.label || shareName),
+                    totalSize: tree.size,
+                    fileCount: tree.fileCount,
+                    children: tree.children,
+                    topLargestFiles: topFiles.slice(0, 50),
+                    typeCategories
+                });
+            }
+
+            // B) Protocol-level recursive scan via listSmbFiles (cross-platform fallback)
+            const smbChildren = [];
+            const scanSmbLevel = async (sub, depth = 0) => {
+                if (depth > 2) return { size: 0, count: 0 };
+                let currentTotal = 0;
+                let currentCount = 0;
+
+                try {
+                    const items = await listSmbFiles(reqPath, sub, user, pass);
+                    for (const item of items) {
+                        const ext = item.name.split('.').pop().toLowerCase();
+                        const category = item.isDirectory ? 'other' : categorize(ext);
+
+                        if (item.isDirectory) {
+                            const nextSub = sub ? `${sub}/${item.name}` : item.name;
+                            const subResult = await scanSmbLevel(nextSub, depth + 1);
+                            currentTotal += subResult.size;
+                            currentCount += subResult.count;
+
+                            if (depth === 0) {
+                                smbChildren.push({
+                                    name: item.name,
+                                    path: item.path,
+                                    isDirectory: true,
+                                    size: subResult.size,
+                                    fileCount: subResult.count,
+                                    children: []
+                                });
+                            }
+                        } else {
+                            const size = item.size || 0;
+                            currentTotal += size;
+                            currentCount += 1;
+                            typeCategories[category] += size;
+
+                            topFiles.push({
+                                name: item.name,
+                                path: item.path,
+                                size,
+                                category,
+                                mtime: item.modified
+                            });
+
+                            if (depth === 0) {
+                                smbChildren.push({
+                                    name: item.name,
+                                    path: item.path,
+                                    isDirectory: false,
+                                    size,
+                                    category,
+                                    mtime: item.modified
+                                });
+                            }
+                        }
+                    }
+                } catch (e) {
+                    logger.warn(`[SMB Tree] Error scanning subpath "${sub}": ${e.message}`);
+                }
+
+                return { size: currentTotal, count: currentCount };
+            };
+
+            const scanRes = await scanSmbLevel(internalSub, 0);
+            topFiles.sort((a, b) => b.size - a.size);
+
+            return res.json({
+                path: reqPath,
+                name: internalSub ? path.basename(internalSub) : (matchedShare?.label || shareName),
+                totalSize: scanRes.size,
+                fileCount: scanRes.count,
+                children: smbChildren.sort((a, b) => b.size - a.size),
+                topLargestFiles: topFiles.slice(0, 50),
+                typeCategories
+            });
+        }
+
+        // 3. Local Host Filesystem Scan
+        let physPath;
+        if (reqPath && (path.isAbsolute(reqPath) || /^[a-zA-Z]:/i.test(reqPath))) {
+            physPath = reqPath;
+            if (/^[a-zA-Z]:$/i.test(physPath)) physPath += path.sep;
+        } else {
+            physPath = storageProvider.resolvePath(reqPath || '');
+        }
+
+        if (!fs.existsSync(physPath)) {
+            try {
+                fs.mkdirSync(physPath, { recursive: true });
+            } catch (_) {
+                physPath = storageProvider.resolvePath('');
+                if (!fs.existsSync(physPath)) fs.mkdirSync(physPath, { recursive: true });
+            }
+        }
+
         const tree = scanTree(physPath, 0);
         topFiles.sort((a, b) => b.size - a.size);
 
@@ -2633,7 +2917,7 @@ router.post('/storage/tree', async (req, res) => {
             totalSize: tree.size,
             fileCount: tree.fileCount,
             children: tree.children,
-            topLargestFiles: topFiles.slice(0, 25),
+            topLargestFiles: topFiles.slice(0, 50),
             typeCategories
         });
     } catch (err) {

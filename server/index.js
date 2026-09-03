@@ -171,7 +171,8 @@ app.use(cors((req, callback) => {
         }
     });
 }));
-app.use(bodyParser.json());
+app.use(bodyParser.json({ limit: '50mb' }));
+app.use(bodyParser.urlencoded({ extended: true, limit: '50mb' }));
 
 // --- ENTERPRISE FIREWALL & WAF DEEP INSPECTION ---
 app.use(firewallMiddleware);

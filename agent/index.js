@@ -35,16 +35,25 @@ const agentAuth = (req, res, next) => {
 
 app.use('/api', agentAuth);
 
-// Dynamic drive and mount discovery
+// Dynamic drive and mount discovery with high-speed caching
+let cachedDrives = null;
+let lastDriveCheck = 0;
+const DRIVE_CACHE_TTL = 60000; // Cache drive paths for 60 seconds
+
 const getAvailableDrives = () => {
     const custom = (process.env.EXPOSED_DRIVES || '').split(',').map(d => d.trim()).filter(Boolean);
     if (custom.length > 0) return custom;
 
+    const now = Date.now();
+    if (cachedDrives && (now - lastDriveCheck < DRIVE_CACHE_TTL)) {
+        return cachedDrives;
+    }
+
     const detected = [];
     if (os.platform() === 'win32') {
         try {
-            // Auto-detect accessible Windows logical drives A:\ to Z:\
-            for (let i = 65; i <= 90; i++) {
+            // Auto-detect accessible Windows logical drives C:\ to Z:\ (skip A: and B: floppy/legacy)
+            for (let i = 67; i <= 90; i++) {
                 const letter = String.fromCharCode(i);
                 const drivePath = `${letter}:\\`;
                 try {
@@ -73,6 +82,9 @@ const getAvailableDrives = () => {
             });
         } catch (e) {}
     }
+
+    cachedDrives = detected;
+    lastDriveCheck = now;
     return detected;
 };
 
@@ -88,13 +100,13 @@ const logToBuffer = (level, message) => {
     if (logBuffer.length > 100) logBuffer.shift();
 };
 
-// Security Check: Ensure requests are within exposed drives
+// Security Check: Ensure requests are within exposed drives (cached fast path)
 const isPathAllowed = (targetPath) => {
     if (!targetPath) return false;
     try {
-        EXPOSED_DRIVES = getAvailableDrives();
+        const drives = getAvailableDrives();
         const resolvedTarget = path.resolve(targetPath).toLowerCase();
-        return EXPOSED_DRIVES.some(drive => {
+        return drives.some(drive => {
             const resolvedDrive = path.resolve(drive).toLowerCase();
             return resolvedTarget.startsWith(resolvedDrive);
         });
@@ -241,23 +253,38 @@ getCPUUsage(); // Initialize
 
 // ─── TELEMETRY & LOGS ENDPOINTS ──────────────────────────────────────────────
 
-// Local storage & CPU/RAM metrics
+// Local storage & CPU/RAM metrics with 15s disk space caching
+let cachedDiskSpace = null;
+let lastDiskSpaceCheck = 0;
+const DISK_SPACE_CACHE_TTL = 15000;
+
 app.get('/api/storage/local', async (req, res) => {
     try {
-        const disks = [];
-        for (const d of EXPOSED_DRIVES) {
-            try {
-                const space = await checkDiskSpace(d);
-                disks.push({
-                    mount: d,
-                    size: space.size,
-                    free: space.free,
-                    used: space.size - space.free,
-                    percentage: Math.round(((space.size - space.free) / space.size) * 100)
-                });
-            } catch (err) {
-                logToBuffer('warn', `Failed to check disk space for ${d}: ${err.message}`);
-            }
+        const now = Date.now();
+        let disks = [];
+
+        if (cachedDiskSpace && (now - lastDiskSpaceCheck < DISK_SPACE_CACHE_TTL)) {
+            disks = cachedDiskSpace;
+        } else {
+            const exposed = getAvailableDrives();
+            const diskPromises = exposed.map(async (d) => {
+                try {
+                    const space = await checkDiskSpace(d);
+                    return {
+                        mount: d,
+                        size: space.size,
+                        free: space.free,
+                        used: space.size - space.free,
+                        percentage: Math.round(((space.size - space.free) / space.size) * 100)
+                    };
+                } catch (err) {
+                    return null;
+                }
+            });
+            const results = await Promise.all(diskPromises);
+            disks = results.filter(Boolean);
+            cachedDiskSpace = disks;
+            lastDiskSpaceCheck = now;
         }
 
         const totalMem = os.totalmem();
@@ -328,35 +355,175 @@ app.get('/api/v1/files/list', async (req, res) => {
         }
 
         const entries = await fs.promises.readdir(targetPath, { withFileTypes: true });
-        const list = [];
 
-        for (const entry of entries) {
+        // Fast parallel non-blocking inspection without synchronous deep directory scanning
+        const items = await Promise.all(entries.map(async (entry) => {
             const entryPath = path.join(targetPath, entry.name);
             try {
-                const stats = fs.statSync(entryPath);
                 const isDir = entry.isDirectory();
-                let dirSize = 0;
-                let itemCount = 0;
-                if (isDir) {
+                let size = 0;
+                let mtime = new Date();
+
+                if (!isDir) {
+                    const stats = await fs.promises.stat(entryPath);
+                    size = stats.size;
+                    mtime = stats.mtime;
+                } else {
                     try {
-                        const children = fs.readdirSync(entryPath);
-                        itemCount = children.length;
-                        dirSize = getDirectorySize(entryPath, 3);
-                    } catch (e) {}
+                        const stats = await fs.promises.stat(entryPath);
+                        mtime = stats.mtime;
+                    } catch (_) {}
                 }
-                list.push({
+
+                return {
                     name: entry.name,
                     isDirectory: isDir,
-                    size: isDir ? dirSize : stats.size,
-                    itemCount: isDir ? itemCount : undefined,
-                    modified: stats.mtime,
+                    size,
+                    itemCount: isDir ? 0 : undefined,
+                    modified: mtime,
                     path: entryPath
-                });
+                };
             } catch (e) {
-                // Ignore single unreadable files/symlinks
+                return null;
             }
+        }));
+
+        res.json(items.filter(Boolean));
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ── STORAGE HEATMAP & TREEMAP ENDPOINT ──────────────────────────────────────
+app.post('/api/v1/files/storage/tree', async (req, res) => {
+    try {
+        const reqPath = req.body.path || '';
+        let physPath = reqPath;
+
+        if (!physPath || physPath === '/' || physPath === '') {
+            const drives = getAvailableDrives();
+            const children = drives.map(d => ({
+                name: d,
+                path: d,
+                isDirectory: true,
+                size: 0,
+                fileCount: 0
+            }));
+            return res.json({
+                path: '',
+                name: 'Agent Drives',
+                totalSize: 0,
+                fileCount: 0,
+                typeCategories: { video: 0, image: 0, audio: 0, archive: 0, code: 0, document: 0, other: 0 },
+                topLargestFiles: [],
+                children
+            });
         }
-        res.json(list);
+
+        if (!isPathAllowed(physPath)) {
+            return res.status(403).json({ error: 'Access denied: Path out of bounds' });
+        }
+
+        if (!fs.existsSync(physPath)) {
+            return res.status(404).json({ error: 'Directory not found' });
+        }
+
+        const topFiles = [];
+        const typeCategories = { video: 0, image: 0, audio: 0, archive: 0, code: 0, document: 0, other: 0 };
+
+        const categorize = (ext) => {
+            if (['mp4', 'mkv', 'avi', 'mov', 'webm', 'wmv'].includes(ext)) return 'video';
+            if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(ext)) return 'image';
+            if (['mp3', 'wav', 'flac', 'm4a', 'aac', 'ogg'].includes(ext)) return 'audio';
+            if (['zip', 'rar', 'tar', 'gz', '7z', 'iso', 'bz2'].includes(ext)) return 'archive';
+            if (['js', 'ts', 'jsx', 'tsx', 'py', 'json', 'html', 'css', 'sql', 'sh', 'php', 'c', 'cpp', 'rs', 'go'].includes(ext)) return 'code';
+            if (['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'csv', 'md'].includes(ext)) return 'document';
+            return 'other';
+        };
+
+        const scanTree = (dir, depth = 0) => {
+            let totalDirSize = 0;
+            let fileCount = 0;
+            const children = [];
+
+            try {
+                const entries = fs.readdirSync(dir, { withFileTypes: true });
+                for (const entry of entries) {
+                    const fullPath = path.join(dir, entry.name);
+                    const lower = entry.name.toLowerCase();
+                    if (['$recycle.bin', 'system volume information', 'node_modules', '.git', 'windows', 'program files', 'program files (x86)', 'appdata', 'programdata'].includes(lower)) continue;
+
+                    if (entry.isDirectory()) {
+                        if (depth < 3) {
+                            const sub = scanTree(fullPath, depth + 1);
+                            totalDirSize += sub.size;
+                            fileCount += sub.fileCount;
+                            children.push({
+                                name: entry.name,
+                                path: fullPath,
+                                isDirectory: true,
+                                size: sub.size,
+                                fileCount: sub.fileCount,
+                                children: depth < 2 ? sub.children : []
+                            });
+                        } else {
+                            try {
+                                const st = fs.statSync(fullPath);
+                                totalDirSize += st.size || 4096;
+                            } catch (_) {}
+                        }
+                    } else {
+                        try {
+                            const st = fs.statSync(fullPath);
+                            const size = st.size;
+                            totalDirSize += size;
+                            fileCount += 1;
+                            const ext = entry.name.split('.').pop().toLowerCase();
+                            const category = categorize(ext);
+                            typeCategories[category] += size;
+
+                            topFiles.push({
+                                name: entry.name,
+                                path: fullPath,
+                                size,
+                                category,
+                                mtime: st.mtime
+                            });
+
+                            if (depth <= 2) {
+                                children.push({
+                                    name: entry.name,
+                                    path: fullPath,
+                                    isDirectory: false,
+                                    size,
+                                    category,
+                                    mtime: st.mtime
+                                });
+                            }
+                        } catch (_) {}
+                    }
+                }
+            } catch (_) {}
+
+            return {
+                size: totalDirSize,
+                fileCount,
+                children: children.sort((a, b) => b.size - a.size)
+            };
+        };
+
+        const tree = scanTree(physPath, 0);
+        topFiles.sort((a, b) => b.size - a.size);
+
+        res.json({
+            path: reqPath,
+            name: path.basename(physPath) || physPath,
+            totalSize: tree.size,
+            fileCount: tree.fileCount,
+            children: tree.children,
+            topLargestFiles: topFiles.slice(0, 50),
+            typeCategories
+        });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

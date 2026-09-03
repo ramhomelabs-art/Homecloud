@@ -481,10 +481,11 @@ class ClusterService {
             this.telemetryHistory.local.push(localMetric);
             if (this.telemetryHistory.local.length > 30) this.telemetryHistory.local.shift();
 
-            // 2. Poll Remote Agents
-            for (const agentId of Object.keys(this.agents)) {
+            // 2. Poll Remote Agents in Parallel (Non-blocking)
+            const agentIds = Object.keys(this.agents);
+            await Promise.allSettled(agentIds.map(async (agentId) => {
                 const agent = this.agents[agentId];
-                if (agent.status !== 'approved') continue;
+                if (agent.status !== 'approved') return;
 
                 const startTime = Date.now();
                 const masterKey = process.env.AGENT_KEY || 'nexadisk-agent-secret-key';
@@ -493,7 +494,7 @@ class ClusterService {
                 try {
                     res = await axios.get(`${agent.url}/api/storage/local`, {
                         headers: { Authorization: `Bearer ${masterKey}` },
-                        timeout: 5000
+                        timeout: 2500
                     });
                 } catch (firstErr) {
                     // If network IP failed, check if agent is listening on localhost (same machine dev setup)
@@ -502,7 +503,7 @@ class ClusterService {
                         const port = portMatch ? portMatch[1] : 5001;
                         res = await axios.get(`http://127.0.0.1:${port}/api/storage/local`, {
                             headers: { Authorization: `Bearer ${masterKey}` },
-                            timeout: 3000
+                            timeout: 1500
                         });
                     } catch (secErr) {
                         // Node went offline
@@ -511,7 +512,7 @@ class ClusterService {
                             agent.online = false;
                             eventBus.publish('AGENT_WENT_OFFLINE', { id: agentId, hostname: agent.hostname });
                         }
-                        continue;
+                        return;
                     }
                 }
 
@@ -536,10 +537,13 @@ class ClusterService {
                         latency
                     };
 
+                    if (!this.telemetryHistory[agentId]) {
+                        this.telemetryHistory[agentId] = [];
+                    }
                     this.telemetryHistory[agentId].push(metric);
                     if (this.telemetryHistory[agentId].length > 30) this.telemetryHistory[agentId].shift();
                 }
-            }
+            }));
         }, 5000); // 5-second telemetry polling
     }
 }

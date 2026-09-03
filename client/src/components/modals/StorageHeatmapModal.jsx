@@ -26,7 +26,7 @@ const CATEGORY_COLORS = {
     other: '#64748b'    // Slate
 };
 
-const StorageHeatmapModal = ({ path: initialPath = '', onClose, showToast, onNavigateToFile }) => {
+const StorageHeatmapModal = ({ path: initialPath = '', agentId = null, onClose, showToast, onNavigateToFile }) => {
     const [currentPath, setCurrentPath] = useState(initialPath);
     const [loading, setLoading] = useState(true);
     const [treeData, setTreeData] = useState(null);
@@ -40,7 +40,8 @@ const StorageHeatmapModal = ({ path: initialPath = '', onClose, showToast, onNav
             const token = localStorage.getItem('token');
             const headers = token ? { Authorization: `Bearer ${token}` } : {};
             const res = await axios.post('/api/v1/files/storage/tree', {
-                path: scanPath
+                path: scanPath,
+                agentId
             }, { headers });
             setTreeData(res.data);
         } catch (err) {
@@ -63,7 +64,7 @@ const StorageHeatmapModal = ({ path: initialPath = '', onClose, showToast, onNav
             const token = localStorage.getItem('token');
             const headers = token ? { Authorization: `Bearer ${token}` } : {};
             await axios.delete('/api/v1/files/delete', {
-                data: { path: filePath },
+                data: { path: filePath, agentId },
                 headers
             });
             if (showToast) showToast('File deleted successfully', 'success');
@@ -79,7 +80,33 @@ const StorageHeatmapModal = ({ path: initialPath = '', onClose, showToast, onNav
         setFileToDelete(filePath);
     };
 
-    const breadcrumbs = currentPath ? currentPath.split(/[/\\]/).filter(Boolean) : [];
+    const isSmb = currentPath && (currentPath.startsWith('\\\\') || currentPath.startsWith('//') || currentPath.startsWith('smb://'));
+
+    const getCrumbs = () => {
+        if (!currentPath) return [];
+        if (isSmb) {
+            const clean = currentPath.replace(/^[\\/]+/, '').replace(/^smb:[\\/]+/, '');
+            const parts = clean.split(/[/\\]/).filter(Boolean);
+            return parts.map((part, idx) => {
+                const subPath = `//${parts.slice(0, idx + 1).join('/')}`;
+                return { name: part, path: subPath };
+            });
+        }
+        const parts = currentPath.split(/[/\\]/).filter(Boolean);
+        return parts.map((part, idx) => {
+            const isWindowsDrive = /^[a-zA-Z]:/.test(parts[0]);
+            let subPath;
+            if (isWindowsDrive) {
+                subPath = parts.slice(0, idx + 1).join('\\');
+                if (idx === 0) subPath += '\\';
+            } else {
+                subPath = '/' + parts.slice(0, idx + 1).join('/');
+            }
+            return { name: part, path: subPath };
+        });
+    };
+
+    const crumbs = getCrumbs();
 
     const filteredFiles = (treeData?.topLargestFiles || []).filter(file => {
         if (activeCategory === 'all') return true;
@@ -147,31 +174,40 @@ const StorageHeatmapModal = ({ path: initialPath = '', onClose, showToast, onNav
                                     Storage Disk Heatmap & Treemap
                                 </h3>
                                 <span style={{ fontSize: '11px', fontWeight: '800', padding: '2px 8px', borderRadius: '6px', background: 'rgba(6, 182, 212, 0.15)', color: 'var(--accent-cyan)' }}>
-                                    Live Analyzer
+                                    {isSmb ? 'SMB Share Analyzer' : 'Live Analyzer'}
                                 </span>
                             </div>
                             {/* Breadcrumbs */}
                             <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '3px', fontSize: '11.5px', color: 'var(--text-dim)' }}>
                                 <span 
-                                    onClick={() => setCurrentPath('')} 
+                                    onClick={() => {
+                                        if (isSmb) {
+                                            const clean = currentPath.replace(/^[\\/]+/, '').replace(/^smb:[\\/]+/, '');
+                                            const parts = clean.split(/[/\\]/).filter(Boolean);
+                                            if (parts.length > 1) {
+                                                setCurrentPath(`//${parts[0]}/${parts[1]}`);
+                                            } else {
+                                                setCurrentPath(`//${parts[0]}`);
+                                            }
+                                        } else {
+                                            setCurrentPath('');
+                                        }
+                                    }} 
                                     style={{ cursor: 'pointer', color: currentPath === '' ? 'var(--text-primary)' : 'var(--primary)', fontWeight: '700' }}
                                 >
-                                    Root
+                                    {isSmb ? 'Share Root' : 'Root'}
                                 </span>
-                                {breadcrumbs.map((crumb, idx) => {
-                                    const subPath = breadcrumbs.slice(0, idx + 1).join('/');
-                                    return (
-                                        <React.Fragment key={idx}>
-                                            <ChevronRight size={12} />
-                                            <span 
-                                                onClick={() => setCurrentPath(subPath)} 
-                                                style={{ cursor: 'pointer', color: idx === breadcrumbs.length - 1 ? 'var(--text-primary)' : 'var(--primary)', fontWeight: '700' }}
-                                            >
-                                                {crumb}
-                                            </span>
-                                        </React.Fragment>
-                                    );
-                                })}
+                                {crumbs.map((crumb, idx) => (
+                                    <React.Fragment key={idx}>
+                                        <ChevronRight size={12} />
+                                        <span 
+                                            onClick={() => setCurrentPath(crumb.path)} 
+                                            style={{ cursor: 'pointer', color: idx === crumbs.length - 1 ? 'var(--text-primary)' : 'var(--primary)', fontWeight: '700' }}
+                                        >
+                                            {crumb.name}
+                                        </span>
+                                    </React.Fragment>
+                                ))}
                             </div>
                         </div>
                     </div>

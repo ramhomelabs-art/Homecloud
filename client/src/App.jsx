@@ -3765,6 +3765,7 @@ function App() {
             {showHeatmapModal !== false && (
                 <StorageHeatmapModal
                     path={typeof showHeatmapModal === 'string' ? showHeatmapModal : path}
+                    agentId={selectedDevice?.type === 'Agent' ? selectedDevice.id : undefined}
                     onClose={() => setShowHeatmapModal(false)}
                     showToast={showToast}
                     onNavigateToFile={(p) => {

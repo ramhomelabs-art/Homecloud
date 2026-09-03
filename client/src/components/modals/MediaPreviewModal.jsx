@@ -62,6 +62,7 @@ const MediaPreviewModal = ({ media, onClose, onDownload, onNext, onPrev, showToa
     const controlsTimeoutRef = useRef(null);
     const audioContextRef = useRef(null);
     const gainNodeRef = useRef(null);
+    const mediaElementSourceRef = useRef(null);
 
     const lineCounterRef = useRef(null);
     const textareaRef = useRef(null);
@@ -88,7 +89,9 @@ const MediaPreviewModal = ({ media, onClose, onDownload, onNext, onPrev, showToa
     if (media) {
         const sizeParam = media.size ? `&size=${media.size}` : '';
         if (shareId) {
-            mediaUrl = `${API_BASE}/share/stream?filePath=${encodeURIComponent(media.path)}&token=${shareId}&intent=stream${sizeParam}`;
+            const guestTok = localStorage.getItem('guestToken') || '';
+            const authParam = guestTok ? `&auth_token=${encodeURIComponent(guestTok)}` : '';
+            mediaUrl = `${API_BASE}/share/stream?filePath=${encodeURIComponent(media.path)}&token=${shareId}&intent=stream${sizeParam}${authParam}`;
         } else {
             mediaUrl = `${API_BASE}/files/download?path=${encodeURIComponent(media.path)}&token=${tok}&intent=stream${sizeParam}`;
             if (media.agentId) mediaUrl += `&agentId=${media.agentId}`;
@@ -190,23 +193,35 @@ const MediaPreviewModal = ({ media, onClose, onDownload, onNext, onPrev, showToa
     const handleSetAudioBoost = (boostVal) => {
         setAudioBoost(boostVal);
         try {
-            if (!audioContextRef.current && videoRef.current) {
+            if (videoRef.current) {
                 const AudioCtx = window.AudioContext || window.webkitAudioContext;
                 if (AudioCtx) {
-                    const ctx = new AudioCtx();
-                    const source = ctx.createMediaElementSource(videoRef.current);
-                    const gain = ctx.createGain();
-                    source.connect(gain);
-                    gain.connect(ctx.destination);
-                    audioContextRef.current = ctx;
-                    gainNodeRef.current = gain;
+                    if (!audioContextRef.current) {
+                        audioContextRef.current = new AudioCtx();
+                    }
+                    const ctx = audioContextRef.current;
+                    if (!gainNodeRef.current) {
+                        const gain = ctx.createGain();
+                        gain.connect(ctx.destination);
+                        gainNodeRef.current = gain;
+                    }
+                    if (!mediaElementSourceRef.current && !videoRef.current._hasAudioSource) {
+                        try {
+                            const source = ctx.createMediaElementSource(videoRef.current);
+                            source.connect(gainNodeRef.current);
+                            mediaElementSourceRef.current = source;
+                            videoRef.current._hasAudioSource = true;
+                        } catch (srcErr) {
+                            console.warn('Audio node already connected:', srcErr);
+                        }
+                    }
+                    if (gainNodeRef.current) {
+                        gainNodeRef.current.gain.value = boostVal;
+                    }
+                    if (ctx.state === 'suspended') {
+                        ctx.resume();
+                    }
                 }
-            }
-            if (gainNodeRef.current) {
-                gainNodeRef.current.gain.value = boostVal;
-            }
-            if (audioContextRef.current?.state === 'suspended') {
-                audioContextRef.current.resume();
             }
             if (showToast) showToast(`Audio Boost: ${Math.round(boostVal * 100)}%`, 'info');
         } catch (e) {
@@ -679,6 +694,8 @@ const MediaPreviewModal = ({ media, onClose, onDownload, onNext, onPrev, showToa
                                 <video
                                     ref={videoRef}
                                     src={mediaUrl}
+                                    crossOrigin="anonymous"
+                                    preload="auto"
                                     autoPlay
                                     playsInline
                                     loop={isLooping}
