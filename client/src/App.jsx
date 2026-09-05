@@ -1305,17 +1305,21 @@ function App() {
                                 let speed = prevOp.speed || 0;
                                 let eta = prevOp.eta || null;
 
+                                const nextBytes = Math.max(prevOp.bytesTransferred || 0, sop.bytesTransferred || 0);
+                                const totalBytes = sop.totalBytes || prevOp.totalBytes || 0;
+                                const nextProgress = sop.status === 'Completed' ? 100 : Math.max(prevOp.progress || 0, sop.progress !== undefined ? sop.progress : (totalBytes > 0 ? Math.min(99, Math.round((nextBytes / totalBytes) * 100)) : 0));
+
                                 if (sop.status === 'In Progress' && prevOp.bytesTransferred !== undefined) {
-                                    const bytesDiff = sop.bytesTransferred - (prevOp.bytesTransferred || 0);
-                                    const timeDiff = (Date.now() - (prevOp.lastUpdate || sop.startTime)) / 1000;
-                                    if (timeDiff >= 1) {
+                                    const bytesDiff = nextBytes - (prevOp.bytesTransferred || 0);
+                                    const timeDiff = (Date.now() - (prevOp.lastUpdate || sop.startTime || Date.now())) / 1000;
+                                    if (timeDiff >= 0.5 && bytesDiff >= 0) {
                                         speed = bytesDiff / timeDiff;
-                                        if (speed > 0) {
-                                            eta = (sop.totalBytes - sop.bytesTransferred) / speed;
+                                        if (speed > 0 && totalBytes > 0) {
+                                            eta = Math.max(0, (totalBytes - nextBytes) / speed);
                                         }
                                     } else {
-                                        speed = prevOp.speed;
-                                        eta = prevOp.eta;
+                                        speed = prevOp.speed || 0;
+                                        eta = prevOp.eta || null;
                                     }
                                 }
                                 if (prevOp.status === 'In Progress' && (sop.status === 'Completed' || sop.status === 'Failed')) {
@@ -1330,7 +1334,16 @@ function App() {
                                         showToast(`Failed operation ${sop.name}: ${sop.error || 'Unknown error'}`, 'error');
                                     }
                                 }
-                                updated[idx] = { ...prevOp, ...sop, speed, eta, lastUpdate: prevOp.lastUpdate && (Date.now() - prevOp.lastUpdate < 1000) ? prevOp.lastUpdate : Date.now() };
+                                updated[idx] = { 
+                                    ...prevOp, 
+                                    ...sop, 
+                                    bytesTransferred: nextBytes,
+                                    progress: nextProgress,
+                                    totalBytes: totalBytes,
+                                    speed, 
+                                    eta, 
+                                    lastUpdate: Date.now() 
+                                };
                             } else {
                                 // For cross-node or newly discovered ops
                                 updated.push({ ...sop, lastUpdate: Date.now() });
@@ -1894,7 +1907,10 @@ function App() {
             source: source,
             dest: target,
             status: 'In Progress',
-            progress: 40
+            progress: 0,
+            bytesTransferred: 0,
+            totalBytes: 0,
+            startTime: Date.now()
         };
 
         setOperations(prev => [newOp, ...prev]);

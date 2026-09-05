@@ -74,7 +74,16 @@ const TransferQueueDrawer = ({
     // Sync external transfers/operations state
     useEffect(() => {
         if (transfers) {
-            setInternalTransfers(transfers);
+            setInternalTransfers(prev => {
+                const updated = [...transfers];
+                // Retain any internal items not yet in transfers
+                prev.forEach(p => {
+                    if (!updated.some(u => u.id === p.id)) {
+                        updated.push(p);
+                    }
+                });
+                return updated;
+            });
         }
     }, [transfers]);
 
@@ -84,44 +93,6 @@ const TransferQueueDrawer = ({
             setIsExpanded(true);
         }
     }, [isOpen]);
-
-    // Simulated progress tick for active items that don't have socket updates
-    useEffect(() => {
-        const interval = setInterval(() => {
-            setInternalTransfers(prev => {
-                let hasChanges = false;
-                const next = prev.map(t => {
-                    const isActive = t.status === 'active' || t.status === 'In Progress' || t.status === 'Preparing';
-                    if (!isActive) return t;
-
-                    const curProg = Number(t.progress || 0);
-                    if (curProg >= 100) {
-                        return { ...t, status: 'completed', progress: 100, speed: 0 };
-                    }
-
-                    // Increment progress slightly for simulation/smooth visual motion
-                    const totalSize = t.size || t.totalBytes || 104857600;
-                    const spd = t.speed || (speedLimit === '5' ? 5242880 : speedLimit === '20' ? 20971520 : speedLimit === '50' ? 52428800 : speedLimit === '100' ? 104857600 : 41943040);
-                    const increment = Math.max(0.5, Math.min(8, (spd / totalSize) * 100 * 0.4));
-                    const newProg = Math.min(100, curProg + increment);
-                    const newTransferred = Math.round((newProg / 100) * totalSize);
-
-                    hasChanges = true;
-                    return {
-                        ...t,
-                        progress: newProg,
-                        transferred: newTransferred,
-                        size: totalSize,
-                        speed: newProg >= 100 ? 0 : spd,
-                        status: newProg >= 100 ? 'completed' : t.status
-                    };
-                });
-                return hasChanges ? next : prev;
-            });
-        }, 400);
-
-        return () => clearInterval(interval);
-    }, [speedLimit]);
 
     // Listen for global transfer queue events
     useEffect(() => {
@@ -153,21 +124,21 @@ const TransferQueueDrawer = ({
     const completedCount = completedTransfers.length;
 
     // Aggregate overall progress
-    const totalBytesAll = internalTransfers.reduce((acc, t) => acc + (t.size || t.totalBytes || 104857600), 0);
+    const totalBytesAll = internalTransfers.reduce((acc, t) => acc + (t.size || t.totalBytes || 0), 0);
     const transferredBytesAll = internalTransfers.reduce((acc, t) => {
-        if (t.status === 'completed' || t.status === 'Completed') return acc + (t.size || t.totalBytes || 104857600);
-        return acc + (t.transferred || t.bytesTransferred || Math.round(((t.progress || 0) / 100) * (t.size || t.totalBytes || 104857600)));
+        const itemSize = t.size || t.totalBytes || 0;
+        if (t.status === 'completed' || t.status === 'Completed') return acc + (itemSize > 0 ? itemSize : (t.transferred || t.bytesTransferred || 0));
+        return acc + (t.transferred || t.bytesTransferred || (itemSize > 0 && t.progress ? Math.round((t.progress / 100) * itemSize) : 0));
     }, 0);
-    const overallProgress = totalBytesAll > 0 ? Math.min(100, Math.round((transferredBytesAll / totalBytesAll) * 100)) : 0;
+    const overallProgress = totalBytesAll > 0 ? Math.min(100, Math.round((transferredBytesAll / totalBytesAll) * 100)) : (
+        internalTransfers.length > 0 ? Math.round(internalTransfers.reduce((acc, t) => acc + (t.status === 'completed' || t.status === 'Completed' ? 100 : (t.progress || 0)), 0) / internalTransfers.length) : 0
+    );
 
     // Calculate dynamic transfer speed
-    const totalSpeed = activeTransfers.reduce((acc, t) => {
-        const spd = t.speed || 38500000;
-        return acc + spd;
-    }, 0);
+    const totalSpeed = activeTransfers.reduce((acc, t) => acc + (t.speed || 0), 0);
 
     const overallRemainingBytes = Math.max(0, totalBytesAll - transferredBytesAll);
-    const overallEtaSeconds = totalSpeed > 0 ? (overallRemainingBytes / totalSpeed) : 0;
+    const overallEtaSeconds = totalSpeed > 0 && overallRemainingBytes > 0 ? (overallRemainingBytes / totalSpeed) : 0;
 
     // Interactive Handlers
     const togglePauseItem = (id) => {
@@ -681,21 +652,23 @@ const TransferQueueDrawer = ({
                                             const isUpload = tx.type === 'upload';
                                             
                                             // Real size & progress calculation
-                                            let size = tx.size || tx.totalBytes || tx.total || tx.fileSize || 104857600;
+                                            let size = tx.size || tx.totalBytes || tx.total || tx.fileSize || 0;
                                             let progress = tx.progress !== undefined ? Math.min(100, Math.max(0, Math.round(tx.progress))) : (isDone ? 100 : 0);
                                             let transferred = tx.transferred || tx.bytesTransferred || tx.loaded || 0;
                                             if (isDone) {
                                                 progress = 100;
-                                                transferred = size;
-                                            } else if (transferred === 0 && progress > 0) {
+                                                if (size > 0) transferred = size;
+                                            } else if (transferred === 0 && progress > 0 && size > 0) {
                                                 transferred = Math.round((progress / 100) * size);
+                                            } else if (size > 0 && transferred > 0 && (tx.progress === undefined || tx.progress === 0)) {
+                                                progress = Math.min(99, Math.round((transferred / size) * 100));
                                             }
 
                                             const source = tx.source || (isUpload ? 'Local Browser Client' : 'Local Storage');
-                                            const destination = tx.destination || (isUpload ? 'NexaDisk Storage' : '\\\\10.10.20.25\\TorrentDownloads');
-                                            const speed = tx.speed || (isDone ? 0 : (isPaused ? 0 : 38500000));
-                                            const remainingBytes = Math.max(0, size - transferred);
-                                            const etaSeconds = speed > 0 ? (remainingBytes / speed) : 0;
+                                            const destination = tx.destination || (isUpload ? 'NexaDisk Storage' : 'Storage Target');
+                                            const speed = tx.speed || (isDone || isPaused ? 0 : 0);
+                                            const remainingBytes = size > 0 ? Math.max(0, size - transferred) : 0;
+                                            const etaSeconds = speed > 0 && remainingBytes > 0 ? (remainingBytes / speed) : 0;
 
                                             return (
                                                 <motion.div 
@@ -893,7 +866,13 @@ const TransferQueueDrawer = ({
                                                             fontFamily: 'var(--font-mono)'
                                                         }}>
                                                             <span style={{ fontWeight: '800', color: 'var(--text-primary)' }}>
-                                                                {formatBytes(transferred)} / {formatBytes(size)} <span style={{ color: isDone ? '#10b981' : isPaused ? '#f59e0b' : 'var(--primary)' }}>({progress}%)</span>
+                                                                {size > 0 ? (
+                                                                    <>{formatBytes(transferred)} / {formatBytes(size)} <span style={{ color: isDone ? '#10b981' : isPaused ? '#f59e0b' : 'var(--primary)' }}>({progress}%)</span></>
+                                                                ) : transferred > 0 ? (
+                                                                    <>{formatBytes(transferred)} <span style={{ color: isDone ? '#10b981' : isPaused ? '#f59e0b' : 'var(--primary)' }}>({progress}%)</span></>
+                                                                ) : (
+                                                                    <span style={{ color: isDone ? '#10b981' : isPaused ? '#f59e0b' : 'var(--primary)' }}>{isDone ? 'Completed' : progress > 0 ? `${progress}%` : 'In Queue'}</span>
+                                                                )}
                                                             </span>
 
                                                             <span style={{

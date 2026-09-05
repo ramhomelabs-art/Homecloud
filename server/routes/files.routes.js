@@ -369,10 +369,65 @@ const smbRenameOrMove = async (srcPath, destPath) => {
     }
 };
 
-const smbCopyFile = async (srcPath, destPath) => {
+const smbCopyFile = async (srcPath, destPath, opId = null) => {
     const sharesRes = await db.query('SELECT * FROM network_shares');
     const isSrcSmb = srcPath && (srcPath.startsWith('\\\\') || srcPath.startsWith('//') || srcPath.startsWith('smb://'));
     const isDestSmb = destPath && (destPath.startsWith('\\\\') || destPath.startsWith('//') || destPath.startsWith('smb://'));
+
+    // Try direct native OS streaming first (especially Windows native UNC and local files)
+    try {
+        let nativeSrc = srcPath;
+        if (!isSrcSmb) {
+            nativeSrc = storageProvider.resolvePath(srcPath);
+        } else if (process.platform === 'win32') {
+            nativeSrc = '\\\\' + srcPath.trim().replace(/^([a-z]+:)?[\/\\]+/, '').replace(/\//g, '\\');
+        }
+
+        let nativeDest = destPath;
+        if (!isDestSmb) {
+            nativeDest = storageProvider.resolvePath(destPath);
+        } else if (process.platform === 'win32') {
+            nativeDest = '\\\\' + destPath.trim().replace(/^([a-z]+:)?[\/\\]+/, '').replace(/\//g, '\\');
+        }
+
+        if (fs.existsSync(nativeSrc) && fs.statSync(nativeSrc).isFile()) {
+            const stats = fs.statSync(nativeSrc);
+            const totalBytes = stats.size;
+            if (opId && activeOps[opId]) {
+                activeOps[opId].totalBytes = totalBytes;
+            }
+
+            let targetFile = nativeDest;
+            try {
+                if (fs.existsSync(nativeDest) && fs.statSync(nativeDest).isDirectory()) {
+                    targetFile = path.join(nativeDest, path.basename(nativeSrc.replace(/\\/g, '/')));
+                }
+            } catch (e) {}
+
+            return await new Promise((resolve, reject) => {
+                const readStream = fs.createReadStream(nativeSrc);
+                const writeStream = fs.createWriteStream(targetFile);
+
+                if (opId && activeOps[opId]) {
+                    readStream.on('data', chunk => {
+                        if (activeOps[opId]) {
+                            activeOps[opId].bytesTransferred = (activeOps[opId].bytesTransferred || 0) + chunk.length;
+                            if (activeOps[opId].totalBytes > 0) {
+                                activeOps[opId].progress = Math.min(99, Math.round((activeOps[opId].bytesTransferred / activeOps[opId].totalBytes) * 100));
+                            }
+                        }
+                    });
+                }
+
+                writeStream.on('finish', () => resolve(true));
+                readStream.on('error', reject);
+                writeStream.on('error', reject);
+                readStream.pipe(writeStream);
+            });
+        }
+    } catch (directErr) {
+        // Fall back to smbclient if direct copy could not access the path
+    }
 
     const spawn = require('child_process').spawn;
 
@@ -429,6 +484,17 @@ const smbCopyFile = async (srcPath, destPath) => {
             const getProc = spawn('smbclient', getArgs, { env: srcEnv });
             const putProc = spawn('smbclient', putArgs, { env: destEnv });
 
+            if (opId && activeOps[opId]) {
+                getProc.stdout.on('data', chunk => {
+                    if (activeOps[opId]) {
+                        activeOps[opId].bytesTransferred = (activeOps[opId].bytesTransferred || 0) + chunk.length;
+                        if (activeOps[opId].totalBytes > 0) {
+                            activeOps[opId].progress = Math.min(99, Math.round((activeOps[opId].bytesTransferred / activeOps[opId].totalBytes) * 100));
+                        }
+                    }
+                });
+            }
+
             getProc.stdout.pipe(putProc.stdin);
 
             let putErr = '';
@@ -458,6 +524,18 @@ const smbCopyFile = async (srcPath, destPath) => {
         return new Promise((resolve, reject) => {
             const getProc = spawn('smbclient', getArgs, { env: srcEnv });
             const outStream = fs.createWriteStream(finalDestFile);
+
+            if (opId && activeOps[opId]) {
+                getProc.stdout.on('data', chunk => {
+                    if (activeOps[opId]) {
+                        activeOps[opId].bytesTransferred = (activeOps[opId].bytesTransferred || 0) + chunk.length;
+                        if (activeOps[opId].totalBytes > 0) {
+                            activeOps[opId].progress = Math.min(99, Math.round((activeOps[opId].bytesTransferred / activeOps[opId].totalBytes) * 100));
+                        }
+                    }
+                });
+            }
+
             getProc.stdout.pipe(outStream);
             outStream.on('finish', () => resolve(true));
             outStream.on('error', reject);
@@ -482,6 +560,17 @@ const smbCopyFile = async (srcPath, destPath) => {
         return new Promise((resolve, reject) => {
             const inStream = fs.createReadStream(resolvedSrc);
             const putProc = spawn('smbclient', putArgs, { env: destEnv });
+
+            if (opId && activeOps[opId]) {
+                inStream.on('data', chunk => {
+                    if (activeOps[opId]) {
+                        activeOps[opId].bytesTransferred = (activeOps[opId].bytesTransferred || 0) + chunk.length;
+                        if (activeOps[opId].totalBytes > 0) {
+                            activeOps[opId].progress = Math.min(99, Math.round((activeOps[opId].bytesTransferred / activeOps[opId].totalBytes) * 100));
+                        }
+                    }
+                });
+            }
 
             inStream.pipe(putProc.stdin);
 
@@ -1479,13 +1568,44 @@ router.post('/copy', requireRole(['Admin', 'Operator', 'Power User', 'User']), a
     const isSrcSmb = srcPath && (srcPath.startsWith('\\\\') || srcPath.startsWith('//') || srcPath.startsWith('smb://'));
     const isDestSmb = destPath && (destPath.startsWith('\\\\') || destPath.startsWith('//') || destPath.startsWith('smb://'));
     if (isSrcSmb || isDestSmb) {
-        try {
-            await smbCopyFile(srcPath, destPath);
-            clearDirSizeCache();
-            return res.json({ message: 'Copied successfully', status: 'Completed' });
-        } catch (smbCopyErr) {
-            return res.status(500).json({ error: smbCopyErr.message });
-        }
+        const opId = `copy_${Date.now()}`;
+        const fileName = path.basename(srcPath.replace(/\\/g, '/'));
+
+        activeOps[opId] = {
+            id: opId,
+            name: fileName,
+            type: 'copy',
+            progress: 0,
+            status: 'In Progress',
+            bytesTransferred: 0,
+            totalBytes: 0,
+            startTime: Date.now()
+        };
+
+        res.json({ opId, status: 'In Progress', totalBytes: 0 });
+
+        setImmediate(async () => {
+            try {
+                await smbCopyFile(srcPath, destPath, opId);
+                clearDirSizeCache();
+                if (activeOps[opId]) {
+                    activeOps[opId].status = 'Completed';
+                    activeOps[opId].progress = 100;
+                    if (activeOps[opId].totalBytes > 0) {
+                        activeOps[opId].bytesTransferred = activeOps[opId].totalBytes;
+                    }
+                    setTimeout(() => delete activeOps[opId], 60000);
+                }
+            } catch (smbCopyErr) {
+                logger.error(`[SMB Copy Operation] Async SMB copy failed: ${smbCopyErr.message}`);
+                if (activeOps[opId]) {
+                    activeOps[opId].status = 'Failed';
+                    activeOps[opId].error = smbCopyErr.message;
+                    setTimeout(() => delete activeOps[opId], 60000);
+                }
+            }
+        });
+        return;
     }
 
     try {
@@ -1970,10 +2090,11 @@ router.get('/download', async (req, res) => {
             let directUncCandidates = [
                 filePath,
                 filePath.replace(/\\/g, '/'),
-                '//' + filePath.trim().replace(/\\/g, '/').replace(/^(smb:)?\/+/, '')
+                '//' + filePath.trim().replace(/^([a-z]+:)?[\/\\]+/, '').replace(/\\/g, '/')
             ];
             if (process.platform === 'win32') {
-                directUncCandidates.push('\\\\' + filePath.trim().replace(/\//g, '\\').replace(/^(\\\\)?/, ''));
+                directUncCandidates.push('\\\\' + filePath.trim().replace(/^([a-z]+:)?[\/\\]+/, '').replace(/\//g, '\\'));
+                directUncCandidates.push(filePath.replace(/^smb:\/\//i, '\\\\').replace(/\//g, '\\'));
             }
 
             const directPath = directUncCandidates.find(p => {
