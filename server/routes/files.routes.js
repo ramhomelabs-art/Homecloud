@@ -2212,6 +2212,38 @@ router.get('/download', async (req, res) => {
             const mimeType = getMediaMimeType(fileName);
             const isStreaming = req.query.intent === 'stream';
 
+            // Discover network share credentials
+            const sharesRes = await db.query('SELECT * FROM network_shares');
+            let clean = filePath.trim().replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
+            const parts = clean.split('/');
+            const host = parts[0];
+            const shareName = parts[1] || '';
+            const uncShare = `//${host}/${shareName}`;
+            const internalFile = parts.slice(2).join('/');
+
+            const matchedShare = sharesRes.rows.find(row => {
+                let cleanRow = (row.path || '').replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
+                const rowParts = cleanRow.split('/');
+                return (rowParts[0]?.toLowerCase() === host.toLowerCase() && 
+                       (rowParts[1] || '').toLowerCase() === shareName.toLowerCase()) ||
+                       (row.label && row.label.toLowerCase() === shareName.toLowerCase());
+            });
+
+            const user = matchedShare?.username || '';
+            let pass = '';
+            if (matchedShare?.password) {
+                try { pass = cryptoHelper.decrypt(matchedShare.password); } catch (e) { pass = matchedShare.password; }
+            }
+
+            // On Windows, ensure the native network share session is authenticated with net use
+            if (process.platform === 'win32' && user && pass) {
+                try {
+                    const { exec } = require('child_process');
+                    const netCmd = `net use "\\\\${host}\\${shareName}" /user:"${user.replace(/"/g, '')}" "${pass.replace(/"/g, '')}" /persistent:no`;
+                    await new Promise(r => exec(netCmd, { timeout: 4000 }, () => r()));
+                } catch (_) {}
+            }
+
             // Check if accessible via native UNC filesystem (Windows / mounted Linux paths)
             let directUncCandidates = [
                 filePath,
@@ -2221,6 +2253,13 @@ router.get('/download', async (req, res) => {
             if (process.platform === 'win32') {
                 directUncCandidates.push('\\\\' + filePath.trim().replace(/^([a-z]+:)?[\/\\]+/, '').replace(/\//g, '\\'));
                 directUncCandidates.push(filePath.replace(/^smb:\/\//i, '\\\\').replace(/\//g, '\\'));
+                if (host && shareName) {
+                    directUncCandidates.push(`\\\\${host}\\${shareName}\\${internalFile.replace(/\//g, '\\')}`);
+                }
+            } else if (host && shareName) {
+                directUncCandidates.push(`/mnt/${shareName}/${internalFile}`);
+                directUncCandidates.push(`/mnt/shares/${shareName}/${internalFile}`);
+                directUncCandidates.push(`/media/${shareName}/${internalFile}`);
             }
 
             const directPath = directUncCandidates.find(p => {
@@ -2255,28 +2294,6 @@ router.get('/download', async (req, res) => {
                     'Content-Disposition': isStreaming ? 'inline' : `attachment; filename="${encodeURIComponent(fileName)}"`
                 });
                 return fs.createReadStream(directPath).pipe(res);
-            }
-
-            // If not directly accessible via native OS UNC, fallback to network share credentials & smbclient
-            const sharesRes = await db.query('SELECT * FROM network_shares');
-            let clean = filePath.trim().replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
-            const parts = clean.split('/');
-            const host = parts[0];
-            const shareName = parts[1] || '';
-            const uncShare = `//${host}/${shareName}`;
-            const internalFile = parts.slice(2).join('/');
-
-            const matchedShare = sharesRes.rows.find(row => {
-                let cleanRow = (row.path || '').replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
-                const rowParts = cleanRow.split('/');
-                return rowParts[0]?.toLowerCase() === host.toLowerCase() && 
-                       (rowParts[1] || '').toLowerCase() === shareName.toLowerCase();
-            });
-
-            const user = matchedShare?.username || '';
-            let pass = '';
-            if (matchedShare?.password) {
-                try { pass = cryptoHelper.decrypt(matchedShare.password); } catch (e) { pass = matchedShare.password; }
             }
 
             // Check if file is already cached locally for instant seeking
@@ -2318,7 +2335,12 @@ router.get('/download', async (req, res) => {
                 }
             }
 
-            // If not cached yet, stream from SMB and cache in background
+            // If on Windows and direct UNC was not found, avoid failing smbclient spawn
+            if (process.platform === 'win32') {
+                return res.status(404).json({ error: `File not found on network share: ${filePath}` });
+            }
+
+            // If not cached yet, stream from SMB and cache in background (Linux hosts)
             const env = { ...process.env, PASSWD: pass || '' };
             const safeUser = (user || '').replace(/[;&|`$<>\\"']/g, '');
             const safeShare = uncShare.replace(/[;&|`$<>\\"']/g, '');
@@ -2326,14 +2348,14 @@ router.get('/download', async (req, res) => {
 
             const spawn = require('child_process').spawn;
             const args = safeUser
-                ? ['-U', safeUser, safeShare, '-t', '30', '-c', smbCmd]
+                ? (pass ? ['-U', `${safeUser}%${pass}`, safeShare, '-t', '30', '-c', smbCmd] : ['-U', safeUser, safeShare, '-t', '30', '-c', smbCmd])
                 : ['-N', safeShare, '-t', '30', '-c', smbCmd];
 
             let fileSize = parseInt(req.query.size, 10) || 0;
             if (!fileSize) {
                 // Quick size discovery
                 const sizeCmd = safeUser
-                    ? `smbclient "${safeShare}" -U "${safeUser}" -t 10 -c 'allinfo "${internalFile.replace(/"/g, '')}"'`
+                    ? `smbclient "${safeShare}" -U "${safeUser}${pass ? `%${pass}` : ''}" -t 10 -c 'allinfo "${internalFile.replace(/"/g, '')}"'`
                     : `smbclient "${safeShare}" -N -t 10 -c 'allinfo "${internalFile.replace(/"/g, '')}"'`;
                 try {
                     const sizeOut = await new Promise((resolve) => {
