@@ -255,7 +255,9 @@ const deleteSmbFile = async (targetPath) => {
 };
 
 const renameSmbFile = async (targetPath, newName) => {
-    const sharesRes = await db.query('SELECT * FROM network_shares');
+    const safeNewName = path.basename(newName);
+    if (!safeNewName) throw new Error('Invalid new file name');
+
     let clean = targetPath.trim().replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
     const parts = clean.split('/');
     const host = parts[0];
@@ -263,22 +265,50 @@ const renameSmbFile = async (targetPath, newName) => {
     const uncShare = `//${host}/${shareName}`;
     const internalPath = parts.slice(2).join('/');
     const internalParent = parts.slice(2, -1).join('/');
-    const internalNewPath = internalParent ? `${internalParent}/${newName}` : newName;
+    const internalNewPath = internalParent ? `${internalParent}/${safeNewName}` : safeNewName;
 
-    // 1. Windows Native OS Direct Filesystem Access
-    if (process.platform === 'win32') {
-        const uncBackslashOld = `\\\\${host}\\${shareName}${internalPath ? '\\' + internalPath.replace(/\//g, '\\') : ''}`;
-        const uncBackslashNew = `\\\\${host}\\${shareName}${internalNewPath ? '\\' + internalNewPath.replace(/\//g, '\\') : ''}`;
-        if (fs.existsSync(uncBackslashOld)) {
-            try {
-                await fs.promises.rename(uncBackslashOld, uncBackslashNew);
-                return true;
-            } catch (fsErr) {
-                logger.warn(`[renameSmbFile] Windows fs rename fallback to smbclient: ${fsErr.message}`);
+    // 1. Direct Filesystem Access (Windows UNC or local mount)
+    const directOldCandidates = [
+        targetPath,
+        `\\\\${host}\\${shareName}${internalPath ? '\\' + internalPath.replace(/\//g, '\\') : ''}`,
+        `//${host}/${shareName}${internalPath ? '/' + internalPath : ''}`
+    ];
+    const directNewCandidates = [
+        path.join(path.dirname(targetPath), safeNewName),
+        `\\\\${host}\\${shareName}${internalNewPath ? '\\' + internalNewPath.replace(/\//g, '\\') : ''}`,
+        `//${host}/${shareName}${internalNewPath ? '/' + internalNewPath : ''}`
+    ];
+
+    for (let i = 0; i < directOldCandidates.length; i++) {
+        const pOld = directOldCandidates[i];
+        const pNew = directNewCandidates[i];
+        try {
+            if (fs.existsSync(pOld)) {
+                try {
+                    await fs.promises.rename(pOld, pNew);
+                    return true;
+                } catch (rErr) {
+                    if (rErr.code === 'EXDEV' || rErr.code === 'EPERM' || rErr.code === 'EBUSY') {
+                        const stat = await fs.promises.stat(pOld);
+                        if (stat.isDirectory()) {
+                            await fs.promises.cp(pOld, pNew, { recursive: true });
+                            await fs.promises.rm(pOld, { recursive: true, force: true });
+                        } else {
+                            await fs.promises.copyFile(pOld, pNew);
+                            await fs.promises.unlink(pOld);
+                        }
+                        return true;
+                    }
+                    throw rErr;
+                }
             }
+        } catch (fsErr) {
+            logger.warn(`[renameSmbFile] Direct rename attempt ${i} failed: ${fsErr.message}`);
         }
     }
 
+    // 2. smbclient fallback
+    const sharesRes = await db.query('SELECT * FROM network_shares');
     const matchedShare = sharesRes.rows.find(row => {
         let cleanRow = (row.path || '').replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
         const rowParts = cleanRow.split('/');
@@ -1380,19 +1410,41 @@ router.post('/rename', requireRole(['Admin', 'Operator', 'Power User', 'User']),
     }
 
     try {
+        const safeNewName = path.basename(newName);
+        if (!safeNewName) return res.status(400).json({ error: 'Invalid new name' });
+
         const resolvedOld = await vaultService.resolveVaultPath(req, oldPath);
         const locker = await vaultService.getLockerForPath(resolvedOld);
         let resolvedNew = '';
         if (locker) {
             const keys = vaultService.getKeys(locker.id);
+            if (!keys) {
+                return res.status(403).json({ error: 'Vault is locked', lockerId: locker.id });
+            }
             const parentVirtual = path.dirname(oldPath);
-            const newVirtual = path.join(parentVirtual, newName);
+            const newVirtual = path.join(parentVirtual, safeNewName);
             resolvedNew = await vaultService.resolveVaultPath(req, newVirtual);
         } else {
-            const resolvedOldRaw = resolveFilePath(req, oldPath);
-            resolvedNew = path.join(path.dirname(resolvedOldRaw), newName);
+            resolvedNew = path.join(path.dirname(resolvedOld), safeNewName);
         }
-        await fs.promises.rename(resolvedOld, resolvedNew);
+
+        try {
+            await fs.promises.rename(resolvedOld, resolvedNew);
+        } catch (renameErr) {
+            if (renameErr.code === 'EXDEV' || renameErr.code === 'EPERM' || renameErr.code === 'EBUSY') {
+                const stat = await fs.promises.stat(resolvedOld);
+                if (stat.isDirectory()) {
+                    await fs.promises.cp(resolvedOld, resolvedNew, { recursive: true });
+                    await fs.promises.rm(resolvedOld, { recursive: true, force: true });
+                } else {
+                    await fs.promises.copyFile(resolvedOld, resolvedNew);
+                    await fs.promises.unlink(resolvedOld);
+                }
+            } else {
+                throw renameErr;
+            }
+        }
+
         clearDirSizeCache();
         res.json({ message: 'Renamed successfully' });
     } catch (err) {
