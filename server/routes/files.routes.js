@@ -254,6 +254,66 @@ const deleteSmbFile = async (targetPath) => {
     });
 };
 
+const renameSmbFile = async (targetPath, newName) => {
+    const sharesRes = await db.query('SELECT * FROM network_shares');
+    let clean = targetPath.trim().replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
+    const parts = clean.split('/');
+    const host = parts[0];
+    const shareName = parts[1] || '';
+    const uncShare = `//${host}/${shareName}`;
+    const internalPath = parts.slice(2).join('/');
+    const internalParent = parts.slice(2, -1).join('/');
+    const internalNewPath = internalParent ? `${internalParent}/${newName}` : newName;
+
+    // 1. Windows Native OS Direct Filesystem Access
+    if (process.platform === 'win32') {
+        const uncBackslashOld = `\\\\${host}\\${shareName}${internalPath ? '\\' + internalPath.replace(/\//g, '\\') : ''}`;
+        const uncBackslashNew = `\\\\${host}\\${shareName}${internalNewPath ? '\\' + internalNewPath.replace(/\//g, '\\') : ''}`;
+        if (fs.existsSync(uncBackslashOld)) {
+            try {
+                await fs.promises.rename(uncBackslashOld, uncBackslashNew);
+                return true;
+            } catch (fsErr) {
+                logger.warn(`[renameSmbFile] Windows fs rename fallback to smbclient: ${fsErr.message}`);
+            }
+        }
+    }
+
+    const matchedShare = sharesRes.rows.find(row => {
+        let cleanRow = (row.path || '').replace(/\\/g, '/').replace(/^(smb:)?\/+/, '');
+        const rowParts = cleanRow.split('/');
+        return (rowParts[0]?.toLowerCase() === host.toLowerCase() && 
+               (rowParts[1] || '').toLowerCase() === shareName.toLowerCase()) ||
+               (row.label && row.label.toLowerCase() === shareName.toLowerCase());
+    });
+
+    const user = matchedShare?.username || '';
+    let pass = '';
+    if (matchedShare?.password) {
+        try { pass = cryptoHelper.decrypt(matchedShare.password); } catch (e) { pass = matchedShare.password; }
+    }
+
+    const env = { ...process.env, PASSWD: pass || '' };
+    const safeUser = (user || '').replace(/[;&|`$<>\\"']/g, '');
+    const safeShare = uncShare.replace(/[;&|`$<>\\"']/g, '');
+    const winOld = internalPath.replace(/\//g, '\\');
+    const winNew = internalNewPath.replace(/\//g, '\\');
+    const renameCmd = `rename "${winOld.replace(/"/g, '')}" "${winNew.replace(/"/g, '')}"`;
+
+    const cmd = safeUser
+        ? `smbclient "${safeShare}" -U "${safeUser}" -t 15 -c '${renameCmd}'`
+        : `smbclient "${safeShare}" -N -t 15 -c '${renameCmd}'`;
+
+    return new Promise((resolve, reject) => {
+        exec(cmd, { env, timeout: 20000 }, (err, stdout, stderr) => {
+            if (err) {
+                return reject(new Error(`SMB rename failed: ${(stderr || stdout || err.message).trim()}`));
+            }
+            resolve(true);
+        });
+    });
+};
+
 const createSmbDirectory = async (targetPath) => {
 
     const sharesRes = await db.query('SELECT * FROM network_shares');
@@ -1292,9 +1352,10 @@ router.post('/delete/batch', requireRole(['Admin', 'Operator', 'Power User', 'Us
 // ── POST /api/v1/files/rename ────────────────────────────────────────────────
 router.post('/rename', requireRole(['Admin', 'Operator', 'Power User', 'User']), async (req, res) => {
     const oldPath = req.body.path || req.body.oldPath;
-    const { newName, agentId } = req.body;
+    const { newName, agentId: rawAgentId } = req.body;
     if (!oldPath || !newName) return res.status(400).json({ error: 'Path and newName are required' });
 
+    const agentId = resolveAgentId(rawAgentId, oldPath);
     if (agentId && clusterService.agents[agentId]) {
         const agent = clusterService.agents[agentId];
         if (agent.status !== 'approved') return res.status(403).json({ error: 'Agent not approved' });
@@ -1303,6 +1364,18 @@ router.post('/rename', requireRole(['Admin', 'Operator', 'Power User', 'User']),
             return res.json({ message: 'Renamed on agent successfully' });
         } catch (e) {
             return res.status(502).json({ error: e.message });
+        }
+    }
+
+    const isSmb = oldPath && (oldPath.startsWith('\\\\') || oldPath.startsWith('//') || oldPath.startsWith('smb://'));
+    if (isSmb) {
+        try {
+            await renameSmbFile(oldPath, newName);
+            clearDirSizeCache();
+            return res.json({ message: 'Renamed successfully' });
+        } catch (smbErr) {
+            logger.error(`[Rename SMB] Failed: ${smbErr.message}`);
+            return res.status(500).json({ error: smbErr.message });
         }
     }
 
@@ -1323,6 +1396,7 @@ router.post('/rename', requireRole(['Admin', 'Operator', 'Power User', 'User']),
         clearDirSizeCache();
         res.json({ message: 'Renamed successfully' });
     } catch (err) {
+        logger.error(`[Rename] Failed: ${err.message}`);
         if (err.statusCode === 403) {
             res.status(403).json({ error: err.message, lockerId: err.lockerId });
         } else {
